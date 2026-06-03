@@ -67,13 +67,45 @@ void input(tenv* env) {
           }
         }
 
+#ifdef ANDROID
+      /* --- Android joystick direction ---
+       * Left zone (x < 80% screen): drag sets direction relative to
+       * where the finger first touched, so the snake steers smoothly
+       * no matter where you place your thumb.
+       * Right zone (x >= 80%): mapped to boost; direction falls back to
+       * absolute screen-centre offset so the snake keeps its last heading.
+       */
+      if (env->wnd->touch.down && !env->wnd->touch.boost_down) {
+        /* Record anchor on the very first frame of a new touch */
+        if (env->wnd->touch.just_down || !gdata->touch_ctrl.joy_tracking) {
+          gdata->touch_ctrl.joy_anchor_x = env->ms->pos[0];
+          gdata->touch_ctrl.joy_anchor_y = env->ms->pos[1];
+          gdata->touch_ctrl.joy_tracking = true;
+        }
+        /* Direction = displacement from anchor, amplified so a short drag
+         * still gives a decisive angle (×4 ≈ 25 px full deflection).   */
+        xm = (int)((env->ms->pos[0] - gdata->touch_ctrl.joy_anchor_x) * 4.0f);
+        ym = (int)((env->ms->pos[1] - gdata->touch_ctrl.joy_anchor_y) * 4.0f);
+      } else {
+        if (!env->wnd->touch.down) gdata->touch_ctrl.joy_tracking = false;
+        /* No joystick touch – use absolute position (keeps last heading) */
+        xm = (int)env->ms->pos[0] - ctx->size[0] / 2;
+        ym = (int)env->ms->pos[1] - ctx->size[1] / 2;
+      }
+#else
       xm = (int)env->ms->pos[0] - ctx->size[0] / 2;
       ym = (int)env->ms->pos[1] - ctx->size[1] / 2;
+#endif
     }
+#ifdef ANDROID
+    /* Boost fires only when the finger is in the right 20 % of the screen */
+    gdata->data.wmd = env->wnd->touch.boost_down || gdata->bot.output.accel;
+#else
     gdata->data.wmd = twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
                       twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
                       twindow_key_down(env->wnd, GLFW_KEY_UP) ||
                       gdata->bot.output.accel;
+#endif
 
     if (gdata->data.md != gdata->data.wmd &&
         gdata->data.ctm - gdata->data.last_accel_mtm > 150) {
