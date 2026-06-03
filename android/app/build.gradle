@@ -1,0 +1,60 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.vlither'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.vlither"
+        minSdk 26          // Vulkan 1.0 baseline
+        targetSdk 34
+        versionCode 1
+        versionName "2.5"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+                cFlags   "-std=c11"
+                arguments "-DANDROID_STL=c++_shared",
+                          "-DANDROID_ARM_NEON=TRUE"
+                abiFilters "arm64-v8a", "x86_64"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                          'proguard-rules.pro'
+            signingConfig signingConfigs.debug   // CI will re-sign
+        }
+        debug {
+            jniDebuggable true
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    // No Java/Kotlin dependencies needed for pure NDK app
+}
