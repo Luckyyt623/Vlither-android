@@ -51,6 +51,13 @@ typedef struct game_data {
   vec4s CURSOR_UV;
   vec4s SKIN_LESS_UV;
 
+  /* ---- Android touch joystick state ---- */
+  struct {
+    float joy_anchor_x;  /* X where finger first touched (joystick base) */
+    float joy_anchor_y;  /* Y where finger first touched (joystick base) */
+    bool  joy_tracking;  /* a left-zone drag is currently active          */
+  } touch_ctrl;
+
   struct mg_mgr network_manager;
   struct mg_connection* connection;
 
