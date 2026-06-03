@@ -1,5 +1,9 @@
+#ifdef ANDROID
+#include "../android_glfw_shim.h"
+#endif
 #include "ui_overlay.h"
 
+#include <math.h>
 #include "../user.h"
 
 void ui_overlay(tenv* env) {
@@ -218,4 +222,91 @@ void ui_overlay(tenv* env) {
     igTextColored((ImVec4){1, 1, 1, 0.7f}, "%d° %d%%", pang, dst);
     igPopFont();
   }
+
+#ifdef ANDROID
+  /* ============================================================
+   * TOUCH CONTROLS OVERLAY
+   * Left side  – virtual joystick ring (always shown in-game)
+   * Right side – BOOST circle (active when touch.boost_down)
+   * ============================================================ */
+  if (gdata->data.follow_view) {
+    ImDrawList* dl  = igGetForegroundDrawList_Nil();
+    float sw        = (float)ctx->size[0];
+    float sh        = (float)ctx->size[1];
+    float margin    = sw * 0.025f;          /* ~27 px on 1080p          */
+
+    bool  joy_on    = gdata->touch_ctrl.joy_tracking;
+    bool  boost_on  = env->wnd->touch.boost_down;
+
+    /* ---------- JOYSTICK (bottom-left) ---------- */
+    float jr        = sh * 0.175f;          /* outer radius             */
+    float jcx       = jr + margin;
+    float jcy       = sh - jr - margin;
+
+    /* outer ring */
+    ImDrawList_AddCircle(dl,
+      (ImVec2){jcx, jcy}, jr,
+      IM_COL32(255, 255, 255, joy_on ? 70 : 38), 64, 3.0f);
+
+    /* inner dead-zone ring */
+    ImDrawList_AddCircle(dl,
+      (ImVec2){jcx, jcy}, jr * 0.32f,
+      IM_COL32(255, 255, 255, 18), 32, 1.5f);
+
+    /* crosshair lines */
+    ImU32 cross = IM_COL32(255, 255, 255, 18);
+    ImDrawList_AddLine(dl,
+      (ImVec2){jcx - jr * 0.78f, jcy}, (ImVec2){jcx + jr * 0.78f, jcy}, cross, 1.5f);
+    ImDrawList_AddLine(dl,
+      (ImVec2){jcx, jcy - jr * 0.78f}, (ImVec2){jcx, jcy + jr * 0.78f}, cross, 1.5f);
+
+    /* thumb – position relative to fixed ring centre so it looks clean */
+    float tx = jcx, ty = jcy;
+    if (joy_on) {
+      float dx   = env->ms->pos[0] - gdata->touch_ctrl.joy_anchor_x;
+      float dy   = env->ms->pos[1] - gdata->touch_ctrl.joy_anchor_y;
+      float dist = sqrtf(dx * dx + dy * dy);
+      float cap  = jr * 0.68f;
+      float sc   = (dist > cap && dist > 0.001f) ? cap / dist : 1.0f;
+      tx = jcx + dx * sc;
+      ty = jcy + dy * sc;
+    }
+    ImDrawList_AddCircleFilled(dl,
+      (ImVec2){tx, ty}, jr * 0.29f,
+      joy_on ? IM_COL32(255, 255, 255, 210) : IM_COL32(255, 255, 255, 60), 32);
+
+    /* "MOVE" hint below ring */
+    float hint_sz = jr * 0.22f;
+    ImVec2 mv_sz; igCalcTextSize(&mv_sz, "MOVE", NULL, false, -1);
+    float mv_scale = hint_sz / igGetFontSize();
+    ImDrawList_AddText_Vec2(dl, igGetFont(), hint_sz,
+      (ImVec2){jcx - mv_sz.x * mv_scale * 0.5f, jcy + jr + 4},
+      IM_COL32(255, 255, 255, 65), "MOVE", NULL, 0.0f, NULL);
+
+    /* ---------- BOOST BUTTON (bottom-right) ---------- */
+    float br  = sh * 0.125f;               /* button radius            */
+    float bcx = sw - br - margin;
+    float bcy = sh - br - margin;
+
+    /* filled circle */
+    ImDrawList_AddCircleFilled(dl,
+      (ImVec2){bcx, bcy}, br,
+      boost_on ? IM_COL32(255, 80, 55, 210) : IM_COL32(210, 55, 35, 85), 48);
+
+    /* ring */
+    ImDrawList_AddCircle(dl,
+      (ImVec2){bcx, bcy}, br,
+      boost_on ? IM_COL32(255, 140, 110, 230) : IM_COL32(210, 90, 65, 130),
+      48, 3.0f);
+
+    /* "BOOST" text centred inside button */
+    float bfont = br * 0.40f;
+    ImVec2 bt_sz; igCalcTextSize(&bt_sz, "BOOST", NULL, false, -1);
+    float bt_scale = bfont / igGetFontSize();
+    ImDrawList_AddText_Vec2(dl, igGetFont(), bfont,
+      (ImVec2){bcx - bt_sz.x * bt_scale * 0.5f, bcy - bfont * 0.5f},
+      IM_COL32(255, 255, 255, boost_on ? 255 : 200),
+      "BOOST", NULL, 0.0f, NULL);
+  }
+#endif /* ANDROID */
 }
