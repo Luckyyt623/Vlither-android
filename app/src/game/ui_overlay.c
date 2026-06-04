@@ -277,9 +277,9 @@ void ui_overlay(tenv* env) {
 
     /* "MOVE" hint below ring */
     float hint_sz = jr * 0.22f;
-    ImVec2 mv_sz; igCalcTextSize(&mv_sz, "MOVE", NULL, false, -1);
+    ImVec2 mv_sz; igCalcTextSize(&mv_sz, "MOVE", NULL, false, -1.0f);
     float mv_scale = hint_sz / igGetFontSize();
-    ImDrawList_AddText_Vec2(dl, igGetFont(), hint_sz,
+    ImDrawList_AddText_FontPtr(dl, igGetFont(), hint_sz,
       (ImVec2){jcx - mv_sz.x * mv_scale * 0.5f, jcy + jr + 4},
       IM_COL32(255, 255, 255, 65), "MOVE", NULL, 0.0f, NULL);
 
@@ -301,9 +301,9 @@ void ui_overlay(tenv* env) {
 
     /* "BOOST" text centred inside button */
     float bfont = br * 0.40f;
-    ImVec2 bt_sz; igCalcTextSize(&bt_sz, "BOOST", NULL, false, -1);
+    ImVec2 bt_sz; igCalcTextSize(&bt_sz, "BOOST", NULL, false, -1.0f);
     float bt_scale = bfont / igGetFontSize();
-    ImDrawList_AddText_Vec2(dl, igGetFont(), bfont,
+    ImDrawList_AddText_FontPtr(dl, igGetFont(), bfont,
       (ImVec2){bcx - bt_sz.x * bt_scale * 0.5f, bcy - bfont * 0.5f},
       IM_COL32(255, 255, 255, boost_on ? 255 : 200),
       "BOOST", NULL, 0.0f, NULL);
