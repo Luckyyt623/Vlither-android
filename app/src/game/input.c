@@ -68,29 +68,26 @@ void input(tenv* env) {
         }
 
 #ifdef ANDROID
-      /* --- Android joystick direction ---
-       * Left zone (x < 80% screen): drag sets direction relative to
-       * where the finger first touched, so the snake steers smoothly
-       * no matter where you place your thumb.
-       * Right zone (x >= 80%): mapped to boost; direction falls back to
-       * absolute screen-centre offset so the snake keeps its last heading.
-       */
+      /* env->ms->pos is always (0,0) on Android because tmouse_create does not
+       * set ms->window – use wnd->touch.x/y directly instead.             */
+      float tx = env->wnd->touch.x;
+      float ty = env->wnd->touch.y;
+
       if (env->wnd->touch.down && !env->wnd->touch.boost_down) {
         /* Record anchor on the very first frame of a new touch */
         if (env->wnd->touch.just_down || !gdata->touch_ctrl.joy_tracking) {
-          gdata->touch_ctrl.joy_anchor_x = env->ms->pos[0];
-          gdata->touch_ctrl.joy_anchor_y = env->ms->pos[1];
+          gdata->touch_ctrl.joy_anchor_x = tx;
+          gdata->touch_ctrl.joy_anchor_y = ty;
           gdata->touch_ctrl.joy_tracking = true;
         }
-        /* Direction = displacement from anchor, amplified so a short drag
-         * still gives a decisive angle (×4 ≈ 25 px full deflection).   */
-        xm = (int)((env->ms->pos[0] - gdata->touch_ctrl.joy_anchor_x) * 4.0f);
-        ym = (int)((env->ms->pos[1] - gdata->touch_ctrl.joy_anchor_y) * 4.0f);
+        /* Direction = displacement from anchor, ×4 so ~25 px = full deflection */
+        xm = (int)((tx - gdata->touch_ctrl.joy_anchor_x) * 4.0f);
+        ym = (int)((ty - gdata->touch_ctrl.joy_anchor_y) * 4.0f);
       } else {
         if (!env->wnd->touch.down) gdata->touch_ctrl.joy_tracking = false;
-        /* No joystick touch – use absolute position (keeps last heading) */
-        xm = (int)env->ms->pos[0] - ctx->size[0] / 2;
-        ym = (int)env->ms->pos[1] - ctx->size[1] / 2;
+        /* No joystick touch – keep snake heading toward last touch absolute pos */
+        xm = (int)tx - ctx->size[0] / 2;
+        ym = (int)ty - ctx->size[1] / 2;
       }
 #else
       xm = (int)env->ms->pos[0] - ctx->size[0] / 2;
