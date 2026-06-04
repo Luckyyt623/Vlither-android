@@ -268,8 +268,8 @@ void ui_overlay(tenv* env) {
     /* thumb – position relative to fixed ring centre so it looks clean */
     float tx = jcx, ty = jcy;
     if (joy_on) {
-      float dx   = env->ms->pos[0] - gdata->touch_ctrl.joy_anchor_x;
-      float dy   = env->ms->pos[1] - gdata->touch_ctrl.joy_anchor_y;
+      float dx   = env->wnd->touch.x - gdata->touch_ctrl.joy_anchor_x;
+      float dy   = env->wnd->touch.y - gdata->touch_ctrl.joy_anchor_y;
       float dist = sqrtf(dx * dx + dy * dy);
       float cap  = jr * 0.68f;
       float sc   = (dist > cap && dist > 0.001f) ? cap / dist : 1.0f;
