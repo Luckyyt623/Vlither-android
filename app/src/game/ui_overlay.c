@@ -1,5 +1,10 @@
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
+/* IM_COL32 lives in the C++ imgui.h only — define it here for C files */
+#ifndef IM_COL32
+#define IM_COL32(R,G,B,A) \
+  (((ImU32)(A)<<24)|((ImU32)(B)<<16)|((ImU32)(G)<<8)|((ImU32)(R)<<0))
+#endif
 #endif
 #include "ui_overlay.h"
 
@@ -230,7 +235,7 @@ void ui_overlay(tenv* env) {
    * Right side – BOOST circle (active when touch.boost_down)
    * ============================================================ */
   if (gdata->data.follow_view) {
-    ImDrawList* dl  = igGetForegroundDrawList_Nil();
+    ImDrawList* dl  = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
     float sw        = (float)ctx->size[0];
     float sh        = (float)ctx->size[1];
     float margin    = sw * 0.025f;          /* ~27 px on 1080p          */
