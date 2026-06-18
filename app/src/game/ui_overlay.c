@@ -850,7 +850,9 @@ void ui_ntl_panel(tenv* env) {
   ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                            ImGuiWindowFlags_NoCollapse;
 
-  if (igBegin("NTL##ntl_panel", &gdata->show_ntl_panel, flags)) {
+  /* No p_open here on purpose — no cross in the title bar. Closing happens
+     via the OK/Reset buttons below, or by tapping outside the panel. */
+  if (igBegin("NTL##ntl_panel", NULL, flags)) {
     igSeparatorText("NTL Mod & Team Settings");
 
     igCheckbox("Show chat", &usrs->show_chat_hud);
@@ -982,6 +984,34 @@ void ui_ntl_panel(tenv* env) {
       }
     }
     igEndDisabled();
+
+    igSpacing();
+    igSeparator();
+    igSpacing();
+
+    float half_w = (panel_w - igGetStyle()->WindowPadding.x * 2 -
+                    igGetStyle()->ItemSpacing.x) * 0.5f;
+    if (igButton("Reset", (ImVec2){half_w, 0})) {
+      /* Discard unsaved edits — forces the reload-from-saved-profile check
+         above to refresh the fields on the next frame. */
+      loaded_for_idx = -2;
+    }
+    igSameLine(0, -1);
+    if (igButton("OK", (ImVec2){half_w, 0})) {
+      gdata->show_ntl_panel = false;
+    }
   }
   igEnd();
+
+  /* Tap anywhere outside the panel to close it too — but not while a combo
+     dropdown or other popup spawned from inside it is open, since that
+     popup's own contents can render past the panel's right/bottom edge. */
+  if (!igIsPopupOpen_Str("", ImGuiPopupFlags_AnyPopupId) &&
+      igIsMouseClicked_Bool(ImGuiMouseButton_Left, false)) {
+    ImVec2 mp;
+    igGetMousePos(&mp);
+    if (mp.x < 0 || mp.y < 0 || mp.x > panel_w || mp.y > panel_h) {
+      gdata->show_ntl_panel = false;
+    }
+  }
 }

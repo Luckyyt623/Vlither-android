@@ -185,7 +185,7 @@ void ui_chat(tenv* env) {
       }
 
 #ifdef ANDROID
-      igPushItemWidth(win_sz.x - 16.0f - 46.0f);
+      igPushItemWidth(win_sz.x - 16.0f - 46.0f - 50.0f);
 #else
       igPushItemWidth(win_sz.x - 16.0f);
 #endif
@@ -196,9 +196,16 @@ void ui_chat(tenv* env) {
 
 #ifdef ANDROID
       igSameLine(0, 4);
-      if (igButton("Paste##paste_chat", (ImVec2){-1, 0})) {
+      if (igButton("Paste##paste_chat", (ImVec2){44, 0})) {
         strncat(input_buf, android_jni_get_clipboard_text(),
                 sizeof(input_buf) - strlen(input_buf) - 1);
+      }
+      igSameLine(0, 4);
+      /* Guaranteed fallback: some Android keyboards don't map their
+         enter/done key the way ImGui's EnterReturnsTrue expects, so don't
+         rely on that alone for sending. */
+      if (igButton("Send##send_chat", (ImVec2){-1, 0})) {
+        submitted = true;
       }
 #endif
 
