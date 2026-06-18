@@ -2,6 +2,9 @@ package com.vlither
 
 import android.app.Activity
 import android.app.NativeActivity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.os.Build
 import android.util.Log
@@ -41,6 +44,41 @@ class GameActivity : NativeActivity() {
                 activity.startActivity(intent)
             } catch (e: Exception) {
                 Log.e(TAG, "requestAdFromC error: ${e.message}")
+            }
+        }
+
+        /**
+         * Called from C via JNI (android_jni.c).
+         * Signature: (Landroid/app/Activity;)Ljava/lang/String;
+         * Returns the system clipboard's current text, or "" if empty/
+         * unavailable. ImGui draws its own text widgets (not native
+         * EditTexts), so there's no built-in paste gesture without this.
+         */
+        @JvmStatic
+        fun getClipboardTextFromC(activity: Activity): String {
+            return try {
+                val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = cm.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    clip.getItemAt(0).coerceToText(activity)?.toString() ?: ""
+                } else ""
+            } catch (e: Exception) {
+                Log.e(TAG, "getClipboardTextFromC error: ${e.message}")
+                ""
+            }
+        }
+
+        /**
+         * Called from C via JNI (android_jni.c).
+         * Signature: (Landroid/app/Activity;Ljava/lang/String;)V
+         */
+        @JvmStatic
+        fun setClipboardTextFromC(activity: Activity, text: String) {
+            try {
+                val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Vlither", text))
+            } catch (e: Exception) {
+                Log.e(TAG, "setClipboardTextFromC error: ${e.message}")
             }
         }
     }

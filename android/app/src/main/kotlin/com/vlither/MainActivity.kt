@@ -25,8 +25,8 @@ class MainActivity : Activity() {
     companion object {
         private const val TAG               = "VlitherMain"
         private const val CURRENT_VERSION   = "3.2"
-        private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/apk/main/version.txt"
-        private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/apk/main/download_url.txt"
+        private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Arrow-logic-/main/version.txt"
+        private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Arrow-logic-/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
 
         fun getUnlockRemainingMs(context: Context): Long {

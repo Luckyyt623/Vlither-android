@@ -13,6 +13,9 @@
 #include "user_settings.h"
 #include "../ui/chat.h"
 #include "../network/ntl_client.h"
+#ifdef ANDROID
+#include "../android_jni.h"
+#endif
 
 static const char* clean_ntl_nickname(const char* raw_nick) {
   if (!raw_nick) return "";
@@ -831,4 +834,154 @@ void ui_player_details_hud(tenv* env) {
   igEnd();
   last_scr_w = scr_w;
   last_scr_h = scr_h;
+}
+void ui_ntl_panel(tenv* env) {
+  tuser_data* usr = env->usr;
+  user_settings* usrs = &usr->usrs;
+  game_data* gdata = &usr->gdata;
+  if (!gdata->show_ntl_panel) return;
+
+  float panel_w = env->ctx->size[0] * 0.5f;
+  float panel_h = (float)env->ctx->size[1];
+
+  igSetNextWindowPos((ImVec2){0, 0}, ImGuiCond_Always, (ImVec2){0, 0});
+  igSetNextWindowSize((ImVec2){panel_w, panel_h}, ImGuiCond_Always);
+
+  ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                           ImGuiWindowFlags_NoCollapse;
+
+  if (igBegin("NTL##ntl_panel", &gdata->show_ntl_panel, flags)) {
+    igSeparatorText("NTL Mod & Team Settings");
+
+    igCheckbox("Show chat", &usrs->show_chat_hud);
+    igCheckbox("Show online players list", &usrs->show_online_players_hud);
+    igCheckbox("Show player details list", &usrs->show_player_details_hud);
+
+    igSpacing();
+    igSeparator();
+    igSpacing();
+    igText("Active team:");
+
+    static char edit_team_id[33] = {0};
+    static char edit_auth_key[65] = {0};
+    static char edit_profile_name[33] = {0};
+    static int loaded_for_idx = -2; /* -2 = never loaded yet */
+
+    const char* active_label = "None";
+    if (usrs->ntl_active_team_idx >= 0 &&
+        usrs->ntl_active_team_idx < usrs->ntl_team_count) {
+      active_label = usrs->ntl_teams[usrs->ntl_active_team_idx].name;
+    }
+
+    igSetNextItemWidth(-1);
+    if (igBeginCombo("##ntl_active_team", active_label, ImGuiComboFlags_None)) {
+      if (igSelectable_Bool("None", usrs->ntl_active_team_idx == -1,
+                            ImGuiSelectableFlags_None, (ImVec2){})) {
+        usrs->ntl_active_team_idx = -1;
+      }
+      for (int i = 0; i < usrs->ntl_team_count; i++) {
+        igPushID_Int(i);
+        if (igSelectable_Bool(usrs->ntl_teams[i].name,
+                              usrs->ntl_active_team_idx == i,
+                              ImGuiSelectableFlags_None, (ImVec2){})) {
+          usrs->ntl_active_team_idx = i;
+        }
+        igPopID();
+      }
+      igEndCombo();
+    }
+
+    /* Whenever the active selection changes, refresh the edit fields from
+       that profile's saved values (or clear them for "None" / a brand new
+       profile that hasn't been added yet). */
+    if (loaded_for_idx != usrs->ntl_active_team_idx) {
+      loaded_for_idx = usrs->ntl_active_team_idx;
+      if (loaded_for_idx >= 0 && loaded_for_idx < usrs->ntl_team_count) {
+        strcpy(edit_profile_name, usrs->ntl_teams[loaded_for_idx].name);
+        strcpy(edit_team_id, usrs->ntl_teams[loaded_for_idx].team_id);
+        strcpy(edit_auth_key, usrs->ntl_teams[loaded_for_idx].auth_key);
+      } else {
+        edit_profile_name[0] = '\0';
+        edit_team_id[0] = '\0';
+        edit_auth_key[0] = '\0';
+      }
+    }
+
+    igSpacing();
+    igText("Profile name");
+    igSetNextItemWidth(-1);
+    igInputText("##ntl_profile_name", edit_profile_name,
+               sizeof(edit_profile_name), ImGuiInputTextFlags_None, NULL, NULL);
+    igText("Team ID");
+#ifdef ANDROID
+    igSetNextItemWidth(-46.0f);
+    igInputText("##ntl_team_id", edit_team_id, sizeof(edit_team_id),
+               ImGuiInputTextFlags_None, NULL, NULL);
+    igSameLine(0, 4);
+    if (igButton("Paste##paste_team_id", (ImVec2){-1, 0})) {
+      strncpy(edit_team_id, android_jni_get_clipboard_text(), sizeof(edit_team_id) - 1);
+      edit_team_id[sizeof(edit_team_id) - 1] = '\0';
+    }
+#else
+    igSetNextItemWidth(-1);
+    igInputText("##ntl_team_id", edit_team_id, sizeof(edit_team_id),
+               ImGuiInputTextFlags_None, NULL, NULL);
+#endif
+    igText("Auth key");
+#ifdef ANDROID
+    igSetNextItemWidth(-46.0f);
+    igInputText("##ntl_auth_key", edit_auth_key, sizeof(edit_auth_key),
+               ImGuiInputTextFlags_Password, NULL, NULL);
+    igSameLine(0, 4);
+    if (igButton("Paste##paste_auth_key", (ImVec2){-1, 0})) {
+      strncpy(edit_auth_key, android_jni_get_clipboard_text(), sizeof(edit_auth_key) - 1);
+      edit_auth_key[sizeof(edit_auth_key) - 1] = '\0';
+    }
+#else
+    igSetNextItemWidth(-1);
+    igInputText("##ntl_auth_key", edit_auth_key, sizeof(edit_auth_key),
+               ImGuiInputTextFlags_Password, NULL, NULL);
+#endif
+
+    igSpacing();
+    bool can_save = edit_profile_name[0] != '\0' && edit_team_id[0] != '\0' &&
+                    edit_auth_key[0] != '\0';
+    igBeginDisabled(!can_save);
+    if (igButton("Save profile", (ImVec2){-1, 0})) {
+      int target_idx = usrs->ntl_active_team_idx;
+      if (target_idx < 0 || target_idx >= usrs->ntl_team_count) {
+        if (usrs->ntl_team_count < 12) {
+          target_idx = usrs->ntl_team_count;
+          usrs->ntl_team_count++;
+        } else {
+          target_idx = -1; /* full — can't add another */
+        }
+      }
+      if (target_idx >= 0) {
+        strcpy(usrs->ntl_teams[target_idx].name, edit_profile_name);
+        strcpy(usrs->ntl_teams[target_idx].team_id, edit_team_id);
+        strcpy(usrs->ntl_teams[target_idx].auth_key, edit_auth_key);
+        usrs->ntl_active_team_idx = target_idx;
+        loaded_for_idx = target_idx;
+        save_user_settings(usrs);
+      }
+    }
+    igEndDisabled();
+
+    igBeginDisabled(usrs->ntl_active_team_idx < 0);
+    if (igButton("Delete profile", (ImVec2){-1, 0})) {
+      int del_idx = usrs->ntl_active_team_idx;
+      if (del_idx >= 0 && del_idx < usrs->ntl_team_count) {
+        for (int i = del_idx; i < usrs->ntl_team_count - 1; i++) {
+          usrs->ntl_teams[i] = usrs->ntl_teams[i + 1];
+        }
+        usrs->ntl_team_count--;
+        usrs->ntl_active_team_idx = -1;
+        loaded_for_idx = -2;
+        save_user_settings(usrs);
+      }
+    }
+    igEndDisabled();
+  }
+  igEnd();
 }

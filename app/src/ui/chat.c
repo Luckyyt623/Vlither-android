@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include "../user.h"
 #include "../network/ntl_client.h"
+#ifdef ANDROID
+#include "../android_jni.h"
+#endif
 
 #define MAX_CHAT_MESSAGES 30
 
@@ -175,17 +178,29 @@ void ui_chat(tenv* env) {
 
     // Render input field or helper
     igSetCursorPosY(win_sz.y - 32.0f);
-    igPushItemWidth(win_sz.x - 16.0f);
     if (chat_is_active) {
       if (focus_input) {
         igSetKeyboardFocusHere(0);
         focus_input = false;
       }
 
+#ifdef ANDROID
+      igPushItemWidth(win_sz.x - 16.0f - 46.0f);
+#else
+      igPushItemWidth(win_sz.x - 16.0f);
+#endif
       bool submitted = igInputTextWithHint("##chat_box_input", "Press Enter to send...",
                                            input_buf, sizeof(input_buf),
                                            ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
       igPopItemWidth();
+
+#ifdef ANDROID
+      igSameLine(0, 4);
+      if (igButton("Paste##paste_chat", (ImVec2){-1, 0})) {
+        strncat(input_buf, android_jni_get_clipboard_text(),
+                sizeof(input_buf) - strlen(input_buf) - 1);
+      }
+#endif
 
       if (submitted) {
         if (strlen(input_buf) > 0) {
@@ -226,7 +241,6 @@ void ui_chat(tenv* env) {
 
       igPopStyleColor(2);
       igPopStyleVar(1);
-      igPopItemWidth();
     }
     ImVec2 pos;
     igGetWindowPos(&pos);

@@ -179,12 +179,13 @@ void trender(tenv* env) {
     }
     igEnd();
 
-    if (usr->gdata.curr_screen == TITLE_SCREEN ||
-        usr->gdata.curr_screen == PLAYING ||
-        usr->gdata.curr_screen == SETTINGS) {
+    if (usr->gdata.curr_screen == PLAYING) {
       ui_chat(env);
       ui_online_players_hud(env);
       ui_player_details_hud(env);
+    }
+    if (usr->gdata.curr_screen == TITLE_SCREEN) {
+      ui_ntl_panel(env);
     }
 
     /* ═══════════════════════════════════════════════════════════════
