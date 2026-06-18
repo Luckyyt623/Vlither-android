@@ -1,7 +1,6 @@
 #include "title_screen.h"
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
-#include "../android_jni.h"
 #endif
 
 #include "../network/server.h"
@@ -68,46 +67,19 @@ void ui_title_screen(tenv* env) {
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y);
+  igPushItemWidth(logo_size);
   igPushStyleColor_Vec4(ImGuiCol_FrameBg,
                         (ImVec4){0.297f, 0.265f, 0.484f, 1.0f});
-#ifdef ANDROID
-  igPushItemWidth(logo_size - 50.0f);
   igInputTextWithHint("##nickname_input", "Nickname", usrs->nickname,
                       MAX_NICKNAME_LEN + 1, ImGuiInputTextFlags_None, NULL,
                       NULL);
-  igPopItemWidth();
-  igSameLine(0, 4);
-  if (igButton("Paste##paste_nick", (ImVec2){44, 0})) {
-    strncpy(usrs->nickname, android_jni_get_clipboard_text(), MAX_NICKNAME_LEN);
-    usrs->nickname[MAX_NICKNAME_LEN] = '\0';
-  }
-#else
-  igPushItemWidth(logo_size);
-  igInputTextWithHint("##nickname_input", "Nickname", usrs->nickname,
-                      MAX_NICKNAME_LEN + 1, ImGuiInputTextFlags_None, NULL,
-                      NULL);
-  igPopItemWidth();
-#endif
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 2 +
                   frame_height);
-#ifdef ANDROID
-  igPushItemWidth(logo_size - 50.0f);
   igInputTextWithHint("##ipv4_input", "IPv4:Port", usrs->ipv4, MAX_IPV4_LEN + 1,
                       ImGuiInputTextFlags_None, NULL, NULL);
-  igPopItemWidth();
-  igSameLine(0, 4);
-  if (igButton("Paste##paste_ipv4", (ImVec2){44, 0})) {
-    strncpy(usrs->ipv4, android_jni_get_clipboard_text(), MAX_IPV4_LEN);
-    usrs->ipv4[MAX_IPV4_LEN] = '\0';
-  }
-#else
-  igPushItemWidth(logo_size);
-  igInputTextWithHint("##ipv4_input", "IPv4:Port", usrs->ipv4, MAX_IPV4_LEN + 1,
-                      ImGuiInputTextFlags_None, NULL, NULL);
-  igPopItemWidth();
-#endif
   igPopStyleColor(1);
+  igPopItemWidth();
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 3 +
                   frame_height * 2);

@@ -8,21 +8,7 @@
 
 #include <android/asset_manager.h>
 #include <android_native_app_glue.h>
-#include "android_jni.h"
 extern struct android_app* g_android_app;
-
-/* Bridge ImGui copy/paste to the Android system clipboard. Without this,
-   paste silently does nothing on Android: there's no GLFW clipboard here,
-   and ImGui renders its own text widgets rather than native EditTexts, so
-   there's no OS-level paste path otherwise. */
-static const char* android_clipboard_get(ImGuiContext* ctx) {
-  (void)ctx;
-  return android_jni_get_clipboard_text();
-}
-static void android_clipboard_set(ImGuiContext* ctx, const char* text) {
-  (void)ctx;
-  android_jni_set_clipboard_text(text);
-}
 
 void imgui_init(tenv* env) {
     tuser_data*   usr  = env->usr;
@@ -50,10 +36,6 @@ void imgui_init(tenv* env) {
     ImGuiIO* io = igGetIO_Nil();
     io->DisplaySize = (ImVec2){(float)env->ctx->size[0],
                                (float)env->ctx->size[1]};
-
-    ImGuiPlatformIO* pio = igGetPlatformIO_Nil();
-    pio->Platform_GetClipboardTextFn = android_clipboard_get;
-    pio->Platform_SetClipboardTextFn = android_clipboard_set;
 
     AAssetManager* am = g_android_app->activity->assetManager;
 

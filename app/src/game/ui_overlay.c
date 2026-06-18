@@ -13,9 +13,6 @@
 #include "user_settings.h"
 #include "../ui/chat.h"
 #include "../network/ntl_client.h"
-#ifdef ANDROID
-#include "../android_jni.h"
-#endif
 
 static const char* clean_ntl_nickname(const char* raw_nick) {
   if (!raw_nick) return "";
@@ -915,35 +912,13 @@ void ui_ntl_panel(tenv* env) {
     igInputText("##ntl_profile_name", edit_profile_name,
                sizeof(edit_profile_name), ImGuiInputTextFlags_None, NULL, NULL);
     igText("Team ID");
-#ifdef ANDROID
-    igSetNextItemWidth(-46.0f);
-    igInputText("##ntl_team_id", edit_team_id, sizeof(edit_team_id),
-               ImGuiInputTextFlags_None, NULL, NULL);
-    igSameLine(0, 4);
-    if (igButton("Paste##paste_team_id", (ImVec2){-1, 0})) {
-      strncpy(edit_team_id, android_jni_get_clipboard_text(), sizeof(edit_team_id) - 1);
-      edit_team_id[sizeof(edit_team_id) - 1] = '\0';
-    }
-#else
     igSetNextItemWidth(-1);
     igInputText("##ntl_team_id", edit_team_id, sizeof(edit_team_id),
                ImGuiInputTextFlags_None, NULL, NULL);
-#endif
     igText("Auth key");
-#ifdef ANDROID
-    igSetNextItemWidth(-46.0f);
-    igInputText("##ntl_auth_key", edit_auth_key, sizeof(edit_auth_key),
-               ImGuiInputTextFlags_Password, NULL, NULL);
-    igSameLine(0, 4);
-    if (igButton("Paste##paste_auth_key", (ImVec2){-1, 0})) {
-      strncpy(edit_auth_key, android_jni_get_clipboard_text(), sizeof(edit_auth_key) - 1);
-      edit_auth_key[sizeof(edit_auth_key) - 1] = '\0';
-    }
-#else
     igSetNextItemWidth(-1);
     igInputText("##ntl_auth_key", edit_auth_key, sizeof(edit_auth_key),
                ImGuiInputTextFlags_Password, NULL, NULL);
-#endif
 
     igSpacing();
     bool can_save = edit_profile_name[0] != '\0' && edit_team_id[0] != '\0' &&
