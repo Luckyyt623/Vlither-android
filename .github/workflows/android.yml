@@ -1,0 +1,177 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.6'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: |
+          sdkmanager --install "ndk;26.3.11579264" "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> $GITHUB_ENV
+
+      - name: Set up signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > android/app/vlither.keystore
+          echo "Keystore ready"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Slang shader compiler
+        run: |
+          SLANG_VERSION="2024.14.3"
+          wget -q "https://github.com/shader-slang/slang/releases/download/v${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64.tar.gz" -O slang.tar.gz
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to download Slang v${SLANG_VERSION}"
+            exit 1
+          fi
+          tar -xzf slang.tar.gz
+          SLANG_DIR=$(find . -maxdepth 2 -name slangc -type f | head -1 | xargs dirname)
+          SLANG_DIR=$(realpath "$SLANG_DIR")
+          printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s:$LD_LIBRARY_PATH"\nexec "%s/slangc" "$@"\n' "$SLANG_DIR" "$SLANG_DIR" > /tmp/slangc_wrapper.sh
+          sudo mv /tmp/slangc_wrapper.sh /usr/local/bin/slangc
+          sudo chmod +x /usr/local/bin/slangc
+          slangc -v
+
+      - name: Compile shaders
+        run: python3 build.py 2
+
+      - name: Copy assets to Android project
+        run: |
+          ASSETS=android/app/src/main/assets
+          mkdir -p "$ASSETS/shaders" "$ASSETS/fonts" "$ASSETS/textures"
+          if [ ! -d "app/res/shaders/bin" ]; then
+            echo "ERROR: app/res/shaders/bin does not exist."
+            exit 1
+          fi
+          cp app/res/shaders/bin/*.spv "$ASSETS/shaders/"
+          [ -d "app/res/fonts"    ] && cp app/res/fonts/*.ttf      "$ASSETS/fonts/"    || true
+          [ -d "app/res/textures" ] && cp -r app/res/textures/. "$ASSETS/textures/" || true
+          echo "Assets copied:" && find "$ASSETS" -type f
+
+      - name: Generate Gradle wrapper
+        run: |
+          cd android
+          gradle wrapper --gradle-version=8.6
+          chmod +x gradlew
+
+      - name: Build release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease -Pandroid.ndkVersion=26.3.11579264 --stacktrace
+
+      - name: Get version from CMakeLists
+        id: get_version
+        run: |
+          VERSION=$(grep 'APP_VERSION=' android/app/src/main/cpp/CMakeLists.txt | grep -oP '"\K[^"]+')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "App version: $VERSION"
+
+      # Artifact upload removed — APK goes directly to public releases repo
+
+      # ── Publish ONLY APK + version files to public releases repo ────────
+      # NOTE: Only app-debug.apk, version.txt and download_url.txt are pushed.
+      # Source code is NEVER pushed to the public repo.
+      - name: Publish APK to public releases repo
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          REPO="Luckyyt623/apk"
+          TAG="v${VERSION}"
+          RELEASE_NAME="Vlither v${VERSION}"
+
+          echo "Publishing $RELEASE_NAME to $REPO"
+
+          # Delete existing release with same tag if exists (for re-releases)
+          EXISTING=$(curl -s \
+            -H "Authorization: token $RELEASES_TOKEN" \
+            "https://api.github.com/repos/$REPO/releases/tags/$TAG")
+          EXISTING_ID=$(echo "$EXISTING" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null)
+          if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "None" ]; then
+            echo "Deleting existing release $EXISTING_ID"
+            curl -s -X DELETE \
+              -H "Authorization: token $RELEASES_TOKEN" \
+              "https://api.github.com/repos/$REPO/releases/$EXISTING_ID"
+            # Also delete the tag
+            curl -s -X DELETE \
+              -H "Authorization: token $RELEASES_TOKEN" \
+              "https://api.github.com/repos/$REPO/git/refs/tags/$TAG" || true
+          fi
+
+          # Create new release
+          RELEASE=$(curl -s -X POST \
+            -H "Authorization: token $RELEASES_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$REPO/releases" \
+            -d "{
+              \"tag_name\": \"$TAG\",
+              \"name\": \"$RELEASE_NAME\",
+              \"body\": \"Vlither v${VERSION}\",
+              \"draft\": false,
+              \"prerelease\": false
+            }")
+
+          UPLOAD_URL=$(echo "$RELEASE" | python3 -c "import sys,json; print(json.load(sys.stdin)['upload_url'].split('{')[0])")
+          echo "Upload URL: $UPLOAD_URL"
+
+          # Upload ONLY the APK — no source code
+          curl -s -X POST \
+            -H "Authorization: token $RELEASES_TOKEN" \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary @"$APK_PATH" \
+            "${UPLOAD_URL}?name=Vlither-v${VERSION}.apk"
+
+          echo "APK uploaded"
+
+          # Update version.txt and download_url.txt ONLY — no source files
+          git config --global user.email "ci@vlither"
+          git config --global user.name "Vlither CI"
+
+          # Fresh clone of public repo into isolated temp dir
+          rm -rf /tmp/releases_repo
+          git clone "https://x-access-token:$RELEASES_TOKEN@github.com/$REPO.git" /tmp/releases_repo
+
+          cd /tmp/releases_repo
+
+          # Remove everything except .git (in case someone pushed source by mistake)
+          find . -not -path './.git*' -not -name '.' -delete 2>/dev/null || true
+
+          # Write ONLY the two text files
+          echo "$VERSION" > version.txt
+          echo "https://github.com/$REPO/releases/download/$TAG/Vlither-v${VERSION}.apk" > download_url.txt
+
+          git add version.txt download_url.txt
+          git commit -m "Release v$VERSION" || echo "No changes"
+          git push
+          echo "Done — public repo now has only version.txt and download_url.txt"
