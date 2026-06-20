@@ -79,12 +79,7 @@ static void log_close(void) {
 #define NTL_POLL_INTERVAL     3.0
 #define NTL_RESPONSE_BUF_SIZE 32768
 
-/* ── per-request context (no global buffer race) ──────────────────────── */
-
-typedef struct ntl_req_ctx {
-  char nick_with_id[128];
-  char http_request[4200];
-} ntl_req_ctx;
+/* ── per-request context — defined later, before event handler ─────────── */
 
 #define MAX_PENDING_CHAT   16
 #define MAX_OUTGOING_CHAT  16
@@ -264,10 +259,19 @@ static void ntl_parse_response(const char* body, const char* my_nick) {
 
 /* ── mongoose handler ─────────────────────────────────────────────────── */
 
+/* response accumulation buffer per connection */
+#define RESP_BUF_SIZE 65536
+typedef struct ntl_req_ctx {
+  char nick_with_id[128];
+  char http_request[4200];
+  char resp_buf[RESP_BUF_SIZE];
+  int  resp_len;
+} ntl_req_ctx;
+
 static void ntl_event_handler(struct mg_connection* c, int ev, void* ev_data) {
   ntl_req_ctx* ctx=(ntl_req_ctx*)c->fn_data;
   if(ev==MG_EV_CONNECT){
-    ntl_log("MG_EV_CONNECT — init TLS skip_verification=1");
+    ntl_log("MG_EV_CONNECT — init TLS");
     struct mg_tls_opts opts={.skip_verification=1,.name=mg_str(NTL_HOST)};
     mg_tls_init(c,&opts);
     if(ctx){
@@ -275,30 +279,45 @@ static void ntl_event_handler(struct mg_connection* c, int ev, void* ev_data) {
       mg_printf(c,"%s",ctx->http_request);
     }
   } else if(ev==MG_EV_TLS_HS){
-    ntl_log("MG_EV_TLS_HS — TLS handshake complete");
-  } else if(ev==MG_EV_HTTP_MSG){
-    struct mg_http_message* hm=(struct mg_http_message*)ev_data;
-    ntl_log("MG_EV_HTTP_MSG — status=%.*s body_len=%d",
-            (int)hm->uri.len,hm->uri.buf,(int)hm->body.len);
-    /* log first 200 chars of body for debugging */
-    int preview=(int)hm->body.len; if(preview>200) preview=200;
-    ntl_log("body preview: %.*s",preview,hm->body.buf);
-
-    size_t len=hm->body.len;
-    if(len>=NTL_RESPONSE_BUF_SIZE) len=NTL_RESPONSE_BUF_SIZE-1;
-    memcpy(ntl_response_buf,hm->body.buf,len);
-    ntl_response_buf[len]=0;
-    if(len>0&&ctx) ntl_parse_response(ntl_response_buf,ctx->nick_with_id);
-    if(ctx){free(ctx);c->fn_data=NULL;}
-    c->is_draining=1;
-    request_in_flight=false;
+    ntl_log("MG_EV_TLS_HS — TLS complete");
+  } else if(ev==MG_EV_READ){
+    /* accumulate raw bytes — don't rely on MG_EV_HTTP_MSG parsing */
+    if(ctx){
+      struct mg_iobuf* r=(struct mg_iobuf*)ev_data;
+      int space=RESP_BUF_SIZE-1-ctx->resp_len;
+      int copy=(int)r->len < space ? (int)r->len : space;
+      if(copy>0){
+        memcpy(ctx->resp_buf+ctx->resp_len, r->buf, copy);
+        ctx->resp_len+=copy;
+        ctx->resp_buf[ctx->resp_len]='\0';
+      }
+      /* consume bytes so mongoose doesn't hold them */
+      mg_iobuf_del(r,0,r->len);
+    }
   } else if(ev==MG_EV_ERROR){
     ntl_log("MG_EV_ERROR: %s",(char*)ev_data);
     if(ctx){free(ctx);c->fn_data=NULL;}
     request_in_flight=false;
   } else if(ev==MG_EV_CLOSE){
-    ntl_log("MG_EV_CLOSE");
-    if(ctx){free(ctx);c->fn_data=NULL;}
+    ntl_log("MG_EV_CLOSE — resp_len=%d", ctx ? ctx->resp_len : -1);
+    if(ctx){
+      if(ctx->resp_len>0){
+        /* log first 300 chars of raw response */
+        int prev=ctx->resp_len<300?ctx->resp_len:300;
+        ntl_log("raw response: %.*s", prev, ctx->resp_buf);
+        /* skip HTTP headers — find blank line \r\n\r\n or \n\n */
+        char* body=strstr(ctx->resp_buf,"\r\n\r\n");
+        if(body) body+=4;
+        else { body=strstr(ctx->resp_buf,"\n\n"); if(body) body+=2; }
+        if(body && *body)
+          ntl_parse_response(body, ctx->nick_with_id);
+        else
+          ntl_log("no body found in response");
+      } else {
+        ntl_log("empty response — nothing to parse");
+      }
+      free(ctx); c->fn_data=NULL;
+    }
     request_in_flight=false;
   }
 }
@@ -378,12 +397,15 @@ static void ntl_issue_request(tenv* env) {
            "GET %s HTTP/1.0\r\nHost: "NTL_HOST"\r\n"
            "User-Agent: Vlither/3.2\r\nConnection: close\r\n\r\n",path);
 
-  char full_url[4200];
-  snprintf(full_url,sizeof(full_url),"https://"NTL_HOST"%s",path);
-  ntl_log("connecting to: https://%s",NTL_HOST);
+  /* Use plain mg_connect (not mg_http_connect) so we get raw MG_EV_READ
+     events instead of relying on mongoose's HTTP client parser which
+     silently drops MG_EV_HTTP_MSG on some server responses. */
+  char host_port[64];
+  snprintf(host_port,sizeof(host_port),"https://"NTL_HOST":443");
+  ntl_log("connecting to: %s",host_port);
 
-  if(!mg_http_connect(&ntl_mgr,full_url,ntl_event_handler,ctx)){
-    ntl_log("mg_http_connect returned NULL — connection failed");
+  if(!mg_connect(&ntl_mgr,host_port,ntl_event_handler,ctx)){
+    ntl_log("mg_connect returned NULL — failed");
     free(ctx);
   } else {
     request_in_flight=true;
