@@ -33,3 +33,5 @@ void ntl_client_send_msg(const char* text);
 bool ntl_client_poll_chat(char* sender, char* text);
 
 #endif
+
+const char** ntl_get_log_lines(int* count);

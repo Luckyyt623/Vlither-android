@@ -961,14 +961,30 @@ void ui_ntl_panel(tenv* env) {
     igEndDisabled();
 
     igSpacing();
+    igSeparatorText("Debug Log");
+    igPushFont(usr->imgui_data.mono_font[FONT_SIZE_TINY],
+               usr->imgui_data.mono_font[FONT_SIZE_TINY]->LegacySize);
+    igBeginChild_Str("##ntl_log_box", (ImVec2){-1, 120}, ImGuiChildFlags_Borders,
+                     ImGuiWindowFlags_HorizontalScrollbar);
+    {
+      int lcount = 0;
+      const char** lines = ntl_get_log_lines(&lcount);
+      for (int i = 0; i < lcount; i++)
+        igTextUnformatted(lines[i], NULL);
+      /* auto-scroll to bottom */
+      if (igGetScrollY() >= igGetScrollMaxY() - 4.0f)
+        igSetScrollHereY(1.0f);
+    }
+    igEndChild();
+    igPopFont();
+
+    igSpacing();
     igSeparator();
     igSpacing();
 
     float half_w = (panel_w - igGetStyle()->WindowPadding.x * 2 -
                     igGetStyle()->ItemSpacing.x) * 0.5f;
     if (igButton("Reset", (ImVec2){half_w, 0})) {
-      /* Discard unsaved edits — forces the reload-from-saved-profile check
-         above to refresh the fields on the next frame. */
       loaded_for_idx = -2;
     }
     igSameLine(0, -1);
