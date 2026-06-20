@@ -76,9 +76,9 @@ void android_jni_request_ad(void) {
         return;
     }
 
-    jclass cls = (*env)->FindClass(env, "com/vlither/GameActivity");
+    jclass cls = (*env)->GetObjectClass(env, obj);
     if (!cls) {
-        AJNI_LOG("request_ad: GameActivity class not found");
+        AJNI_LOG("request_ad: GetObjectClass failed");
         (*env)->ExceptionClear(env);
         goto cleanup;
     }
@@ -125,9 +125,9 @@ void android_jni_open_realtime_leaderboard(void) {
         return;
     }
 
-    jclass cls = (*env)->FindClass(env, "com/vlither/GameActivity");
+    jclass cls = (*env)->GetObjectClass(env, obj);
     if (!cls) {
-        AJNI_LOG("open_realtime_leaderboard: GameActivity class not found");
+        AJNI_LOG("open_realtime_leaderboard: GetObjectClass failed");
         (*env)->ExceptionClear(env);
         goto cleanup;
     }
