@@ -99,5 +99,53 @@ cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
+/* ── open_realtime_leaderboard — JNI call via g_android_app ─────────── */
+
+void android_jni_open_realtime_leaderboard(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm) {
+        AJNI_LOG("open_realtime_leaderboard: g_android_app not ready");
+        return;
+    }
+
+    JavaVM*  vm  = g_android_app->activity->vm;
+    jobject  obj = g_android_app->activity->clazz;
+    JNIEnv*  env = NULL;
+    bool did_attach = false;
+
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) {
+            AJNI_LOG("open_realtime_leaderboard: AttachCurrentThread failed");
+            return;
+        }
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        AJNI_LOG("open_realtime_leaderboard: GetEnv failed status=%d", status);
+        return;
+    }
+
+    jclass cls = (*env)->FindClass(env, "com/vlither/GameActivity");
+    if (!cls) {
+        AJNI_LOG("open_realtime_leaderboard: GameActivity class not found");
+        (*env)->ExceptionClear(env);
+        goto cleanup;
+    }
+
+    {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "openRealtimeLeaderboardFromC", "(Landroid/app/Activity;)V");
+        if (!mid) {
+            AJNI_LOG("open_realtime_leaderboard: method not found");
+            (*env)->ExceptionClear(env);
+            goto cleanup;
+        }
+        (*env)->CallStaticVoidMethod(env, cls, mid, obj);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    }
+
+cleanup:
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
 
 #endif /* ANDROID */

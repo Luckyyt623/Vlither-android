@@ -5,7 +5,6 @@
 #include "input.h"
 
 #include "../user.h"
-#include "../ui/chat.h"
 
 void input(tenv* env) {
   tuser_data* usr = env->usr;
@@ -13,7 +12,6 @@ void input(tenv* env) {
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
   struct mg_connection* connection = gdata->connection;
-  bool typing = chat_is_typing();
 
   if (!gdata->data.wfpr) {
     if (gdata->data.ctm - gdata->data.last_ping_mtm > 250) {
@@ -34,12 +32,10 @@ void input(tenv* env) {
       xm = gdata->bot.output.xm;
       ym = gdata->bot.output.ym;
     } else {
-      if (!typing) {
-        if (twindow_key_down(env->wnd, GLFW_KEY_LEFT))
-          gdata->data.kd_l_frb += gdata->data.vfrb;
-        if (twindow_key_down(env->wnd, GLFW_KEY_RIGHT))
-          gdata->data.kd_r_frb += gdata->data.vfrb;
-      }
+      if (twindow_key_down(env->wnd, GLFW_KEY_LEFT))
+        gdata->data.kd_l_frb += gdata->data.vfrb;
+      if (twindow_key_down(env->wnd, GLFW_KEY_RIGHT))
+        gdata->data.kd_r_frb += gdata->data.vfrb;
 
       if (gdata->data.kd_l_frb > 0 || gdata->data.kd_r_frb > 0)
         if (gdata->data.ctm - gdata->data.lkstm > 150) {
@@ -207,10 +203,9 @@ void input(tenv* env) {
     /* Boost fires only when the finger is in the right 20 % of the screen */
     gdata->data.wmd = env->wnd->touch.boost_down || gdata->bot.output.accel;
 #else
-    gdata->data.wmd = (!typing &&
-                       (twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
-                        twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
-                        twindow_key_down(env->wnd, GLFW_KEY_UP))) ||
+    gdata->data.wmd = twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
+                      twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
+                      twindow_key_down(env->wnd, GLFW_KEY_UP) ||
                       gdata->bot.output.accel;
 #endif
 
@@ -247,16 +242,14 @@ void input(tenv* env) {
     }
   }
 
-  if (!typing) {
-    gdata->data.ms_zoom *= expf(env->ms->dwheel * usrs->zoom_step);
+  gdata->data.ms_zoom *= expf(env->ms->dwheel * usrs->zoom_step);
 
-    if (tkeyboard_key_pressed(env->kb, GLFW_KEY_N) ||
-        (GLFW_KEY_N < 512 && gdata->data.fake_key_pressed[GLFW_KEY_N]))
-      gdata->data.ms_zoom *= expf(1 * usrs->zoom_step);
-    else if (tkeyboard_key_pressed(env->kb, GLFW_KEY_M) ||
-             (GLFW_KEY_M < 512 && gdata->data.fake_key_pressed[GLFW_KEY_M]))
-      gdata->data.ms_zoom *= expf(-1 * usrs->zoom_step);
-  }
+  if (tkeyboard_key_pressed(env->kb, GLFW_KEY_N) ||
+      (GLFW_KEY_N < 512 && gdata->data.fake_key_pressed[GLFW_KEY_N]))
+    gdata->data.ms_zoom *= expf(1 * usrs->zoom_step);
+  else if (tkeyboard_key_pressed(env->kb, GLFW_KEY_M) ||
+           (GLFW_KEY_M < 512 && gdata->data.fake_key_pressed[GLFW_KEY_M]))
+    gdata->data.ms_zoom *= expf(-1 * usrs->zoom_step);
 
   gdata->data.ms_zoom =
       GLM_MAX(MAX_ZOOM_OUT, GLM_MIN(gdata->data.ms_zoom, MAX_ZOOM_IN));
@@ -265,7 +258,7 @@ void input(tenv* env) {
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;
 
-  for (int i = 0; i < NUM_HOTKEYS && !typing; i++) {
+  for (int i = 0; i < NUM_HOTKEYS; i++) {
     hotkey* hk = usrs->hotkeys + i;
     bool real_down    = twindow_key_down(env->wnd, hk->key);
     bool real_pressed = tkeyboard_key_pressed(env->kb, hk->key);

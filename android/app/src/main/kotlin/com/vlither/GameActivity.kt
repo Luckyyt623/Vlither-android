@@ -1,18 +1,33 @@
 package com.vlither
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NativeActivity
-import android.content.Context
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Build
 import android.util.Log
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 
 class GameActivity : NativeActivity() {
 
     companion object {
         private const val TAG = "VlitherGame"
+
+        /** Same NTL RealTime Status page the JS slither.io mod opens. */
+        private const val RTL_URL = "https://ntl-slither.com/ss/rs.php?ntlmod"
+
+        /** Arbitrary fixed id so hideRealtimeLeaderboard() can find the WebView. */
+        private const val RTL_WEBVIEW_ID = 0x7E470001
 
         /**
          * Called from C via JNI (android_jni.c).
@@ -43,6 +58,125 @@ class GameActivity : NativeActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "requestAdFromC error: ${e.message}")
             }
+        }
+
+        /**
+         * Called from C via JNI (android_jni.c).
+         * Signature: (Landroid/app/Activity;)V
+         * Opens the same "RealTime Leaderboards" page the JS slither.io
+         * mod opens, as an embedded WebView popup over the game surface.
+         */
+        @JvmStatic
+        fun openRealtimeLeaderboardFromC(activity: Activity) {
+            try {
+                (activity as? GameActivity)?.showRealtimeLeaderboard()
+            } catch (e: Exception) {
+                Log.e(TAG, "openRealtimeLeaderboardFromC error: ${e.message}")
+            }
+        }
+    }
+
+    /** Root view of the RealTime Leaderboards popup, null when closed. */
+    private var rtlOverlay: View? = null
+
+    /**
+     * Builds and shows the RealTime Leaderboards popup: a translucent
+     * backdrop + card with a title bar, close button, and a WebView
+     * loading RTL_URL — mirroring the #rtlpage / #rts iframe popup from
+     * the JS slither.io mod (Li() / Ji()).
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun showRealtimeLeaderboard() {
+        runOnUiThread {
+            if (rtlOverlay != null) return@runOnUiThread // already open
+
+            val backdrop = FrameLayout(this)
+            backdrop.setBackgroundColor(0xCC000000.toInt())
+
+            val card = LinearLayout(this)
+            card.orientation = LinearLayout.VERTICAL
+            card.setBackgroundColor(0xFF0D0E14.toInt())
+
+            // ── Title bar: label + Close button (== JS "Close" button) ──
+            val header = FrameLayout(this)
+            header.setBackgroundColor(0xFF161822.toInt())
+            header.setPadding(24, 16, 16, 16)
+
+            val title = TextView(this)
+            title.text = "Slither.io RealTime Status"
+            title.setTextColor(0xFF2BAA60.toInt())
+            title.textSize = 14f
+            title.gravity = Gravity.CENTER
+            header.addView(
+                title,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).also { it.gravity = Gravity.CENTER }
+            )
+
+            val closeBtn = Button(this)
+            closeBtn.text = "Close"
+            closeBtn.textSize = 12f
+            closeBtn.setPadding(24, 0, 24, 0)
+            closeBtn.setOnClickListener { hideRealtimeLeaderboard() }
+            header.addView(
+                closeBtn,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).also { it.gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+            )
+
+            // ── WebView — same destination as the JS iframe (#rts) ──────
+            val webView = WebView(this)
+            webView.setBackgroundColor(Color.WHITE)
+            webView.settings.javaScriptEnabled = true
+            webView.settings.domStorageEnabled = true
+            webView.webViewClient = WebViewClient()
+            webView.loadUrl(RTL_URL)
+            webView.id = RTL_WEBVIEW_ID
+
+            card.addView(
+                header,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            card.addView(
+                webView,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+                )
+            )
+
+            val cardParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            cardParams.setMargins(48, 48, 48, 48)
+            backdrop.addView(card, cardParams)
+
+            rtlOverlay = backdrop
+            addContentView(
+                backdrop,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+    }
+
+    /** Tears down the popup — == JS Ji() (clears iframe src, removes nodes). */
+    private fun hideRealtimeLeaderboard() {
+        runOnUiThread {
+            rtlOverlay?.let { overlay ->
+                overlay.findViewById<WebView>(RTL_WEBVIEW_ID)?.loadUrl("about:blank")
+                (overlay.parent as? ViewGroup)?.removeView(overlay)
+            }
+            rtlOverlay = null
         }
     }
 
@@ -87,6 +221,14 @@ class GameActivity : NativeActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK && rtlOverlay != null) {
+            hideRealtimeLeaderboard()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onDestroy() {
