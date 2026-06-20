@@ -77,6 +77,7 @@ typedef enum font_size {
   FONT_SIZE_SMALL,
   FONT_SIZE_REGULAR,
   FONT_SIZE_LARGE,
+  FONT_SIZE_TINY,
   NUM_FONT_SIZES
 } font_size;
 

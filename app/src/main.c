@@ -1,9 +1,12 @@
 #include "game/loop.h"
+#include "game/ui_overlay.h"
 #include "ui/skin_editor.h"
 #include "ui/title_screen.h"
 #include "ui/settings.h"
 #include "ui/key_buttons.h"
 #include "ui/viewport.h"
+#include "ui/chat.h"
+#include "network/ntl_client.h"
 #include "user.h"
 #ifdef ANDROID
 #include "android_jni.h"
@@ -47,6 +50,8 @@ void tinput(tenv* env) {
     env->config.running = false;
     save_user_settings(usrs);
   }
+
+  ntl_client_poll(env);
 
   /* F11 fullscreen is PC-only — no keyboard on Android */
 #ifndef ANDROID
@@ -105,10 +110,14 @@ void tinit(tenv* env) {
   game_data_init(env);
   ui_key_buttons_init(env);
   DLOG("tinit: game_data_init done");
+  ui_chat_init(env);
+  ntl_client_start(env);
   DLOG("tinit: complete");
 }
 
 void tdestroy(tenv* env) {
+  ntl_client_stop();
+  ui_chat_destroy(env);
   ui_key_buttons_destroy(env);
   game_data_destroy(env);
   ui_settings_destroy(env);
@@ -169,6 +178,15 @@ void trender(tenv* env) {
         break;
     }
     igEnd();
+
+    if (usr->gdata.curr_screen == PLAYING) {
+      ui_chat(env);
+      ui_online_players_hud(env);
+      ui_player_details_hud(env);
+    }
+    if (usr->gdata.curr_screen == TITLE_SCREEN) {
+      ui_ntl_panel(env);
+    }
 
     /* ═══════════════════════════════════════════════════════════════
        QUICK SETTINGS  –  gear button (top-right, always faded) +

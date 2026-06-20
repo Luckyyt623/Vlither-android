@@ -33,6 +33,7 @@ void imgui_init(tenv* env) {
   // io->MouseDrawCursor = true;
 
   for (int i = 0; i < NUM_FONT_SIZES; i++) {
+    float size = (i == FONT_SIZE_TINY) ? 13.0f : (20.0f + i * 4.0f);
     ImFontConfig icons_config = {.FontDataOwnedByAtlas = true,
                                  .OversampleH = 0,
                                  .OversampleV = 0,
@@ -41,35 +42,35 @@ void imgui_init(tenv* env) {
                                  .RasterizerMultiply = 1,
                                  .EllipsisChar = 0,
                                  .MergeMode = true,
-                                 .GlyphOffset = (ImVec2){0, 2 + i},
-                                 .GlyphMinAdvanceX = 26.0f + i * 6};
+                                 .GlyphOffset = (ImVec2){0, (i == FONT_SIZE_TINY) ? 1.0f : 2.0f + i},
+                                 .GlyphMinAdvanceX = (i == FONT_SIZE_TINY) ? 16.0f : (26.0f + i * 6)};
 
     usr->imgui_data.mono_font[i] = ImFontAtlas_AddFontFromFileTTF(
-        io->Fonts, "app/res/fonts/mono_regular.ttf", 20 + i * 4, NULL, NULL);
+        io->Fonts, "app/res/fonts/mono_regular.ttf", size, NULL, NULL);
 
     ImFontAtlas_AddFontFromFileTTF(
-        io->Fonts, "app/res/fonts/iconfont.ttf", 20 + i * 4, &icons_config,
+        io->Fonts, "app/res/fonts/iconfont.ttf", size, &icons_config,
         (const ImWchar[]){0xe900, 0xeaea, 0});
 
     usr->imgui_data.regular_font[i] = ImFontAtlas_AddFontFromFileTTF(
-        io->Fonts, "app/res/fonts/regular_regular.ttf", 20 + i * 4, NULL, NULL);
+        io->Fonts, "app/res/fonts/regular_regular.ttf", size, NULL, NULL);
 
     ImFontAtlas_AddFontFromFileTTF(
-        io->Fonts, "app/res/fonts/iconfont.ttf", 20 + i * 4, &icons_config,
+        io->Fonts, "app/res/fonts/iconfont.ttf", size, &icons_config,
         (const ImWchar[]){0xe900, 0xeaea, 0});
 
     usr->imgui_data.mono_font_bold[i] = ImFontAtlas_AddFontFromFileTTF(
-        io->Fonts, "app/res/fonts/mono_bold.ttf", 20 + i * 4, NULL, NULL);
+        io->Fonts, "app/res/fonts/mono_bold.ttf", size, NULL, NULL);
 
     ImFontAtlas_AddFontFromFileTTF(io->Fonts, "app/res/fonts/iconfont.ttf",
-                                   20 + i * 4, &icons_config,
+                                   size, &icons_config,
                                    (const ImWchar[]){0xe900, 0xeaea, 0});
 
     usr->imgui_data.regular_font_bold[i] = ImFontAtlas_AddFontFromFileTTF(
-        io->Fonts, "app/res/fonts/regular_bold.ttf", 20 + i * 4, NULL, NULL);
+        io->Fonts, "app/res/fonts/regular_bold.ttf", size, NULL, NULL);
 
     ImFontAtlas_AddFontFromFileTTF(io->Fonts, "app/res/fonts/iconfont.ttf",
-                                   20 + i * 4, &icons_config,
+                                   size, &icons_config,
                                    (const ImWchar[]){0xe900, 0xeaea, 0});
   }
   
@@ -139,4 +140,5 @@ void imgui_destroy() {
   igImplGlfw_Shutdown();
   igImplVulkan_Shutdown();
   igDestroyContext(NULL);
-}#endif /* !ANDROID */
+}
+#endif /* !ANDROID */

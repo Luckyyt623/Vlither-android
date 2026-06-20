@@ -1,7 +1,6 @@
 #include "title_screen.h"
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
-#include "../android_jni.h"
 #endif
 
 #include "../network/server.h"
@@ -105,10 +104,8 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 5 +
                   frame_height * 4);
-  if (igButton("\ue99e RealTime Leaderboards", (ImVec2){logo_size})) {
-#ifdef ANDROID
-    android_jni_open_realtime_leaderboard();
-#endif
+  if (igButton("NTL", (ImVec2){logo_size})) {
+    usr->gdata.show_ntl_panel = !usr->gdata.show_ntl_panel;
   }
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +

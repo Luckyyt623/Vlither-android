@@ -43,7 +43,7 @@ void imgui_init(tenv* env) {
     static const ImWchar icon_ranges[] = {0xe900, 0xeaea, 0};
 
     for (int i = 0; i < NUM_FONT_SIZES; i++) {
-        float size = 20.0f + i * 4.0f;
+        float size = (i == FONT_SIZE_TINY) ? 13.0f : (20.0f + i * 4.0f);
 
         ImFontConfig icons_cfg = {
             .FontDataOwnedByAtlas = true,
@@ -54,8 +54,8 @@ void imgui_init(tenv* env) {
             .RasterizerMultiply   = 1,
             .EllipsisChar         = 0,
             .MergeMode            = true,
-            .GlyphOffset          = (ImVec2){0, 2.0f + i},
-            .GlyphMinAdvanceX     = 26.0f + i * 6.0f,
+            .GlyphOffset          = (ImVec2){0, (i == FONT_SIZE_TINY) ? 1.0f : 2.0f + i},
+            .GlyphMinAdvanceX     = (i == FONT_SIZE_TINY) ? 16.0f : (26.0f + i * 6.0f),
         };
 
 #define LOAD_FONT(path, sz, cfg, ranges) do { \
