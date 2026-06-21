@@ -63,6 +63,6 @@ android {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.3.20"
     implementation "com.google.android.gms:play-services-ads:25.4.0"
 }
