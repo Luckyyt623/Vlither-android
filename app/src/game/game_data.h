@@ -70,7 +70,6 @@ typedef struct game_data {
     float tp_cursor_angle_deg; /* arrow rotation angle toward center       */
     bool  tp_tracking;         /* finger is currently on trackpad          */
     bool  tp_visible;          /* cursor should be drawn                   */
-    bool  tp_direction_found;  /* first significant swipe detected (>2px)  */
   } touch_ctrl;
 
   struct mg_mgr network_manager;

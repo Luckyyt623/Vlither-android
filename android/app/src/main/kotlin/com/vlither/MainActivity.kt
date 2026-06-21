@@ -76,6 +76,9 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
         buildUi()
         checkForUpdate()
+        AdManager.initialize(this)
+        AdManager.preload(this) { refreshUnlockUi() }
+        refreshUnlockUi()
     }
 
     override fun onResume() {
@@ -85,6 +88,7 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        refreshUnlockUi()
     }
 
     override fun onDestroy() {
@@ -210,14 +214,15 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).also { it.setMargins(0, 8, 0, 8) }
 
-        // Ads coming soon — disabled
+        // Watch ad to unlock — enabled once a rewarded ad is ready
         btnWatchAd = Button(this)
-        btnWatchAd.text = "🎬  Ads Coming Soon"
+        btnWatchAd.text = "🎬  Loading ad…"
         btnWatchAd.textSize = 15f
         btnWatchAd.setPadding(0, 20, 0, 20)
         btnWatchAd.layoutParams = btnParams
         btnWatchAd.isEnabled = false
         btnWatchAd.alpha = 0.4f
+        btnWatchAd.setOnClickListener { onWatchAdClicked() }
 
         // Hidden timer placeholder
         tvTimer = TextView(this)
@@ -297,6 +302,53 @@ class MainActivity : Activity() {
             android.widget.Toast.makeText(this,
                 "Failed to start game: ${e.message}",
                 android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ── Ads ────────────────────────────────────────────────────────────
+
+    private fun onWatchAdClicked() {
+        btnWatchAd.isEnabled = false
+        AdManager.show(
+            activity = this,
+            onReward = {
+                saveUnlock(this)
+                android.widget.Toast.makeText(this,
+                    "Unlocked for 24 hours!", android.widget.Toast.LENGTH_SHORT).show()
+                refreshUnlockUi()
+            },
+            onClosed = { refreshUnlockUi() },
+            onUnavailable = {
+                android.widget.Toast.makeText(this,
+                    "Ad isn't ready yet — try again in a moment.",
+                    android.widget.Toast.LENGTH_SHORT).show()
+                refreshUnlockUi()
+            }
+        )
+    }
+
+    /** Reflects current unlock status + ad availability on btnWatchAd / tvTimer. */
+    private fun refreshUnlockUi() {
+        val remaining = getUnlockRemainingMs(this)
+        if (remaining > 0) {
+            val totalMinutes = remaining / 60000L
+            val hours = totalMinutes / 60
+            val minutes = totalMinutes % 60
+            btnWatchAd.text = "✓  Unlocked"
+            btnWatchAd.isEnabled = false
+            btnWatchAd.alpha = 0.6f
+            tvTimer.visibility = View.VISIBLE
+            tvTimer.text = "Unlocked — ${hours}h ${minutes}m left"
+        } else if (AdManager.isReady()) {
+            btnWatchAd.text = "🎬  Watch Ad to Unlock"
+            btnWatchAd.isEnabled = true
+            btnWatchAd.alpha = 1.0f
+            tvTimer.visibility = View.GONE
+        } else {
+            btnWatchAd.text = "🎬  Loading ad…"
+            btnWatchAd.isEnabled = false
+            btnWatchAd.alpha = 0.4f
+            tvTimer.visibility = View.GONE
         }
     }
 }

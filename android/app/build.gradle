@@ -58,9 +58,11 @@ android {
 
     buildFeatures {
         prefab true
+        buildConfig true
     }
 }
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
+    implementation "com.google.android.gms:play-services-ads:25.4.0"
 }

@@ -80,9 +80,8 @@ void input(tenv* env) {
          * touch.down = movement finger (never the boost finger)
          * touch.boost_down = independent boost finger
          * ============================================================ */
-        #define NTL_FORBIDDEN_R  25.0f   /* dead-zone radius at centre (JS: 25)  */
-        #define NTL_SPAWN_R      50.0f   /* spawn offset from centre  (JS: 50)   */
-        #define NTL_CURSOR_SPEED  1.8f   /* delta multiplier          (JS: 1.8)  */
+        #define NTL_FORBIDDEN_R  23.0f   /* dead-zone radius at centre   */
+        #define NTL_SPAWN_R      44.0f   /* spawn offset from centre     */
         #define NTL_VEL_DECAY    0.85f
         #define NTL_VEL_WEIGHT   0.15f
 
@@ -101,16 +100,28 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
 
-            /* Spawn cursor at spawnRadius from last disappear angle */
-            float ang = gdata->touch_ctrl.tp_disappear_angle;
+            /* Spawn cursor at spawnRadius from the snake's CURRENT live
+             * heading (me->eang) — NOT tp_disappear_angle.
+             *
+             * tp_disappear_angle is stale across round boundaries: it is
+             * never reset by game_data_reset(), so after a death/restart
+             * it still holds whatever direction you were facing in the
+             * *previous* round, which has nothing to do with this round's
+             * (server-assigned) starting heading. me->eang, by contrast,
+             * is always the snake's real current heading — correct at
+             * round start and correctly tracked afterward — so spawning
+             * here is a guaranteed no-op for direction: the arrow
+             * reappears already pointing the way the snake is actually
+             * going, and the line below recomputes that exact same angle
+             * instead of snapping to some unrelated old value. */
+            float ang = me->eang;
             gdata->touch_ctrl.tp_cursor_x      = cx + NTL_SPAWN_R * cosf(ang);
             gdata->touch_ctrl.tp_cursor_y      = cy + NTL_SPAWN_R * sinf(ang);
             gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
             gdata->touch_ctrl.tp_prev_cursor_y = gdata->touch_ctrl.tp_cursor_y;
-            gdata->touch_ctrl.tp_vx              = 0.0f;
-            gdata->touch_ctrl.tp_vy              = 0.0f;
-            gdata->touch_ctrl.tp_visible         = true;
-            gdata->touch_ctrl.tp_direction_found = false; /* JS: directionAngle = null */
+            gdata->touch_ctrl.tp_vx            = 0.0f;
+            gdata->touch_ctrl.tp_vy            = 0.0f;
+            gdata->touch_ctrl.tp_visible       = true;
           } else {
             /* ---- Touch move ---- */
             float dx = tx - gdata->touch_ctrl.tp_last_touch_x;
@@ -118,21 +129,9 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
 
-            /* JS: on first movement >2px, re-spawn cursor at the actual swipe
-             * direction angle (mirrors JS resetCursorWithDirection(directionAngle)) */
-            if (!gdata->touch_ctrl.tp_direction_found &&
-                (fabsf(dx) > 2.0f || fabsf(dy) > 2.0f)) {
-              float dir_ang = atan2f(dy, dx);
-              gdata->touch_ctrl.tp_cursor_x      = cx + NTL_SPAWN_R * cosf(dir_ang);
-              gdata->touch_ctrl.tp_cursor_y      = cy + NTL_SPAWN_R * sinf(dir_ang);
-              gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
-              gdata->touch_ctrl.tp_prev_cursor_y = gdata->touch_ctrl.tp_cursor_y;
-              gdata->touch_ctrl.tp_direction_found = true;
-            }
-
-            /* Move cursor by delta * NTL_CURSOR_SPEED (JS: 1.8x) */
-            float nx = gdata->touch_ctrl.tp_cursor_x + dx * NTL_CURSOR_SPEED;
-            float ny = gdata->touch_ctrl.tp_cursor_y + dy * NTL_CURSOR_SPEED;
+            /* Move cursor by delta (speed = 1.0, tune if needed) */
+            float nx = gdata->touch_ctrl.tp_cursor_x + dx;
+            float ny = gdata->touch_ctrl.tp_cursor_y + dy;
 
             /* Clamp to screen */
             nx = GLM_MAX(0.0f, GLM_MIN(sw, nx));
@@ -168,7 +167,10 @@ void input(tenv* env) {
                      cx  - gdata->touch_ctrl.tp_cursor_x) *
               (180.0f / PI);
 
-          /* Use cursor position as direction vector for snake */
+          /* Use cursor position as direction vector for snake.
+           * On the very first contact frame this is a no-op: the cursor
+           * was just spawned at (NTL_SPAWN_R, me->eang) above, so this
+           * recomputes the exact same angle the snake already had. */
           xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
           ym = (int)(gdata->touch_ctrl.tp_cursor_y - cy);
 
@@ -178,9 +180,8 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_disappear_angle =
                 atan2f(gdata->touch_ctrl.tp_cursor_y - cy,
                        gdata->touch_ctrl.tp_cursor_x - cx);
-            gdata->touch_ctrl.tp_tracking        = false;
-            gdata->touch_ctrl.tp_visible         = false;
-            gdata->touch_ctrl.tp_direction_found = false;
+            gdata->touch_ctrl.tp_tracking = false;
+            gdata->touch_ctrl.tp_visible  = false;
           }
           /* No active touch – keep last heading */
           xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
