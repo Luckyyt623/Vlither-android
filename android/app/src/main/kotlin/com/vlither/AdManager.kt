@@ -12,9 +12,12 @@ import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.OnUserEarnedRewardListener
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import com.google.android.ump.ConsentInformation
+import com.google.android.ump.ConsentRequestParameters
+import com.google.android.ump.UserMessagingPlatform
 
 /**
- * Wraps all AdMob rewarded-ad logic in one place.
+ * Wraps AdMob rewarded-ad logic + the GDPR/UK consent flow (UMP SDK) in one place.
  *
  * ── BEFORE YOU PUBLISH TO THE PLAY STORE ───────────────────────────────
  * REWARDED_AD_UNIT_ID currently resolves to Google's official TEST ad unit
@@ -22,11 +25,13 @@ import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
  * is completely safe to ship by accident — it just earns no real money.
  *
  * When you're actually ready to publish:
- *   1. Open the AdMob console -> Apps -> Vlither -> Ad units -> Rewarded.
- *   2. Create a rewarded ad unit there (if you haven't already).
- *   3. Paste that ad unit ID into REAL_REWARDED_AD_UNIT_ID below.
- *   4. Build a release build and confirm the warning in verifyNotShipping...
- *      below no longer fires (check Logcat for tag "VlitherAds").
+ *   1. AdMob console -> Apps -> Vlither -> Ad units -> Rewarded -> create one.
+ *   2. Paste that ad unit ID into REAL_REWARDED_AD_UNIT_ID below.
+ *   3. AdMob console -> Privacy & messaging -> create + publish a GDPR
+ *      message (EEA/UK) — the UMP SDK below will only show a real form
+ *      once that exists; until then it just no-ops for those users.
+ *   4. Build a release build and confirm the warning in
+ *      verifyNotShippingTestAdsInRelease no longer fires (Logcat: "VlitherAds").
  * ────────────────────────────────────────────────────────────────────────
  */
 object AdManager {
@@ -37,30 +42,80 @@ object AdManager {
     private const val TEST_REWARDED_AD_UNIT_ID =
         "ca-app-pub-3940256099942544/5224354917"
 
-    // TODO: put your REAL rewarded ad unit ID here when you're ready to
-    // publish. Leave it blank until then — leaving it blank is what keeps
-    // you safely on test ads.
-    private const val REAL_REWARDED_AD_UNIT_ID = ""
+    // Your real rewarded ad unit ID (AdMob console -> Vlither -> Ad units).
+    // Leave this set — it's what takes you off test ads.
+    private const val REAL_REWARDED_AD_UNIT_ID = "ca-app-pub-9185462985805279/2901530505"
 
     private val rewardedAdUnitId: String
         get() = REAL_REWARDED_AD_UNIT_ID.ifBlank { TEST_REWARDED_AD_UNIT_ID }
 
     private var rewardedAd: RewardedAd? = null
     private var isLoading = false
-    private var initialized = false
+    private var mobileAdsStarted = false
+    private var consentInformation: ConsentInformation? = null
 
-    /** Call once, early (e.g. MainActivity.onCreate). Safe to call more than once. */
-    fun initialize(context: Context) {
-        if (initialized) return
-        initialized = true
+    /**
+     * Call once, early (e.g. MainActivity.onCreate). Gathers/refreshes consent
+     * first (required every launch per Google's UMP guidance), then starts the
+     * Mobile Ads SDK and invokes [onReady] only once ads can actually be
+     * requested. Safe to call more than once.
+     */
+    fun initialize(activity: Activity, onReady: () -> Unit) {
+        verifyNotShippingTestAdsInRelease(activity)
 
-        verifyNotShippingTestAdsInRelease(context)
+        val info = UserMessagingPlatform.getConsentInformation(activity)
+        consentInformation = info
 
+        val params = ConsentRequestParameters.Builder().build()
+        info.requestConsentInfoUpdate(
+            activity,
+            params,
+            {
+                UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { formError ->
+                    if (formError != null) {
+                        Log.w(TAG, "Consent form error (${formError.errorCode}): ${formError.message}")
+                    }
+                    if (info.canRequestAds()) {
+                        startMobileAdsSdk(activity, onReady)
+                    } else {
+                        Log.w(TAG, "Ads not requestable after consent flow — skipping ad init this session.")
+                    }
+                }
+            },
+            { requestError ->
+                Log.w(TAG, "Consent info update failed: ${requestError.message}")
+                // Fall back to a previously cached consent decision, if any,
+                // so a transient network hiccup doesn't permanently block ads.
+                if (info.canRequestAds()) {
+                    startMobileAdsSdk(activity, onReady)
+                }
+            }
+        )
+    }
+
+    private fun startMobileAdsSdk(context: Context, onReady: () -> Unit) {
+        if (mobileAdsStarted) { onReady(); return }
+        mobileAdsStarted = true
         Thread {
             MobileAds.initialize(context.applicationContext) { status ->
                 Log.d(TAG, "MobileAds SDK initialized: $status")
             }
         }.start()
+        onReady()
+    }
+
+    /** Whether the "Privacy Options" entry point must be shown (EEA/UK users only). */
+    fun isPrivacyOptionsRequired(): Boolean =
+        consentInformation?.privacyOptionsRequirementStatus ==
+            ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+
+    /** Lets the user revisit/change their consent choice later. */
+    fun showPrivacyOptionsForm(activity: Activity) {
+        UserMessagingPlatform.showPrivacyOptionsForm(activity) { formError ->
+            if (formError != null) {
+                Log.w(TAG, "Privacy options form error: ${formError.message}")
+            }
+        }
     }
 
     /** Kick off (or re-kick off) loading the next rewarded ad in the background. */
