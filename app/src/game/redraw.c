@@ -1,7 +1,6 @@
 #include "redraw.h"
 
 #include "../user.h"
-#include "../network/ntl_client.h"
 
 void lerp_minimap_float(float* dst, const uint8_t* src, int mmsz, float alpha) {
   int stride = MAX_MINIMAP_SIZE;
@@ -218,27 +217,10 @@ void redraw(tenv* env) {
                     1;
         score = GLM_MIN(GLM_MAX(score, 0), 999999);
         double score_rep = score / 1000.0;
-        bool is_teammate = false;
-        int ntl_count = 0;
-        ntl_player* ntl_players = ntl_get_players(&ntl_count);
-        for (int p_idx = 0; p_idx < ntl_count; p_idx++) {
-          if (ntl_players[p_idx].sid[0] != '\0' && atoi(ntl_players[p_idx].sid) == o->id) {
-            is_teammate = true;
-            break;
-          }
-        }
-
-        char display_nk[MAX_NICKNAME_LEN + 16] = {0};
-        if (is_teammate) {
-          sprintf(display_nk, "\u2605 %s", o->nk);
-        } else {
-          strcpy(display_nk, o->nk);
-        }
-
-        char nk_label_buff[MAX_NICKNAME_LEN + 32] = {0};
+        char nk_label_buff[MAX_NICKNAME_LEN + 1 + 7 + 1] = {0};
         char score_rep_str[9] = {0};
         sprintf(score_rep_str, " %.1fK", score_rep);
-        sprintf(nk_label_buff, "%s%s", display_nk, score_rep_str);
+        sprintf(nk_label_buff, "%s%s", o->nk, score_rep_str);
 
         if (o->id != gdata->data.snake_id) {
           float ntx = o->xx + o->fx;
@@ -246,7 +228,7 @@ void redraw(tenv* env) {
 
           ImVec2 tsize;
           ImVec2 nsize;
-          igCalcTextSize(&nsize, display_nk, NULL, false, -1);
+          igCalcTextSize(&nsize, o->nk, NULL, false, -1);
           igCalcTextSize(&tsize, nk_label_buff, NULL, false, -1);
 
           ntx = mww2 + (ntx - gdata->data.view_xx) * gdata->data.gsc;
@@ -257,14 +239,9 @@ void redraw(tenv* env) {
               (o->cusk ? o->cusk_data[0] : gdata->default_skins[o->cv][1]);
 
           vec3 ncolor;
+          glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, mode->player_names_outline ? 0.7f : 0.6f, ncolor);
           vec3 lcolor;
-          if (is_teammate) {
-            ncolor[0] = 0.0f; ncolor[1] = 0.9f; ncolor[2] = 0.6f;
-            lcolor[0] = 0.2f; lcolor[1] = 1.0f; lcolor[2] = 0.7f;
-          } else {
-            glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, mode->player_names_outline ? 0.7f : 0.6f, ncolor);
-            glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, mode->player_names_outline ? 0.8f : 0.7f, lcolor);
-          }
+          glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, mode->player_names_outline ? 0.8f : 0.7f, lcolor);
 
           ntx = ntx - (usrs->snake_scores ? tsize.x : nsize.x) * 0.5f;
           nty = nty + 32 + 11 * o->sc * gdata->data.gsc;
@@ -275,7 +252,7 @@ void redraw(tenv* env) {
                 if (x == 0 && y == 0) continue;
                 ImDrawList_AddText_Vec2(
                     igGetWindowDrawList(), (ImVec2){ntx + x, nty + y},
-                    igColorConvertFloat4ToU32((ImVec4){0, 0, 0, a}), display_nk,
+                    igColorConvertFloat4ToU32((ImVec4){0, 0, 0, a}), o->nk,
                     NULL);
               }
             }
@@ -297,7 +274,7 @@ void redraw(tenv* env) {
               igGetWindowDrawList(), (ImVec2){ntx, nty},
               igColorConvertFloat4ToU32(
                   (ImVec4){ncolor[0], ncolor[1], ncolor[2], mode->player_names_outline ? a : 0.5f * a}),
-              display_nk, NULL);
+              o->nk, NULL);
 
           if (usrs->snake_scores) {
             igPushFont(

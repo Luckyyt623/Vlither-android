@@ -5,7 +5,6 @@
 #include "input.h"
 
 #include "../user.h"
-#include "../ui/chat.h"
 
 void input(tenv* env) {
   tuser_data* usr = env->usr;
@@ -13,7 +12,6 @@ void input(tenv* env) {
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
   struct mg_connection* connection = gdata->connection;
-  bool typing = chat_is_typing();
 
   if (!gdata->data.wfpr) {
     if (gdata->data.ctm - gdata->data.last_ping_mtm > 250) {
@@ -34,12 +32,10 @@ void input(tenv* env) {
       xm = gdata->bot.output.xm;
       ym = gdata->bot.output.ym;
     } else {
-      if (!typing) {
-        if (twindow_key_down(env->wnd, GLFW_KEY_LEFT))
-          gdata->data.kd_l_frb += gdata->data.vfrb;
-        if (twindow_key_down(env->wnd, GLFW_KEY_RIGHT))
-          gdata->data.kd_r_frb += gdata->data.vfrb;
-      }
+      if (twindow_key_down(env->wnd, GLFW_KEY_LEFT))
+        gdata->data.kd_l_frb += gdata->data.vfrb;
+      if (twindow_key_down(env->wnd, GLFW_KEY_RIGHT))
+        gdata->data.kd_r_frb += gdata->data.vfrb;
 
       if (gdata->data.kd_l_frb > 0 || gdata->data.kd_r_frb > 0)
         if (gdata->data.ctm - gdata->data.lkstm > 150) {
@@ -84,8 +80,9 @@ void input(tenv* env) {
          * touch.down = movement finger (never the boost finger)
          * touch.boost_down = independent boost finger
          * ============================================================ */
-        #define NTL_FORBIDDEN_R  23.0f   /* dead-zone radius at centre   */
-        #define NTL_SPAWN_R      44.0f   /* spawn offset from centre     */
+        #define NTL_FORBIDDEN_R  25.0f   /* dead-zone radius at centre (JS: 25)  */
+        #define NTL_SPAWN_R      50.0f   /* spawn offset from centre  (JS: 50)   */
+        #define NTL_CURSOR_SPEED  1.8f   /* delta multiplier          (JS: 1.8)  */
         #define NTL_VEL_DECAY    0.85f
         #define NTL_VEL_WEIGHT   0.15f
 
@@ -110,9 +107,10 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_cursor_y      = cy + NTL_SPAWN_R * sinf(ang);
             gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
             gdata->touch_ctrl.tp_prev_cursor_y = gdata->touch_ctrl.tp_cursor_y;
-            gdata->touch_ctrl.tp_vx            = 0.0f;
-            gdata->touch_ctrl.tp_vy            = 0.0f;
-            gdata->touch_ctrl.tp_visible       = true;
+            gdata->touch_ctrl.tp_vx              = 0.0f;
+            gdata->touch_ctrl.tp_vy              = 0.0f;
+            gdata->touch_ctrl.tp_visible         = true;
+            gdata->touch_ctrl.tp_direction_found = false; /* JS: directionAngle = null */
           } else {
             /* ---- Touch move ---- */
             float dx = tx - gdata->touch_ctrl.tp_last_touch_x;
@@ -120,9 +118,21 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
 
-            /* Move cursor by delta (speed = 1.0, tune if needed) */
-            float nx = gdata->touch_ctrl.tp_cursor_x + dx;
-            float ny = gdata->touch_ctrl.tp_cursor_y + dy;
+            /* JS: on first movement >2px, re-spawn cursor at the actual swipe
+             * direction angle (mirrors JS resetCursorWithDirection(directionAngle)) */
+            if (!gdata->touch_ctrl.tp_direction_found &&
+                (fabsf(dx) > 2.0f || fabsf(dy) > 2.0f)) {
+              float dir_ang = atan2f(dy, dx);
+              gdata->touch_ctrl.tp_cursor_x      = cx + NTL_SPAWN_R * cosf(dir_ang);
+              gdata->touch_ctrl.tp_cursor_y      = cy + NTL_SPAWN_R * sinf(dir_ang);
+              gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
+              gdata->touch_ctrl.tp_prev_cursor_y = gdata->touch_ctrl.tp_cursor_y;
+              gdata->touch_ctrl.tp_direction_found = true;
+            }
+
+            /* Move cursor by delta * NTL_CURSOR_SPEED (JS: 1.8x) */
+            float nx = gdata->touch_ctrl.tp_cursor_x + dx * NTL_CURSOR_SPEED;
+            float ny = gdata->touch_ctrl.tp_cursor_y + dy * NTL_CURSOR_SPEED;
 
             /* Clamp to screen */
             nx = GLM_MAX(0.0f, GLM_MIN(sw, nx));
@@ -168,8 +178,9 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_disappear_angle =
                 atan2f(gdata->touch_ctrl.tp_cursor_y - cy,
                        gdata->touch_ctrl.tp_cursor_x - cx);
-            gdata->touch_ctrl.tp_tracking = false;
-            gdata->touch_ctrl.tp_visible  = false;
+            gdata->touch_ctrl.tp_tracking        = false;
+            gdata->touch_ctrl.tp_visible         = false;
+            gdata->touch_ctrl.tp_direction_found = false;
           }
           /* No active touch – keep last heading */
           xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
@@ -207,10 +218,9 @@ void input(tenv* env) {
     /* Boost fires only when the finger is in the right 20 % of the screen */
     gdata->data.wmd = env->wnd->touch.boost_down || gdata->bot.output.accel;
 #else
-    gdata->data.wmd = (!typing &&
-                       (twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
-                        twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
-                        twindow_key_down(env->wnd, GLFW_KEY_UP))) ||
+    gdata->data.wmd = twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
+                      twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
+                      twindow_key_down(env->wnd, GLFW_KEY_UP) ||
                       gdata->bot.output.accel;
 #endif
 
@@ -247,16 +257,14 @@ void input(tenv* env) {
     }
   }
 
-  if (!typing) {
-    gdata->data.ms_zoom *= expf(env->ms->dwheel * usrs->zoom_step);
+  gdata->data.ms_zoom *= expf(env->ms->dwheel * usrs->zoom_step);
 
-    if (tkeyboard_key_pressed(env->kb, GLFW_KEY_N) ||
-        (GLFW_KEY_N < 512 && gdata->data.fake_key_pressed[GLFW_KEY_N]))
-      gdata->data.ms_zoom *= expf(1 * usrs->zoom_step);
-    else if (tkeyboard_key_pressed(env->kb, GLFW_KEY_M) ||
-             (GLFW_KEY_M < 512 && gdata->data.fake_key_pressed[GLFW_KEY_M]))
-      gdata->data.ms_zoom *= expf(-1 * usrs->zoom_step);
-  }
+  if (tkeyboard_key_pressed(env->kb, GLFW_KEY_N) ||
+      (GLFW_KEY_N < 512 && gdata->data.fake_key_pressed[GLFW_KEY_N]))
+    gdata->data.ms_zoom *= expf(1 * usrs->zoom_step);
+  else if (tkeyboard_key_pressed(env->kb, GLFW_KEY_M) ||
+           (GLFW_KEY_M < 512 && gdata->data.fake_key_pressed[GLFW_KEY_M]))
+    gdata->data.ms_zoom *= expf(-1 * usrs->zoom_step);
 
   gdata->data.ms_zoom =
       GLM_MAX(MAX_ZOOM_OUT, GLM_MIN(gdata->data.ms_zoom, MAX_ZOOM_IN));
@@ -265,7 +273,7 @@ void input(tenv* env) {
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;
 
-  for (int i = 0; i < NUM_HOTKEYS && !typing; i++) {
+  for (int i = 0; i < NUM_HOTKEYS; i++) {
     hotkey* hk = usrs->hotkeys + i;
     bool real_down    = twindow_key_down(env->wnd, hk->key);
     bool real_pressed = tkeyboard_key_pressed(env->kb, hk->key);

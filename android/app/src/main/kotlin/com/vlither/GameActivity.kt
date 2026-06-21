@@ -2,7 +2,6 @@ package com.vlither
 
 import android.app.Activity
 import android.app.NativeActivity
-import android.content.Context
 import android.os.Bundle
 import android.os.Build
 import android.util.Log
