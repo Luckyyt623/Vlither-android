@@ -37,9 +37,19 @@ jobs:
       - name: Set up signing keystore
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ADMOB_AD_UNIT_ID: ${{ secrets.ADMOB_AD_UNIT_ID }}
         run: |
           echo "$KEYSTORE_B64" | base64 -d > android/app/vlither.keystore
-          echo "Keystore ready"
+          cat > android/app/keystore.properties <<EOF
+          STORE_PASSWORD=$STORE_PASSWORD
+          KEY_ALIAS=$KEY_ALIAS
+          KEY_PASSWORD=$KEY_PASSWORD
+          ADMOB_AD_UNIT_ID=$ADMOB_AD_UNIT_ID
+          EOF
+          echo "Keystore + properties ready"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -107,7 +117,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          REPO="Lucky63-dot/Vlither_android"
+          REPO="Luckyyt623/Vlither_android"
           TAG="v${VERSION}"
           RELEASE_NAME="Vlither v${VERSION}"
 

@@ -1,0 +1,27 @@
+# ── Secrets — never commit these ────────────────────────────────────────
+android/app/keystore.properties
+android/local.properties
+*.keystore
+*.jks
+
+# ── Android / Gradle build outputs ──────────────────────────────────────
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/*.iml
+android/captures/
+android/.cxx/
+android/app/.cxx/
+android/app/src/main/assets/shaders/
+android/app/src/main/assets/fonts/
+android/app/src/main/assets/textures/
+
+# ── Native build artifacts ───────────────────────────────────────────────
+app/res/shaders/bin/
+*.o
+*.spv
+
+# ── OS / editor cruft ────────────────────────────────────────────────────
+.DS_Store
+*.swp

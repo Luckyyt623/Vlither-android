@@ -78,8 +78,9 @@ class MainActivity : Activity() {
         buildUi()
         checkForUpdate()
         refreshUnlockUi()
+        AdManager.setStatusListener { mainHandler.post { refreshUnlockUi() } }
         AdManager.initialize(this) {
-            AdManager.preload(this) { refreshUnlockUi() }
+            AdManager.preload(this)
             mainHandler.post { tvPrivacy.visibility = if (AdManager.isPrivacyOptionsRequired()) View.VISIBLE else View.GONE }
         }
     }

@@ -2,6 +2,8 @@ package com.vlither
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import com.google.android.gms.ads.AdError
@@ -19,20 +21,14 @@ import com.google.android.ump.UserMessagingPlatform
 /**
  * Wraps AdMob rewarded-ad logic + the GDPR/UK consent flow (UMP SDK) in one place.
  *
- * ── BEFORE YOU PUBLISH TO THE PLAY STORE ───────────────────────────────
- * REWARDED_AD_UNIT_ID currently resolves to Google's official TEST ad unit
- * ID. It always serves a sample ad, is not tied to any AdMob account, and
- * is completely safe to ship by accident — it just earns no real money.
+ * The real ad unit ID lives in android/app/keystore.properties (gitignored,
+ * local-only) or the ADMOB_AD_UNIT_ID GitHub Actions secret in CI — never
+ * hardcoded here. If neither is set, this automatically falls back to
+ * Google's test ad unit ID, so a build with no secret configured is always
+ * safe to run.
  *
- * When you're actually ready to publish:
- *   1. AdMob console -> Apps -> Vlither -> Ad units -> Rewarded -> create one.
- *   2. Paste that ad unit ID into REAL_REWARDED_AD_UNIT_ID below.
- *   3. AdMob console -> Privacy & messaging -> create + publish a GDPR
- *      message (EEA/UK) — the UMP SDK below will only show a real form
- *      once that exists; until then it just no-ops for those users.
- *   4. Build a release build and confirm the warning in
- *      verifyNotShippingTestAdsInRelease no longer fires (Logcat: "VlitherAds").
- * ────────────────────────────────────────────────────────────────────────
+ * A brand-new ad unit can take up to ~1 hour to start filling — failed
+ * loads during that window are expected and will auto-retry below.
  */
 object AdManager {
     private const val TAG = "VlitherAds"
@@ -42,17 +38,29 @@ object AdManager {
     private const val TEST_REWARDED_AD_UNIT_ID =
         "ca-app-pub-3940256099942544/5224354917"
 
-    // Your real rewarded ad unit ID (AdMob console -> Vlither -> Ad units).
-    // Leave this set — it's what takes you off test ads.
-    private const val REAL_REWARDED_AD_UNIT_ID = "ca-app-pub-9185462985805279/2901530505"
-
+    // Real rewarded ad unit ID — comes from BuildConfig, which Gradle fills in
+    // from android/app/keystore.properties (gitignored) or, in CI, from the
+    // ADMOB_AD_UNIT_ID repo secret. Never hardcoded in source.
     private val rewardedAdUnitId: String
-        get() = REAL_REWARDED_AD_UNIT_ID.ifBlank { TEST_REWARDED_AD_UNIT_ID }
+        get() = BuildConfig.ADMOB_AD_UNIT_ID.ifBlank { TEST_REWARDED_AD_UNIT_ID }
 
     private var rewardedAd: RewardedAd? = null
     private var isLoading = false
     private var mobileAdsStarted = false
     private var consentInformation: ConsentInformation? = null
+
+    private var statusListener: (() -> Unit)? = null
+    private var retryAttempt = 0
+    private val retryHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Called whenever ad status changes — load succeeded, load failed
+     * (about to retry), shown, or dismissed. Wire this to your UI refresh
+     * (e.g. MainActivity calls this once in onCreate with refreshUnlockUi).
+     */
+    fun setStatusListener(listener: () -> Unit) {
+        statusListener = listener
+    }
 
     /**
      * Call once, early (e.g. MainActivity.onCreate). Gathers/refreshes consent
@@ -118,34 +126,47 @@ object AdManager {
         }
     }
 
-    /** Kick off (or re-kick off) loading the next rewarded ad in the background. */
-    fun preload(context: Context, onLoaded: (() -> Unit)? = null) {
-        if (rewardedAd != null) {
-            onLoaded?.invoke()
-            return
-        }
-        if (isLoading) return
+    /**
+     * Kick off (or re-kick off) loading the next rewarded ad in the background.
+     * On failure this automatically retries with backoff (1/2/4/8 min, capped
+     * at 5 min) — important for a brand-new ad unit that can take up to ~1hr
+     * to start filling. Always uses applicationContext internally so a long
+     * retry chain never holds on to a destroyed Activity.
+     */
+    fun preload(context: Context) {
+        if (rewardedAd != null || isLoading) return
         isLoading = true
+        val appContext = context.applicationContext
 
         RewardedAd.load(
-            context,
+            appContext,
             rewardedAdUnitId,
             AdRequest.Builder().build(),
             object : RewardedAdLoadCallback() {
                 override fun onAdLoaded(ad: RewardedAd) {
                     isLoading = false
+                    retryAttempt = 0
                     rewardedAd = ad
                     Log.d(TAG, "Rewarded ad loaded.")
-                    onLoaded?.invoke()
+                    statusListener?.invoke()
                 }
 
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     isLoading = false
                     rewardedAd = null
-                    Log.w(TAG, "Rewarded ad failed to load: ${error.message}")
+                    Log.w(TAG, "Rewarded ad failed to load (code ${error.code}): ${error.message}")
+                    statusListener?.invoke()
+                    scheduleRetry(appContext)
                 }
             }
         )
+    }
+
+    private fun scheduleRetry(appContext: Context) {
+        retryAttempt++
+        val delayMs = (60_000L * (1L shl minOf(retryAttempt, 3))).coerceAtMost(300_000L)
+        Log.d(TAG, "Retrying ad load in ${delayMs / 1000}s (attempt $retryAttempt)")
+        retryHandler.postDelayed({ preload(appContext) }, delayMs)
     }
 
     fun isReady(): Boolean = rewardedAd != null
@@ -198,8 +219,8 @@ object AdManager {
     private fun verifyNotShippingTestAdsInRelease(context: Context) {
         if (!BuildConfig.DEBUG && rewardedAdUnitId == TEST_REWARDED_AD_UNIT_ID) {
             val msg = "WARNING: release build is still using the TEST ad " +
-                "unit ID. Set REAL_REWARDED_AD_UNIT_ID in AdManager.kt " +
-                "before publishing to the Play Store."
+                "unit ID. Set ADMOB_AD_UNIT_ID in keystore.properties (or " +
+                "the CI secret) before publishing to the Play Store."
             Log.e(TAG, msg)
             try {
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
