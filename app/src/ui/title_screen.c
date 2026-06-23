@@ -104,6 +104,12 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 5 +
                   frame_height * 4);
+  if (igButton("NTL", (ImVec2){logo_size})) {
+    usr->gdata.show_ntl_panel = !usr->gdata.show_ntl_panel;
+  }
+  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
+                  frame_height * 5);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);
@@ -112,8 +118,8 @@ void ui_title_screen(tenv* env) {
 #ifdef ANDROID
   /* ── Crash warning note ─────────────────────────────────────────── */
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
-                  frame_height * 5);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
+                  frame_height * 6);
   igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){1.0f, 0.75f, 0.25f, 0.85f});
   igPushFont(usr->imgui_data.regular_font[FONT_SIZE_SMALL],
              usr->imgui_data.regular_font[FONT_SIZE_SMALL]->LegacySize);

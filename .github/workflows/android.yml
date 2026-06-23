@@ -117,7 +117,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          REPO="Luckyyt623/Vlither_android"
+          REPO="Lucky63-dot/apk"
           TAG="v${VERSION}"
           RELEASE_NAME="Vlither v${VERSION}"
 
