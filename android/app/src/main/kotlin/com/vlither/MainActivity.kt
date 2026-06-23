@@ -25,9 +25,11 @@ class MainActivity : Activity() {
     companion object {
         private const val TAG               = "VlitherMain"
         private const val CURRENT_VERSION   = "3.2"
-        private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Arrow-logic-/main/version.txt"
-        private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Arrow-logic-/main/download_url.txt"
+        private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
+        private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
+
+        private const val ADSTERRA_UNLOCK_PAGE_URL = "https://vlither-ads.onrender.com"
 
         fun getUnlockRemainingMs(context: Context): Long {
             val file = File(context.filesDir, UNLOCK_FILENAME)
@@ -56,6 +58,7 @@ class MainActivity : Activity() {
     private lateinit var btnWatchAd:    Button
     private lateinit var tvStatus:      TextView
     private lateinit var tvTimer:       TextView
+    private lateinit var tvPrivacy:     TextView
     private lateinit var layoutUpdate:  LinearLayout  // update panel, hidden by default
     private lateinit var tvUpdateMsg:   TextView
     private lateinit var btnDownload:   Button
@@ -76,6 +79,29 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
         buildUi()
         checkForUpdate()
+        handleUnlockDeepLink(intent)
+        refreshUnlockUi()
+        AdManager.setStatusListener { mainHandler.post { refreshUnlockUi() } }
+        AdManager.initialize(this) {
+            AdManager.preload(this)
+            mainHandler.post { tvPrivacy.visibility = if (AdManager.isPrivacyOptionsRequired()) View.VISIBLE else View.GONE }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleUnlockDeepLink(intent)
+    }
+
+    /** Catches vlither://unlock coming back from the browser after the ad page's timer finishes. */
+    private fun handleUnlockDeepLink(intent: Intent?) {
+        val data = intent?.data
+        if (data != null && data.scheme == "vlither" && data.host == "unlock") {
+            saveUnlock(this)
+            android.widget.Toast.makeText(this, "Unlocked for 24 hours!", android.widget.Toast.LENGTH_SHORT).show()
+            refreshUnlockUi()
+        }
     }
 
     override fun onResume() {
@@ -85,6 +111,7 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        refreshUnlockUi()
     }
 
     override fun onDestroy() {
@@ -210,26 +237,37 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).also { it.setMargins(0, 8, 0, 8) }
 
-        // Ads coming soon — disabled
+        // Watch ad to unlock — opens the Adsterra unlock page in the browser
         btnWatchAd = Button(this)
-        btnWatchAd.text = "🎬  Ads Coming Soon"
+        btnWatchAd.text = "🌐  Watch Ad to Unlock"
         btnWatchAd.textSize = 15f
         btnWatchAd.setPadding(0, 20, 0, 20)
         btnWatchAd.layoutParams = btnParams
-        btnWatchAd.isEnabled = false
-        btnWatchAd.alpha = 0.4f
+        btnWatchAd.isEnabled = true
+        btnWatchAd.alpha = 1.0f
+        btnWatchAd.setOnClickListener { onWatchAdClicked() }
 
         // Hidden timer placeholder
         tvTimer = TextView(this)
         tvTimer.visibility = View.GONE
 
-        // Play button — always enabled
+        // Play button — gated behind an active unlock (must watch an ad first)
         btnPlay = Button(this)
         btnPlay.text = "▶  PLAY"
         btnPlay.textSize = 18f
         btnPlay.setPadding(0, 28, 0, 28)
         btnPlay.layoutParams = btnParams
-        btnPlay.setOnClickListener { launchGame() }
+        btnPlay.setOnClickListener { onPlayClicked() }
+
+        // Privacy Options — only shown if UMP says it's required (EEA/UK)
+        tvPrivacy = TextView(this)
+        tvPrivacy.text = "Privacy Options"
+        tvPrivacy.textSize = 12f
+        tvPrivacy.setTextColor(0xFF888888.toInt())
+        tvPrivacy.gravity = android.view.Gravity.CENTER
+        tvPrivacy.setPadding(0, 24, 0, 0)
+        tvPrivacy.visibility = View.GONE
+        tvPrivacy.setOnClickListener { AdManager.showPrivacyOptionsForm(this) }
 
         // ── Update panel — hidden until update found ──────────────────
         layoutUpdate = LinearLayout(this)
@@ -282,9 +320,18 @@ class MainActivity : Activity() {
         col.addView(btnWatchAd)
         col.addView(tvTimer)
         col.addView(btnPlay)
+        col.addView(tvPrivacy)
         col.addView(layoutUpdate)
         root.addView(col, colParams)
         setContentView(root)
+    }
+
+    private fun onPlayClicked() {
+        if (getUnlockRemainingMs(this) > 0) {
+            launchGame()
+        } else {
+            onWatchAdClicked()
+        }
     }
 
     private fun launchGame() {
@@ -297,6 +344,45 @@ class MainActivity : Activity() {
             android.widget.Toast.makeText(this,
                 "Failed to start game: ${e.message}",
                 android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ── Ads (Adsterra, via browser + deep-link callback) ────────────────
+
+    private fun onWatchAdClicked() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ADSTERRA_UNLOCK_PAGE_URL)))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open unlock page: ${e.message}")
+            android.widget.Toast.makeText(this,
+                "Couldn't open the browser: ${e.message}",
+                android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Reflects current unlock status on btnWatchAd / btnPlay / tvTimer. */
+    private fun refreshUnlockUi() {
+        val remaining = getUnlockRemainingMs(this)
+        if (remaining > 0) {
+            val totalMinutes = remaining / 60000L
+            val hours = totalMinutes / 60
+            val minutes = totalMinutes % 60
+            btnWatchAd.text = "✓  Unlocked"
+            btnWatchAd.isEnabled = false
+            btnWatchAd.alpha = 0.6f
+            tvTimer.visibility = View.VISIBLE
+            tvTimer.text = "Unlocked — ${hours}h ${minutes}m left"
+            btnPlay.text = "▶  PLAY"
+            btnPlay.isEnabled = true
+            btnPlay.alpha = 1.0f
+        } else {
+            btnWatchAd.text = "🌐  Watch Ad to Unlock"
+            btnWatchAd.isEnabled = true
+            btnWatchAd.alpha = 1.0f
+            tvTimer.visibility = View.GONE
+            btnPlay.text = "🔒  Watch Ad to Play"
+            btnPlay.isEnabled = true
+            btnPlay.alpha = 1.0f
         }
     }
 }

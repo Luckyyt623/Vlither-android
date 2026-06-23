@@ -49,6 +49,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep link used by the Adsterra unlock webpage to signal
+                 "ad watched" back to the app: vlither://unlock -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="vlither" android:host="unlock" />
+            </intent-filter>
         </activity>
 
         <!-- GameActivity: NativeActivity subclass — launched by MainActivity -->

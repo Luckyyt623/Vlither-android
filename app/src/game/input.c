@@ -5,7 +5,6 @@
 #include "input.h"
 
 #include "../user.h"
-#include "../ui/chat.h"
 
 void input(tenv* env) {
   tuser_data* usr = env->usr;
@@ -13,7 +12,6 @@ void input(tenv* env) {
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
   struct mg_connection* connection = gdata->connection;
-  bool typing = chat_is_typing();
 
   if (!gdata->data.wfpr) {
     if (gdata->data.ctm - gdata->data.last_ping_mtm > 250) {
@@ -34,12 +32,10 @@ void input(tenv* env) {
       xm = gdata->bot.output.xm;
       ym = gdata->bot.output.ym;
     } else {
-      if (!typing) {
-        if (twindow_key_down(env->wnd, GLFW_KEY_LEFT))
-          gdata->data.kd_l_frb += gdata->data.vfrb;
-        if (twindow_key_down(env->wnd, GLFW_KEY_RIGHT))
-          gdata->data.kd_r_frb += gdata->data.vfrb;
-      }
+      if (twindow_key_down(env->wnd, GLFW_KEY_LEFT))
+        gdata->data.kd_l_frb += gdata->data.vfrb;
+      if (twindow_key_down(env->wnd, GLFW_KEY_RIGHT))
+        gdata->data.kd_r_frb += gdata->data.vfrb;
 
       if (gdata->data.kd_l_frb > 0 || gdata->data.kd_r_frb > 0)
         if (gdata->data.ctm - gdata->data.lkstm > 150) {
@@ -104,8 +100,21 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
 
-            /* Spawn cursor at spawnRadius from last disappear angle */
-            float ang = gdata->touch_ctrl.tp_disappear_angle;
+            /* Spawn cursor at spawnRadius from the snake's CURRENT live
+             * heading (me->eang) — NOT tp_disappear_angle.
+             *
+             * tp_disappear_angle is stale across round boundaries: it is
+             * never reset by game_data_reset(), so after a death/restart
+             * it still holds whatever direction you were facing in the
+             * *previous* round, which has nothing to do with this round's
+             * (server-assigned) starting heading. me->eang, by contrast,
+             * is always the snake's real current heading — correct at
+             * round start and correctly tracked afterward — so spawning
+             * here is a guaranteed no-op for direction: the arrow
+             * reappears already pointing the way the snake is actually
+             * going, and the line below recomputes that exact same angle
+             * instead of snapping to some unrelated old value. */
+            float ang = me->eang;
             gdata->touch_ctrl.tp_cursor_x      = cx + NTL_SPAWN_R * cosf(ang);
             gdata->touch_ctrl.tp_cursor_y      = cy + NTL_SPAWN_R * sinf(ang);
             gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
@@ -158,7 +167,10 @@ void input(tenv* env) {
                      cx  - gdata->touch_ctrl.tp_cursor_x) *
               (180.0f / PI);
 
-          /* Use cursor position as direction vector for snake */
+          /* Use cursor position as direction vector for snake.
+           * On the very first contact frame this is a no-op: the cursor
+           * was just spawned at (NTL_SPAWN_R, me->eang) above, so this
+           * recomputes the exact same angle the snake already had. */
           xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
           ym = (int)(gdata->touch_ctrl.tp_cursor_y - cy);
 
@@ -207,10 +219,9 @@ void input(tenv* env) {
     /* Boost fires only when the finger is in the right 20 % of the screen */
     gdata->data.wmd = env->wnd->touch.boost_down || gdata->bot.output.accel;
 #else
-    gdata->data.wmd = (!typing &&
-                       (twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
-                        twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
-                        twindow_key_down(env->wnd, GLFW_KEY_UP))) ||
+    gdata->data.wmd = twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
+                      twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
+                      twindow_key_down(env->wnd, GLFW_KEY_UP) ||
                       gdata->bot.output.accel;
 #endif
 
@@ -247,16 +258,14 @@ void input(tenv* env) {
     }
   }
 
-  if (!typing) {
-    gdata->data.ms_zoom *= expf(env->ms->dwheel * usrs->zoom_step);
+  gdata->data.ms_zoom *= expf(env->ms->dwheel * usrs->zoom_step);
 
-    if (tkeyboard_key_pressed(env->kb, GLFW_KEY_N) ||
-        (GLFW_KEY_N < 512 && gdata->data.fake_key_pressed[GLFW_KEY_N]))
-      gdata->data.ms_zoom *= expf(1 * usrs->zoom_step);
-    else if (tkeyboard_key_pressed(env->kb, GLFW_KEY_M) ||
-             (GLFW_KEY_M < 512 && gdata->data.fake_key_pressed[GLFW_KEY_M]))
-      gdata->data.ms_zoom *= expf(-1 * usrs->zoom_step);
-  }
+  if (tkeyboard_key_pressed(env->kb, GLFW_KEY_N) ||
+      (GLFW_KEY_N < 512 && gdata->data.fake_key_pressed[GLFW_KEY_N]))
+    gdata->data.ms_zoom *= expf(1 * usrs->zoom_step);
+  else if (tkeyboard_key_pressed(env->kb, GLFW_KEY_M) ||
+           (GLFW_KEY_M < 512 && gdata->data.fake_key_pressed[GLFW_KEY_M]))
+    gdata->data.ms_zoom *= expf(-1 * usrs->zoom_step);
 
   gdata->data.ms_zoom =
       GLM_MAX(MAX_ZOOM_OUT, GLM_MIN(gdata->data.ms_zoom, MAX_ZOOM_IN));
@@ -265,7 +274,7 @@ void input(tenv* env) {
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;
 
-  for (int i = 0; i < NUM_HOTKEYS && !typing; i++) {
+  for (int i = 0; i < NUM_HOTKEYS; i++) {
     hotkey* hk = usrs->hotkeys + i;
     bool real_down    = twindow_key_down(env->wnd, hk->key);
     bool real_pressed = tkeyboard_key_pressed(env->kb, hk->key);

@@ -99,5 +99,4 @@ cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
-
 #endif /* ANDROID */

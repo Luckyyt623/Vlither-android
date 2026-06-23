@@ -77,7 +77,6 @@ typedef struct game_data {
 
   bool restart_req;
   bool closed;
-  bool show_ntl_panel;
 
   struct {
     float grd;
