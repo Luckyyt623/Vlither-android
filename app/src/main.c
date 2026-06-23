@@ -4,6 +4,8 @@
 #include "ui/settings.h"
 #include "ui/key_buttons.h"
 #include "ui/viewport.h"
+#include "ui/chat.h"
+#include "network/ntl_client.h"
 #include "user.h"
 #ifdef ANDROID
 #include "android_jni.h"
@@ -105,10 +107,18 @@ void tinit(tenv* env) {
   game_data_init(env);
   ui_key_buttons_init(env);
   DLOG("tinit: game_data_init done");
+
+  /* ── NTL & Chat init ─────────────────────────────────────────────── */
+  DLOG("tinit: ui_chat_init");
+  ui_chat_init(env);
+  DLOG("tinit: ntl_client_start");
+  ntl_client_start(env);
   DLOG("tinit: complete");
 }
 
 void tdestroy(tenv* env) {
+  ntl_client_stop();
+  ui_chat_destroy(env);
   ui_key_buttons_destroy(env);
   game_data_destroy(env);
   ui_settings_destroy(env);

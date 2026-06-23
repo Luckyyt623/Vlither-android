@@ -7,6 +7,13 @@
 
 #include "../constants.h"
 
+/* NTL team profile (Team ID + auth key + friendly name) */
+typedef struct ntl_team_profile {
+  char name[33];
+  char team_id[33];
+  char auth_key[65];
+} ntl_team_profile;
+
 typedef struct hotkey {
   int key;
   bool active;
@@ -117,6 +124,15 @@ typedef struct user_settings {
 
   /* on-screen custom key buttons */
   custom_key_btn key_btns[MAX_KEY_BTNS];
+
+  /* ── NTL Teammate Sync ──────────────────────────────────────── */
+  ntl_team_profile ntl_teams[12];
+  int              ntl_team_count;
+  int              ntl_active_team_idx;
+  char             ntl_user_id[9];   /* 8-char hex ID, null-terminated   */
+  bool             show_chat_hud;
+  bool             show_online_players_hud;
+  bool             show_player_details_hud;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

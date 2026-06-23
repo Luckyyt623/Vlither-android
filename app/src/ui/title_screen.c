@@ -5,8 +5,11 @@
 
 #include "../network/server.h"
 #include "../user.h"
+#include "ntl_panel.h"
 
-void ui_title_screen_init(tenv* env) {}
+void ui_title_screen_init(tenv* env) {
+  ui_ntl_panel_init();
+}
 
 void ui_title_screen(tenv* env) {
   tuser_data* usr = env->usr;
@@ -101,9 +104,27 @@ void ui_title_screen(tenv* env) {
                (ImVec2){logo_size / 2 - style->ItemSpacing.x / 2})) {
     usr->gdata.curr_screen = SETTINGS;
   }
+
+  /* ── NTL Teammates button ─────────────────────────────────────────── */
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 5 +
                   frame_height * 4);
+  igPushStyleColor_Vec4(ImGuiCol_Button,
+      (ImVec4){0.04f, 0.22f, 0.40f, 1.0f});
+  igPushStyleColor_Vec4(ImGuiCol_ButtonHovered,
+      (ImVec4){0.07f, 0.34f, 0.58f, 1.0f});
+  igPushStyleColor_Vec4(ImGuiCol_ButtonActive,
+      (ImVec4){0.02f, 0.16f, 0.30f, 1.0f});
+  igPushStyleColor_Vec4(ImGuiCol_Text,
+      (ImVec4){0.20f, 0.90f, 1.0f, 1.0f});
+  if (igButton("\ue9c5 NTL Teammates", (ImVec2){logo_size})) {
+    ui_ntl_panel_open();
+  }
+  igPopStyleColor(4);
+
+  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
+                  frame_height * 5);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);
@@ -112,8 +133,8 @@ void ui_title_screen(tenv* env) {
 #ifdef ANDROID
   /* ── Crash warning note ─────────────────────────────────────────── */
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
-                  frame_height * 5);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
+                  frame_height * 6);
   igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){1.0f, 0.75f, 0.25f, 0.85f});
   igPushFont(usr->imgui_data.regular_font[FONT_SIZE_SMALL],
              usr->imgui_data.regular_font[FONT_SIZE_SMALL]->LegacySize);
@@ -157,6 +178,9 @@ void ui_title_screen(tenv* env) {
 #endif /* ANDROID */
 
   igPopFont();
+
+  /* NTL panel — renders as full-screen overlay when open */
+  ui_ntl_panel(env);
 }
 
 void ui_title_screen_destroy(tenv* env) {}
