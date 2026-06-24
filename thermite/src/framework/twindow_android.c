@@ -361,6 +361,34 @@ ImGuiIO* _io = igGetIO_Nil();
                 }
                 if (pid == -1) break; /* couldn't identify new finger */
 
+                /* ── Early reconciliation ─────────────────────────────────────
+                   A POINTER_UP sets pending_reconcile and defers clearing slots
+                   until the next MOVE event.  But if a new POINTER_DOWN arrives
+                   first (e.g. player re-touches the trackpad while still holding
+                   boost), touch.down is still stale-true and none of the routing
+                   branches below match — the new finger gets silently dropped.
+                   Fix: run reconciliation here too, using this event's pointer
+                   list, which contains exactly the fingers genuinely still down. */
+                if (wnd->touch.pending_reconcile) {
+                    wnd->touch.pending_reconcile = false;
+                    bool move_alive2 = false, boost_alive2 = false;
+                    for (int32_t ri = 0; ri < cnt2; ri++) {
+                        int rpid = (int)AMotionEvent_getPointerId(event, ri);
+                        if (rpid == wnd->touch.move_ptr_id)  move_alive2  = true;
+                        if (rpid == wnd->touch.boost_ptr_id) boost_alive2 = true;
+                    }
+                    if (!move_alive2 && wnd->touch.move_ptr_id != -1) {
+                        wnd->touch.down        = false;
+                        wnd->touch.just_down   = false;
+                        wnd->touch.move_ptr_id = -1;
+                    }
+                    if (!boost_alive2 && wnd->touch.boost_ptr_id != -1) {
+                        wnd->touch.boost_down      = false;
+                        wnd->touch.boost_just_down = false;
+                        wnd->touch.boost_ptr_id    = -1;
+                    }
+                }
+
                 /* Zoom slider — highest priority */
                 bool in_zslider2 = g_overlay_was_active &&
                                    (g_zslider_right > g_zslider_left) &&

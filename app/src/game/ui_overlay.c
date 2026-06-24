@@ -11,22 +11,6 @@
 #include <math.h>
 #include "../user.h"
 #include "user_settings.h"
-#include "../network/ntl_client.h"
-#include "../ui/chat.h"
-
-/* Strip the 8-char hex prefix that NTL embeds in nicknames */
-static const char* clean_ntl_nick(const char* raw) {
-  if (!raw) return "";
-  if (strlen(raw) >= 8) {
-    bool hex = true;
-    for (int i = 0; i < 8; i++) {
-      char c = raw[i];
-      if (!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'))) { hex=false; break; }
-    }
-    if (hex) return raw + 8;
-  }
-  return raw;
-}
 
 void ui_overlay(tenv* env) {
   tuser_data* usr = env->usr;
@@ -219,31 +203,11 @@ void ui_overlay(tenv* env) {
             itcolor.w = 0.6f;  // .7f * (.3f + .7f * (1 - (1 + row) / 10.0f));
           }
 
-          /* Check if this leaderboard entry is an NTL teammate */
-          int ntl_cnt2 = 0;
-          ntl_player* ntl_pl2 = ntl_get_players(&ntl_cnt2);
-          bool is_ntl_mate = false;
-          for (int npi = 0; npi < ntl_cnt2; npi++) {
-            const char* cnick = clean_ntl_nick(ntl_pl2[npi].nickname);
-            if (strcmp(cnick, gdata->data.lb.entries[row].nickname) == 0) {
-              is_ntl_mate = true;
-              break;
-            }
-          }
-          if (is_ntl_mate) {
-            itcolor = (ImVec4){0.20f, 1.0f, 0.75f, 1.0f};
-          }
-
           igTableNextRow(ImGuiTableRowFlags_None, 0);
           igTableSetColumnIndex(0);
           igTextColored((ImVec4){1, 1, 1, itcolor.w}, "%2d.", row + 1);
           igTableSetColumnIndex(1);
-          if (is_ntl_mate) {
-            igTextColored(itcolor, "\xe2\x98\x85 %s",
-                          gdata->data.lb.entries[row].nickname);
-          } else {
-            igTextColored(itcolor, "%s", gdata->data.lb.entries[row].nickname);
-          }
+          igTextColored(itcolor, "%s", gdata->data.lb.entries[row].nickname);
           igTableSetColumnIndex(2);
           igTextColored(itcolor, "%d", gdata->data.lb.entries[row].score);
 
@@ -260,64 +224,6 @@ void ui_overlay(tenv* env) {
                                      usr->r->global.minimap_circ[2] -
                                      style->WindowPadding.y - line_height;
     usr->r->global.minimap_opacity = 1;
-
-    /* ── Minimap Teammate Indicators ───────────────────────────────────
-     * Draw a green/cyan dot + cleaned nickname for every NTL teammate
-     * that is on the same server, mapped onto the circular minimap.      */
-    {
-      float mm_r      = usrs->minimap_size * 0.5f;
-      float mm_cx     = usr->r->global.minimap_circ[0] + mm_r;
-      float mm_cy     = usr->r->global.minimap_circ[1] + mm_r;
-      int   ntl_count = 0;
-      ntl_player* players = ntl_get_players(&ntl_count);
-
-      if (ntl_count > 0 && gdata->data.grd > 0.0f) {
-        ImDrawList* dl = igGetWindowDrawList();
-        igPushFont(usr->imgui_data.mono_font[FONT_SIZE_SMALL],
-                   usr->imgui_data.mono_font[FONT_SIZE_SMALL]->LegacySize);
-
-        for (int pi = 0; pi < ntl_count; pi++) {
-          /* Only draw teammates on the same server */
-          if (strcmp(players[pi].server, usrs->ipv4) != 0) continue;
-
-          float tx = (float)atof(players[pi].valx);
-          float ty = (float)atof(players[pi].valy);
-          if (tx <= 0.0f && ty <= 0.0f) continue;
-
-          /* Normalise to [-1, 1] relative to map centre */
-          float rx = (tx - gdata->data.grd) / gdata->data.grd;
-          float ry = (ty - gdata->data.grd) / gdata->data.grd;
-
-          float dist = sqrtf(rx * rx + ry * ry);
-          if (dist > 1.0f && dist > 0.001f) { rx /= dist; ry /= dist; }
-
-          float sx = mm_cx + rx * mm_r;
-          float sy = mm_cy + ry * mm_r;
-
-          /* Outer border */
-          ImU32 border = igColorConvertFloat4ToU32(
-              (ImVec4){0.0f, 0.0f, 0.0f, 0.80f});
-          /* Vibrant green dot for teammates on same server */
-          ImU32 dot_col = igColorConvertFloat4ToU32(
-              (ImVec4){0.10f, 1.0f, 0.55f, 1.0f});
-          ImDrawList_AddCircleFilled(dl, (ImVec2){sx, sy}, 5.0f, dot_col,  12);
-          ImDrawList_AddCircle      (dl, (ImVec2){sx, sy}, 5.0f, border,   12, 1.2f);
-
-          /* Name label above the dot */
-          char label[16];
-          strncpy(label, clean_ntl_nick(players[pi].nickname), 15);
-          label[15] = '\0';
-
-          ImVec2 tsz;
-          igCalcTextSize(&tsz, label, NULL, false, -1);
-          ImDrawList_AddText_Vec2(dl,
-              (ImVec2){sx - tsz.x * 0.5f, sy - tsz.y - 5},
-              igColorConvertFloat4ToU32((ImVec4){0.85f, 1.0f, 0.85f, 0.90f}),
-              label, NULL);
-        }
-        igPopFont();
-      }
-    }
 
     igPushFont(usr->imgui_data.mono_font[usrs->stats_font_size],
                usr->imgui_data.mono_font[usrs->stats_font_size]->LegacySize);
@@ -455,9 +361,9 @@ void ui_overlay(tenv* env) {
         float cs   = cosf(rot);
         float sn_v = sinf(rot);
 
-        /* Arrow dimensions (matches CSS 300×180 aspect ratio) */
-        float aw = sh * 0.11f;    /* full width  */
-        float ah = sh * 0.066f;   /* full height */
+        /* Arrow dimensions — scaled by user arrow_size setting */
+        float aw = sh * 0.11f  * usrs->arrow_size;   /* full width  */
+        float ah = sh * 0.066f * usrs->arrow_size;   /* full height */
 
         /* Rotate local point (px,py) around cursor (acx,acy) */
         #define ARPT(px, py) \
@@ -575,38 +481,6 @@ void ui_overlay(tenv* env) {
           usrs->hotkeys[hi].active = !usrs->hotkeys[hi].active;
       }
     }
-
-    /* ── CHAT toggle button (always shown when NTL chat is enabled) ───
-     * Renders to the right of the hotkey buttons, always at top row.    */
-    if (usrs->show_chat_hud) {
-      float bx   = margin2 + (float)hk_col * (btn_w + margin2);
-      float by   = start_y;
-      bool  on   = chat_is_typing();
-      ImU32 cbg  = on ? IM_COL32(30,100,180,220) : IM_COL32(20,60,120,180);
-      ImU32 cbrd = on ? IM_COL32(80,160,255,240) : IM_COL32(80,120,200,180);
-      ImU32 ctxt = IM_COL32(255,255,255, on ? 255 : 200);
-      float rnd  = btn_h * 0.22f;
-
-      ImDrawList_AddRectFilled(hkdl,
-        (ImVec2){bx,by}, (ImVec2){bx+btn_w, by+btn_h}, cbg, rnd, 0);
-      ImDrawList_AddRect(hkdl,
-        (ImVec2){bx,by}, (ImVec2){bx+btn_w, by+btn_h}, cbrd, rnd, 0, 1.5f);
-
-      const char* chat_lbl = on ? "Close" : "CHAT";
-      float cfsz = btn_h * 0.40f;
-      float ctsc = cfsz / igGetFontSize();
-      ImVec2 ctsz; igCalcTextSize(&ctsz, chat_lbl, NULL, false, -1.0f);
-      ImDrawList_AddText_FontPtr(hkdl, igGetFont(), cfsz,
-        (ImVec2){bx + btn_w*0.5f - ctsz.x*ctsc*0.5f, by + btn_h*0.5f - cfsz*0.5f},
-        ctxt, chat_lbl, NULL, 0, NULL);
-
-      ImGuiIO* cio = igGetIO_Nil();
-      if (cio && igIsMouseClicked_Bool(0, false)) {
-        float mx = cio->MousePos.x, my = cio->MousePos.y;
-        if (mx >= bx && mx <= bx+btn_w && my >= by && my <= by+btn_h)
-          ui_chat_toggle();
-      }
-    }
   }
 
     /* ═══════════════════════════════════════════════════════════════════
@@ -696,9 +570,5 @@ void ui_overlay(tenv* env) {
       (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},
       thumb_brd, thumb_w * 0.5f, 0, 1.8f);
   }
-
-  /* ── Chat overlay (renders over everything, even zoom slider) ─────── */
-  ui_chat(env);
-
 #endif /* ANDROID */
 }

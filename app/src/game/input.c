@@ -129,9 +129,9 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
 
-            /* Move cursor by delta (speed = 1.0, tune if needed) */
-            float nx = gdata->touch_ctrl.tp_cursor_x + dx;
-            float ny = gdata->touch_ctrl.tp_cursor_y + dy;
+            /* Move cursor by delta, scaled by arrow_sensitivity setting */
+            float nx = gdata->touch_ctrl.tp_cursor_x + dx * usrs->arrow_sensitivity;
+            float ny = gdata->touch_ctrl.tp_cursor_y + dy * usrs->arrow_sensitivity;
 
             /* Clamp to screen */
             nx = GLM_MAX(0.0f, GLM_MIN(sw, nx));
