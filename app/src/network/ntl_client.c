@@ -154,7 +154,11 @@ static void ntl_http_cb(struct mg_connection* c, int ev, void* ev_data) {
   ntl_http_ctx* ctx = (ntl_http_ctx*)c->fn_data;
 
   if (ev == MG_EV_CONNECT) {
-    /* Connection established: send HTTP GET */
+    /* TCP connected — for plain HTTP we'd send here,
+     * but we're HTTPS so wait for MG_EV_TLS_HS instead. */
+    (void)ev_data;
+  } else if (ev == MG_EV_TLS_HS) {
+    /* TLS handshake complete — safe to send HTTP request now */
     mg_printf(c,
       "GET %s HTTP/1.0\r\n"
       "Host: ntl-slither.com\r\n"
@@ -165,7 +169,7 @@ static void ntl_http_cb(struct mg_connection* c, int ev, void* ev_data) {
     struct mg_http_message* hm = (struct mg_http_message*)ev_data;
     size_t len = hm->body.len;
     if (len >= sizeof(ctx->body)) len = sizeof(ctx->body)-1;
-    memcpy(ctx->body, hm->body.ptr, len);
+    memcpy(ctx->body, hm->body.buf, len);
     ctx->body[len] = '\0';
     ctx->body_len  = len;
     c->is_closing  = 1;
@@ -322,17 +326,9 @@ static void* ntl_thread_fn(void* arg) {
              gdata->data.fps, gdata->data.ping, gdata->data.kills);
     url_encode(raw_dt, enc_dt, sizeof(enc_dt));
 
-    /* Snake position */
-    float valx=0, valy=0;
-    int slen = tdarray_length(gdata->data.snakes);
-    if (slen > 0) {
-      snake* me = gdata->data.snakes + (slen - 1);
-      valx = me->xx + me->fx;
-      valy = me->yy + me->fy;
-    } else {
-      valx = gdata->data.view_xx;
-      valy = gdata->data.view_yy;
-    }
+    /* Snake position — use view coordinates (safe float reads, no tdarray) */
+    float valx = gdata->data.view_xx;
+    float valy = gdata->data.view_yy;
 
     /* Outgoing chat message */
     char raw_msg[512]={0};

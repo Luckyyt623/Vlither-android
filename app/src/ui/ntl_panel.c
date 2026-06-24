@@ -219,8 +219,8 @@ void ui_ntl_panel(tenv* env) {
   igPushStyleColor_Vec4(ImGuiCol_HeaderActive,   (ImVec4){0.10f,0.38f,0.60f,1.0f});
   /* 10 colour pushes */
 
-  igPushFont(usr->imgui_data.regular_font[FONT_SIZE_MEDIUM],
-             usr->imgui_data.regular_font[FONT_SIZE_MEDIUM]->LegacySize);
+  igPushFont(usr->imgui_data.regular_font[FONT_SIZE_REGULAR],
+             usr->imgui_data.regular_font[FONT_SIZE_REGULAR]->LegacySize);
 
   igDummy((ImVec2){0, 6});
 
@@ -502,8 +502,8 @@ void ui_ntl_panel(tenv* env) {
 
   igSetCursorPosX(inner_pad);
   igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){0.85f,1.0f,0.85f,1.0f});
-  igPushFont(usr->imgui_data.mono_font[FONT_SIZE_MEDIUM],
-             usr->imgui_data.mono_font[FONT_SIZE_MEDIUM]->LegacySize);
+  igPushFont(usr->imgui_data.mono_font[FONT_SIZE_REGULAR],
+             usr->imgui_data.mono_font[FONT_SIZE_REGULAR]->LegacySize);
   igText(usrs->ntl_user_id[0] ? usrs->ntl_user_id : "(not generated yet)");
   igPopFont();
   igPopStyleColor(1);
@@ -586,7 +586,7 @@ void ui_ntl_panel(tenv* env) {
   igPushStyleColor_Vec4(ImGuiCol_Button,        (ImVec4){0.06f,0.36f,0.20f,1.0f});
   igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0.10f,0.52f,0.30f,1.0f});
   igPushStyleColor_Vec4(ImGuiCol_ButtonActive,  (ImVec4){0.04f,0.26f,0.14f,1.0f});
-  igPushStyleVar_Vec2(ImGuiStyleVar_FrameRounding, (ImVec2){8, 8});
+  igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 8.0f);
   if (igButton("\xe2\x9c\x93  OK", (ImVec2){btn_w2, btn_h})) {
     /* Generate user ID on first-time save */
     if (!usrs->ntl_user_id[0]) gen_user_id(usrs->ntl_user_id);
@@ -603,7 +603,7 @@ void ui_ntl_panel(tenv* env) {
   igPushStyleColor_Vec4(ImGuiCol_Button,        (ImVec4){0.30f,0.08f,0.06f,1.0f});
   igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0.48f,0.14f,0.10f,1.0f});
   igPushStyleColor_Vec4(ImGuiCol_ButtonActive,  (ImVec4){0.20f,0.04f,0.04f,1.0f});
-  igPushStyleVar_Vec2(ImGuiStyleVar_FrameRounding, (ImVec2){8, 8});
+  igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 8.0f);
   if (igButton("\xe2\x86\xba  Reset", (ImVec2){btn_w2, btn_h})) {
     s_confirm_reset = true;
   }
