@@ -37,9 +37,15 @@ void ui_title_screen(tenv* env) {
   usr->r->global.minimap_opacity = 0;
 
   float frame_height = igGetFrameHeight();
-
   float logo_size = 400;
   float logo_gap = 5;
+
+  /* ── Hide all home content while NTL panel is open ─────────────────── */
+  if (ui_ntl_panel_is_open()) {
+    igPopFont();
+    ui_ntl_panel(env);
+    return;
+  }
 
   igPushFont(usr->imgui_data.mono_font[usrs->ui_font_size],
              usr->imgui_data.mono_font[usrs->ui_font_size]->LegacySize);
