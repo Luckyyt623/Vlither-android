@@ -217,7 +217,9 @@ void ui_ntl_panel(tenv* env) {
   igPushStyleColor_Vec4(ImGuiCol_HeaderActive,   (ImVec4){0.10f,0.38f,0.60f,1.00f});
   igPushStyleColor_Vec4(ImGuiCol_ScrollbarBg,    (ImVec4){0.04f,0.10f,0.18f,0.60f});
   igPushStyleColor_Vec4(ImGuiCol_ScrollbarGrab,  (ImVec4){0.10f,0.40f,0.60f,0.80f});
-  /* 12 colour pushes */
+  /* Global bright text — overrides the game's near-black default */
+  igPushStyleColor_Vec4(ImGuiCol_Text,           (ImVec4){0.90f,0.94f,1.00f,1.00f});
+  /* 13 colour pushes */
 
   igPushStyleVar_Float(ImGuiStyleVar_FrameRounding,  6.0f);
   igPushStyleVar_Float(ImGuiStyleVar_GrabRounding,   6.0f);
@@ -667,7 +669,7 @@ void ui_ntl_panel(tenv* env) {
 
   igPopItemWidth();
   igPopStyleVar(2);      /* FrameRounding, GrabRounding */
-  igPopStyleColor(12);   /* 12 shared colours */
+  igPopStyleColor(13);   /* 13 shared colours (incl. global Text) */
   igPopFont();
 
   igEnd(); /* ##ntl_panel_content */
