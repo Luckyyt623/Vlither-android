@@ -15,5 +15,11 @@ long android_jni_get_unlock_remaining_ms(void);
  */
 void android_jni_request_ad(void);
 
+/**
+ * Signals to GameActivity that the first Vulkan frame has rendered.
+ * GameActivity will fade out and remove the loading overlay.
+ */
+void android_jni_notify_game_ready(void);
+
 #endif /* ANDROID */
 #endif /* ANDROID_JNI_H */

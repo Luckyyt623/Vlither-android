@@ -178,6 +178,29 @@ void imgui_prerender(void) {
         io->MouseDown[0] = wnd->touch.down;
         if (wnd->size[0] > 0 && wnd->size[1] > 0)
             io->DisplaySize = (ImVec2){(float)wnd->size[0], (float)wnd->size[1]};
+
+        /* ── Swipe-to-scroll for the settings panel ───────────────────────
+           Android has no mouse wheel, so we translate vertical finger drag
+           into io->MouseWheel before igNewFrame() consumes it.
+           Only active when the panel is open so normal game touches are
+           never mis-interpreted as scroll events.                        */
+        extern bool g_panel_open;
+        static float s_scroll_last_y   = 0.0f;
+        static bool  s_scroll_was_down = false;
+        if (g_panel_open) {
+            bool down_now = io->MouseDown[0];
+            if (down_now && s_scroll_was_down) {
+                float dy = io->MousePos.y - s_scroll_last_y;
+                /* Dead zone of 2 px avoids converting taps into micro-scrolls */
+                if (dy < -2.0f || dy > 2.0f)
+                    io->MouseWheel += dy / 30.0f; /* px → scroll lines */
+            }
+            s_scroll_was_down = down_now;
+            s_scroll_last_y   = down_now ? io->MousePos.y : 0.0f;
+        } else {
+            s_scroll_was_down = false;
+        }
+
   g_imgui_wants_keyboard = io->WantTextInput;
     }
 

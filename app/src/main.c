@@ -262,9 +262,12 @@ void trender(tenv* env) {
           igSetNextWindowBgAlpha(0.91f);
 
           ImGuiWindowFlags pf =
-            ImGuiWindowFlags_NoTitleBar   | ImGuiWindowFlags_NoResize  |
-            ImGuiWindowFlags_NoMove       | ImGuiWindowFlags_NoNav     |
-            ImGuiWindowFlags_NoDecoration;
+            ImGuiWindowFlags_NoTitleBar  | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove      | ImGuiWindowFlags_NoNav    |
+            ImGuiWindowFlags_NoCollapse;
+            /* NOTE: NoDecoration was removed because it bakes in
+               NoScrollbar + NoScrollWithMouse, which breaks panel scroll.
+               NoCollapse is the only extra flag from NoDecoration we want. */
 
           static int s_qs_page = 0;  /* 0=main, 1=custom controls, 2=hotkeys */
 

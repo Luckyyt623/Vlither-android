@@ -3,6 +3,7 @@
 #include "../core/tenv.h"
 #include "../framework/twindow.h"
 #include "../framework/tkeyboard.h"
+#include "android_jni.h"
 
 /* ------------------------------------------------------------------ */
 /*  Debug logger — sends log lines to ntfy.sh so you can read them    */
@@ -239,6 +240,7 @@ void android_main(struct android_app* app) {
     DLOG("tinit done, running=%d", env.config.running);
 
     DLOG("entering game loop");
+    bool g_first_frame_done = false;
     while (env.config.running) {
         if (!env.ctx->swapchain_ok) {
             /* Swapchain is out of date — poll events then rebuild it */
@@ -259,6 +261,11 @@ void android_main(struct android_app* app) {
 
         tinput(&env);
         trender(&env);
+
+        if (!g_first_frame_done) {
+            g_first_frame_done = true;
+            android_jni_notify_game_ready();
+        }
         tkeyboard_update(env.kb);
         tmouse_update(env.ms);
     }

@@ -99,4 +99,53 @@ cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
+/* ── notify_game_ready — hides the loading overlay in GameActivity ───── */
+
+void android_jni_notify_game_ready(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm) {
+        AJNI_LOG("notify_game_ready: g_android_app not ready");
+        return;
+    }
+
+    JavaVM*  vm  = g_android_app->activity->vm;
+    jobject  obj = g_android_app->activity->clazz;
+    JNIEnv*  env = NULL;
+    bool did_attach = false;
+
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) {
+            AJNI_LOG("notify_game_ready: AttachCurrentThread failed");
+            return;
+        }
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        AJNI_LOG("notify_game_ready: GetEnv failed status=%d", status);
+        return;
+    }
+
+    jclass cls = (*env)->FindClass(env, "com/vlither/GameActivity");
+    if (!cls) {
+        AJNI_LOG("notify_game_ready: GameActivity class not found");
+        (*env)->ExceptionClear(env);
+        goto cleanup2;
+    }
+
+    {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "notifyGameReady", "(Landroid/app/Activity;)V");
+        if (!mid) {
+            AJNI_LOG("notify_game_ready: method not found");
+            (*env)->ExceptionClear(env);
+            goto cleanup2;
+        }
+        (*env)->CallStaticVoidMethod(env, cls, mid, obj);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    }
+
+cleanup2:
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
 #endif /* ANDROID */
