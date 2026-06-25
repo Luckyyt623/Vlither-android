@@ -102,6 +102,7 @@ typedef struct user_settings {
   /* ── Arrow cursor (trackpad mode) ──────────────────────────── */
   float arrow_size;         /* scale multiplier for arrow graphic (default 1.0) */
   float arrow_sensitivity;  /* cursor speed multiplier per touch delta (default 1.0) */
+  bool  boost_arrow_anim;   /* show pulsing glow on arrow when boosting (default true) */
 
   /* ── Zoom slider ────────────────────────────────────────────── */
   float zoom_sensitivity;   /* slider speed multiplier (default 1.0)    */

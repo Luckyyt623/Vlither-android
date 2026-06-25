@@ -120,6 +120,14 @@ void ui_overlay(tenv* env) {
     if (usrs->hotkeys[HOTKEY_MENU].active) {
       display_hotkeys(usr, (icon_sz.x - char_sz.x) * 0.5f,
                       usrs->stats_font_size);
+
+      /* ── In-game quick-toggles (shown alongside hotkey list) ── */
+      igText("");
+      igPushFont(usr->imgui_data.mono_font[usrs->stats_font_size],
+                 usr->imgui_data.mono_font[usrs->stats_font_size]->LegacySize);
+      igTextColored((ImVec4){1, 1, 0.5f, 0.6f}, "Options");
+      igCheckbox("Boost arrow glow", &usrs->boost_arrow_anim);
+      igPopFont();
     }
 
     float px = (((gdata->data.view_xx - gdata->data.grd) * 2) /
@@ -389,7 +397,8 @@ void ui_overlay(tenv* env) {
       }
       s_accel_fr += vfr2 * 0.22f;  /* same rate as AS */
 
-      if (gdata->touch_ctrl.tp_tracking && gdata->touch_ctrl.tp_visible) {
+      if (gdata->touch_ctrl.tp_tracking && gdata->touch_ctrl.tp_visible
+          && !usrs->hotkeys[HOTKEY_BOT].active) {
         float acx = gdata->touch_ctrl.tp_cursor_x;
         float acy = gdata->touch_ctrl.tp_cursor_y;
 
@@ -452,8 +461,9 @@ void ui_overlay(tenv* env) {
 
         /* ── Pass 2: additive boost glow (matches AS arrow_add_batch).
          *   alpha = accel_a * (0.5 + 0.5*cos(accel_fr)), max ~200.
-         *   Drawn slightly larger (+15 %) to look like an additive halo. */
-        if (s_accel_a > 0.0f) {
+         *   Drawn slightly larger (+15 %) to look like an additive halo.
+         *   Skipped when the user has disabled boost arrow animation.    */
+        if (s_accel_a > 0.0f && usrs->boost_arrow_anim) {
           float pulse = s_accel_a * (0.5f + 0.5f * cosf(s_accel_fr));
           int   ga    = (int)(pulse * 200.0f);
           if (ga > 0) {
