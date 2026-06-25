@@ -95,43 +95,48 @@ void input(tenv* env) {
 
         if (touch_down) {
           if (env->wnd->touch.just_down || !gdata->touch_ctrl.tp_tracking) {
-            /* ---- Touch start ---- */
-            gdata->touch_ctrl.tp_tracking     = true;
-            gdata->touch_ctrl.tp_last_touch_x = tx;
-            gdata->touch_ctrl.tp_last_touch_y = ty;
-
-            /* Spawn cursor at spawnRadius from the snake's CURRENT live
-             * heading (me->eang) — NOT tp_disappear_angle.
+            /* ---- Touch start ------------------------------------------------
+             * Real slither.io (control_mode 2) logic:
+             *   fing.xx  = cos(twang) * scale * 39   ← spawn at current heading
+             *   fing.ofx = fing.xx                   ← save as anchor
+             *   fing.sx  = stageX - halfW            ← save initial touch pos
              *
-             * tp_disappear_angle is stale across round boundaries: it is
-             * never reset by game_data_reset(), so after a death/restart
-             * it still holds whatever direction you were facing in the
-             * *previous* round, which has nothing to do with this round's
-             * (server-assigned) starting heading. me->eang, by contrast,
-             * is always the snake's real current heading — correct at
-             * round start and correctly tracked afterward — so spawning
-             * here is a guaranteed no-op for direction: the arrow
-             * reappears already pointing the way the snake is actually
-             * going, and the line below recomputes that exact same angle
-             * instead of snapping to some unrelated old value. */
+             * We do the same: cursor spawns at the snake's current heading,
+             * the spawn position is saved as tp_anchor, and the finger's
+             * initial screen position is saved in tp_last_touch_x/y.
+             * NO delta accumulation — the move path uses absolute offset. */
             float ang = me->eang;
-            gdata->touch_ctrl.tp_cursor_x      = cx + NTL_SPAWN_R * cosf(ang);
-            gdata->touch_ctrl.tp_cursor_y      = cy + NTL_SPAWN_R * sinf(ang);
-            gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
-            gdata->touch_ctrl.tp_prev_cursor_y = gdata->touch_ctrl.tp_cursor_y;
-            gdata->touch_ctrl.tp_vx            = 0.0f;
-            gdata->touch_ctrl.tp_vy            = 0.0f;
-            gdata->touch_ctrl.tp_visible       = true;
-          } else {
-            /* ---- Touch move ---- */
-            float dx = tx - gdata->touch_ctrl.tp_last_touch_x;
-            float dy = ty - gdata->touch_ctrl.tp_last_touch_y;
-            gdata->touch_ctrl.tp_last_touch_x = tx;
-            gdata->touch_ctrl.tp_last_touch_y = ty;
+            float spawn_x = cx + NTL_SPAWN_R * cosf(ang);
+            float spawn_y = cy + NTL_SPAWN_R * sinf(ang);
 
-            /* Move cursor by delta, scaled by arrow_sensitivity setting */
-            float nx = gdata->touch_ctrl.tp_cursor_x + dx * usrs->arrow_sensitivity;
-            float ny = gdata->touch_ctrl.tp_cursor_y + dy * usrs->arrow_sensitivity;
+            gdata->touch_ctrl.tp_tracking     = true;
+            gdata->touch_ctrl.tp_visible      = true;
+            gdata->touch_ctrl.tp_anchor_x     = spawn_x; /* cursor spawn = anchor */
+            gdata->touch_ctrl.tp_anchor_y     = spawn_y;
+            gdata->touch_ctrl.tp_last_touch_x = tx;      /* initial finger pos    */
+            gdata->touch_ctrl.tp_last_touch_y = ty;
+            gdata->touch_ctrl.tp_cursor_x     = spawn_x;
+            gdata->touch_ctrl.tp_cursor_y     = spawn_y;
+            gdata->touch_ctrl.tp_vx           = 0.0f;
+            gdata->touch_ctrl.tp_vy           = 0.0f;
+          } else {
+            /* ---- Touch move -------------------------------------------------
+             * Real slither.io:
+             *   fing.xx = fing.ofx + (stageX - halfW) - fing.sx
+             *           = anchor + (current_touch - initial_touch)
+             *
+             * cursor = anchor + (current_finger - initial_finger) * sensitivity
+             *
+             * This is NOT a running delta. It is an absolute offset from the
+             * spawn position. This means:
+             *   • No cursor jump on re-touch (anchor always resets on just_down)
+             *   • No drift accumulation across frames
+             *   • Even if just_down is missed once, the worst result is the
+             *     cursor sitting at a slightly wrong offset, not a sudden snap */
+            float nx = gdata->touch_ctrl.tp_anchor_x
+                     + (tx - gdata->touch_ctrl.tp_last_touch_x) * usrs->arrow_sensitivity;
+            float ny = gdata->touch_ctrl.tp_anchor_y
+                     + (ty - gdata->touch_ctrl.tp_last_touch_y) * usrs->arrow_sensitivity;
 
             /* Clamp to screen */
             nx = GLM_MAX(0.0f, GLM_MIN(sw, nx));
@@ -147,18 +152,16 @@ void input(tenv* env) {
               ny = cy + sinf(a) * NTL_FORBIDDEN_R;
             }
 
-            /* Velocity smoothing (for arrow rotation) */
-            float mdx = nx - gdata->touch_ctrl.tp_prev_cursor_x;
-            float mdy = ny - gdata->touch_ctrl.tp_prev_cursor_y;
+            /* Per-frame velocity for arrow rotation smoothing */
+            float mdx = nx - gdata->touch_ctrl.tp_cursor_x;
+            float mdy = ny - gdata->touch_ctrl.tp_cursor_y;
             gdata->touch_ctrl.tp_vx =
                 gdata->touch_ctrl.tp_vx * NTL_VEL_DECAY + mdx * NTL_VEL_WEIGHT;
             gdata->touch_ctrl.tp_vy =
                 gdata->touch_ctrl.tp_vy * NTL_VEL_DECAY + mdy * NTL_VEL_WEIGHT;
 
-            gdata->touch_ctrl.tp_prev_cursor_x = gdata->touch_ctrl.tp_cursor_x;
-            gdata->touch_ctrl.tp_prev_cursor_y = gdata->touch_ctrl.tp_cursor_y;
-            gdata->touch_ctrl.tp_cursor_x      = nx;
-            gdata->touch_ctrl.tp_cursor_y      = ny;
+            gdata->touch_ctrl.tp_cursor_x = nx;
+            gdata->touch_ctrl.tp_cursor_y = ny;
           }
 
           /* Arrow angle = direction from cursor toward screen centre */

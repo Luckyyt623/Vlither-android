@@ -374,6 +374,11 @@ ImGuiIO* _io = igGetIO_Nil();
                     bool move_alive2 = false, boost_alive2 = false;
                     for (int32_t ri = 0; ri < cnt2; ri++) {
                         int rpid = (int)AMotionEvent_getPointerId(event, ri);
+                        /* Skip the NEW finger (pid) — Android can reuse pointer IDs
+                           immediately after a POINTER_UP, which would make the old
+                           slot appear "alive" even though it was just lifted.
+                           We only count IDs that belong to fingers already held. */
+                        if (rpid == pid) continue;
                         if (rpid == wnd->touch.move_ptr_id)  move_alive2  = true;
                         if (rpid == wnd->touch.boost_ptr_id) boost_alive2 = true;
                     }

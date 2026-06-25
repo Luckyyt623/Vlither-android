@@ -60,12 +60,12 @@ typedef struct game_data {
     /* ---- NTL Trackpad state ---- */
     float tp_cursor_x;         /* virtual cursor X on screen               */
     float tp_cursor_y;         /* virtual cursor Y on screen               */
-    float tp_prev_cursor_x;    /* cursor X previous frame                  */
-    float tp_prev_cursor_y;    /* cursor Y previous frame                  */
+    float tp_anchor_x;         /* cursor X at touch-start (spawn pos)      */
+    float tp_anchor_y;         /* cursor Y at touch-start (spawn pos)      */
     float tp_vx;               /* smoothed velocity X (for arrow rotation) */
     float tp_vy;               /* smoothed velocity Y                      */
-    float tp_last_touch_x;     /* last recorded touch X                    */
-    float tp_last_touch_y;     /* last recorded touch Y                    */
+    float tp_last_touch_x;     /* finger screen X when touch began         */
+    float tp_last_touch_y;     /* finger screen Y when touch began         */
     float tp_disappear_angle;  /* angle saved when finger lifts            */
     float tp_cursor_angle_deg; /* arrow rotation angle toward center       */
     bool  tp_tracking;         /* finger is currently on trackpad          */
