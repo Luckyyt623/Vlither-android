@@ -347,33 +347,74 @@ void ui_overlay(tenv* env) {
         IM_COL32(255, 255, 255, 65), "MOVE", NULL, 0.0f, NULL);
 
     } else {
-      /* ── TRACKPAD MODE: CSS-style polygon arrow cursor ─────────── */
+      /* ── TRACKPAD MODE: polygon arrow cursor (snake-colour + boost glow) ── */
+
+      /* ── Derive arrow colour from the player snake's colour (cv).
+       *   AS formula: arrow_color = 0.25*256 + 0.75*snake_rgb
+       *   i.e. blend 25 % white with 75 % of the snake body colour.        */
+      float ar = 0.776f, ag = 0.263f, ab = 0.310f;  /* fallback: original red */
+      {
+        int sl2 = tdarray_length(gdata->data.snakes);
+        if (sl2 > 0) {
+          snake* mptr = gdata->data.snakes + (sl2 - 1);
+          if (gdata->data.snake_id == mptr->id) {
+            int cv = mptr->cv;
+            if (cv < 0) cv = 0;
+            if (cv >= NUM_COLOR_GROUPS) cv = NUM_COLOR_GROUPS - 1;
+            vec3s* sc = gdata->cg_colors + cv;
+            ar = 0.25f + 0.75f * sc->r;
+            ag = 0.25f + 0.75f * sc->g;
+            ab = 0.25f + 0.75f * sc->b;
+            if (ar > 1.0f) ar = 1.0f;
+            if (ag > 1.0f) ag = 1.0f;
+            if (ab > 1.0f) ab = 1.0f;
+          }
+        }
+      }
+
+      /* ── Boost animation state — matches AS accel_a / accel_fr logic.
+       *   accel_a: smooth 0→1 fade-in when boosting, 1→0 fade-out when not.
+       *   accel_fr: running counter driving the pulsing cos() glow.         */
+      static float s_accel_a  = 0.0f;
+      static float s_accel_fr = 0.0f;
+      bool is_boosting = boost_on;  /* same flag that lights the boost button */
+      float vfr2 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
+
+      if (is_boosting) {
+        s_accel_a += vfr2 * 0.03f;
+        if (s_accel_a > 1.0f) s_accel_a = 1.0f;
+      } else {
+        s_accel_a -= vfr2 * 0.03f;
+        if (s_accel_a < 0.0f) s_accel_a = 0.0f;
+      }
+      s_accel_fr += vfr2 * 0.22f;  /* same rate as AS */
+
       if (gdata->touch_ctrl.tp_tracking && gdata->touch_ctrl.tp_visible) {
         float acx = gdata->touch_ctrl.tp_cursor_x;
         float acy = gdata->touch_ctrl.tp_cursor_y;
 
-        /* Direction toward screen centre */
         float dir_angle = atan2f(sh * 0.5f - acy, sw * 0.5f - acx);
-        /* Tip points AWAY from centre (outward toward the touch position).
-           The polygon tip is on the left (-x), rotating by dir_angle+pi made it
-           point toward centre; now rotate by dir_angle to point outward. */
         float rot  = dir_angle;
         float cs   = cosf(rot);
         float sn_v = sinf(rot);
 
-        /* Arrow dimensions — scaled by user arrow_size setting */
-        float aw = sh * 0.11f  * usrs->arrow_size;   /* full width  */
-        float ah = sh * 0.066f * usrs->arrow_size;   /* full height */
+        /* Arrow size scales with boost (AS: scaleX = 0.5 + 0.25*accel_a,
+         * base is 0.5, so boost makes it up to 1.5× larger at full accel) */
+        float boost_sz = 1.0f + 0.5f * s_accel_a;
+        float aw = sh * 0.11f  * usrs->arrow_size * boost_sz;
+        float ah = sh * 0.066f * usrs->arrow_size * boost_sz;
 
         /* Rotate local point (px,py) around cursor (acx,acy) */
         #define ARPT(px, py) \
           (ImVec2){ acx + (px)*cs - (py)*sn_v, \
                     acy + (px)*sn_v + (py)*cs }
 
-        ImU32 fill_col   = IM_COL32(198, 67, 79, 230);
-        ImU32 border_col = IM_COL32(139, 58, 71, 255);
+        /* ── Pass 1: base arrow (snake colour, AS fill alpha 230/255) ── */
+        ImU32 fill_col   = IM_COL32((int)(ar*255),(int)(ag*255),(int)(ab*255), 230);
+        /* Border: 70 % brightness of fill */
+        ImU32 border_col = IM_COL32((int)(ar*178),(int)(ag*178),(int)(ab*178), 255);
 
-        /* Body rectangle: x [-0.10..+0.50]*aw, y [-0.25..+0.25]*ah */
+        /* Body rectangle */
         ImVec2 body[4] = {
           ARPT(-0.10f*aw, -0.25f*ah),
           ARPT( 0.50f*aw, -0.25f*ah),
@@ -396,7 +437,7 @@ void ui_overlay(tenv* env) {
           ARPT(-0.50f*aw,  0.00f   ),
           fill_col);
 
-        /* Border outline – full 7-point polygon, closed */
+        /* Border outline */
         ImVec2 outline[7] = {
           ARPT(-0.10f*aw, -0.50f*ah),
           ARPT(-0.10f*aw, -0.25f*ah),
@@ -409,22 +450,76 @@ void ui_overlay(tenv* env) {
         ImDrawList_AddPolyline(dl, outline, 7, border_col,
           ImDrawFlags_Closed, 3.0f);
 
+        /* ── Pass 2: additive boost glow (matches AS arrow_add_batch).
+         *   alpha = accel_a * (0.5 + 0.5*cos(accel_fr)), max ~200.
+         *   Drawn slightly larger (+15 %) to look like an additive halo. */
+        if (s_accel_a > 0.0f) {
+          float pulse = s_accel_a * (0.5f + 0.5f * cosf(s_accel_fr));
+          int   ga    = (int)(pulse * 200.0f);
+          if (ga > 0) {
+            ImU32 glow_col = IM_COL32((int)(ar*255),(int)(ag*255),(int)(ab*255), ga);
+            float gaw = aw * 1.15f;
+            float gah = ah * 1.15f;
+
+            ImVec2 gbody[4] = {
+              ARPT(-0.10f*gaw, -0.25f*gah),
+              ARPT( 0.50f*gaw, -0.25f*gah),
+              ARPT( 0.50f*gaw,  0.25f*gah),
+              ARPT(-0.10f*gaw,  0.25f*gah),
+            };
+            ImDrawList_AddConvexPolyFilled(dl, gbody, 4, glow_col);
+            ImDrawList_AddTriangleFilled(dl,
+              ARPT(-0.10f*gaw, -0.50f*gah),
+              ARPT(-0.10f*gaw, -0.25f*gah),
+              ARPT(-0.50f*gaw,  0.00f    ), glow_col);
+            ImDrawList_AddTriangleFilled(dl,
+              ARPT(-0.10f*gaw,  0.25f*gah),
+              ARPT(-0.10f*gaw,  0.50f*gah),
+              ARPT(-0.50f*gaw,  0.00f    ), glow_col);
+          }
+        }
+
         #undef ARPT
       }
     }
 
-    /* ── BOOST BUTTON ───────────────────────────────────────────── */
+    /* ── BOOST BUTTON ───────────────────────────────────────────────────
+     * Matches AS: boost_a transitions 0.3 (idle) ↔ 0.6 (boosting) at
+     * speed 0.05*vfr.  Button is tinted with the player snake colour.    */
     {
-      float bo = usrs->boost_opacity;
-      ImDrawList_AddCircleFilled(dl,
-        (ImVec2){bcx, bcy}, br,
-        boost_on ? IM_COL32(255,80,55,(int)(210*bo))
-                 : IM_COL32(210,55,35,(int)(85*bo)), 48);
-      ImDrawList_AddCircle(dl,
-        (ImVec2){bcx, bcy}, br,
-        boost_on ? IM_COL32(255,140,110,(int)(230*bo))
-                 : IM_COL32(210,90,65,(int)(130*bo)),
-        48, 3.0f);
+      /* Snake colour (same brightened formula as arrow) */
+      float bbr = 0.863f, bbg = 0.314f, bbb = 0.216f;
+      {
+        int sl3 = tdarray_length(gdata->data.snakes);
+        if (sl3 > 0) {
+          snake* mbptr = gdata->data.snakes + (sl3 - 1);
+          if (gdata->data.snake_id == mbptr->id) {
+            int cv2 = mbptr->cv;
+            if (cv2 < 0) cv2 = 0;
+            if (cv2 >= NUM_COLOR_GROUPS) cv2 = NUM_COLOR_GROUPS - 1;
+            vec3s* sc2 = gdata->cg_colors + cv2;
+            bbr = 0.25f + 0.75f * sc2->r; if (bbr > 1.0f) bbr = 1.0f;
+            bbg = 0.25f + 0.75f * sc2->g; if (bbg > 1.0f) bbg = 1.0f;
+            bbb = 0.25f + 0.75f * sc2->b; if (bbb > 1.0f) bbb = 1.0f;
+          }
+        }
+      }
+      /* Smooth alpha: AS boost_a 0.3 idle → 0.6 boosting, rate 0.05*vfr */
+      static float s_boost_a = 0.3f;
+      float vfr3 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
+      if (boost_on) { s_boost_a += vfr3*0.05f; if (s_boost_a>0.6f) s_boost_a=0.6f; }
+      else          { s_boost_a -= vfr3*0.05f; if (s_boost_a<0.3f) s_boost_a=0.3f; }
+
+      float eff_a = s_boost_a * usrs->boost_opacity;
+      float hr = bbr*1.3f>1.0f?1.0f:bbr*1.3f;
+      float hg = bbg*1.3f>1.0f?1.0f:bbg*1.3f;
+      float hb = bbb*1.3f>1.0f?1.0f:bbb*1.3f;
+      ImU32 fill_c = IM_COL32((int)(bbr*255),(int)(bbg*255),(int)(bbb*255),(int)(eff_a*255));
+      float ring_a = eff_a*1.1f>1.0f?1.0f:eff_a*1.1f;
+      ImU32 ring_c = IM_COL32((int)(hr*255),(int)(hg*255),(int)(hb*255),(int)(ring_a*255));
+
+      ImDrawList_AddCircleFilled(dl, (ImVec2){bcx,bcy}, br, fill_c, 48);
+      ImDrawList_AddCircle      (dl, (ImVec2){bcx,bcy}, br, ring_c, 48, 3.0f);
     }
 
     float bfont = br * 0.40f;
