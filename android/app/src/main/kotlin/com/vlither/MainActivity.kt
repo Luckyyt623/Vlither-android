@@ -56,9 +56,8 @@ class MainActivity : Activity() {
 
     private lateinit var btnPlay:       Button
     private lateinit var btnWatchAd:    Button
-    private lateinit var tvStatus:      TextView
     private lateinit var tvTimer:       TextView
-    private lateinit var tvPrivacy:     TextView
+    private lateinit var btnChangelog:  Button
     private lateinit var layoutUpdate:  LinearLayout  // update panel, hidden by default
     private lateinit var tvUpdateMsg:   TextView
     private lateinit var btnDownload:   Button
@@ -81,11 +80,6 @@ class MainActivity : Activity() {
         checkForUpdate()
         handleUnlockDeepLink(intent)
         refreshUnlockUi()
-        AdManager.setStatusListener { mainHandler.post { refreshUnlockUi() } }
-        AdManager.initialize(this) {
-            AdManager.preload(this)
-            mainHandler.post { tvPrivacy.visibility = if (AdManager.isPrivacyOptionsRequired()) View.VISIBLE else View.GONE }
-        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -164,8 +158,31 @@ class MainActivity : Activity() {
     private fun showUpdatePanel(version: String) {
         tvUpdateMsg.text = "New update available: v$version"
         layoutUpdate.visibility = View.VISIBLE
+        btnChangelog.visibility = View.VISIBLE
         // Dim play button to hint user about update
         btnPlay.alpha = 0.6f
+    }
+
+    private fun showChangelog() {
+        val message = """
+Update 3.3
+
+  • You must now watch an ad to unlock the game for 24 hours
+  • The direction arrow now changes colour based on your snake's colour
+  • You can now customise the arrow's sensitivity and size in Settings
+  • Arrow control has been optimised
+
+
+
+
+Changes made by Lucky
+        """.trimIndent()
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("What's New in v3.3")
+            .setMessage(message)
+            .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 
     private fun onDownloadClicked() {
@@ -224,14 +241,6 @@ class MainActivity : Activity() {
         tvTitle.gravity = android.view.Gravity.CENTER
         tvTitle.setPadding(0, 0, 0, 48)
 
-        // Status
-        tvStatus = TextView(this)
-        tvStatus.text = "Welcome to Vlither!"
-        tvStatus.textSize = 15f
-        tvStatus.setTextColor(0xFF2BAA60.toInt())
-        tvStatus.gravity = android.view.Gravity.CENTER
-        tvStatus.setPadding(0, 0, 0, 24)
-
         val btnParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -259,15 +268,16 @@ class MainActivity : Activity() {
         btnPlay.layoutParams = btnParams
         btnPlay.setOnClickListener { onPlayClicked() }
 
-        // Privacy Options — only shown if UMP says it's required (EEA/UK)
-        tvPrivacy = TextView(this)
-        tvPrivacy.text = "Privacy Options"
-        tvPrivacy.textSize = 12f
-        tvPrivacy.setTextColor(0xFF888888.toInt())
-        tvPrivacy.gravity = android.view.Gravity.CENTER
-        tvPrivacy.setPadding(0, 24, 0, 0)
-        tvPrivacy.visibility = View.GONE
-        tvPrivacy.setOnClickListener { AdManager.showPrivacyOptionsForm(this) }
+        // Changelog — hidden until an update is detected
+        btnChangelog = Button(this)
+        btnChangelog.text = "📋  What's New"
+        btnChangelog.textSize = 13f
+        btnChangelog.setPadding(0, 16, 0, 16)
+        btnChangelog.layoutParams = btnParams
+        btnChangelog.setTextColor(0xFF5DADE2.toInt())
+        btnChangelog.alpha = 0.85f
+        btnChangelog.visibility = View.GONE
+        btnChangelog.setOnClickListener { showChangelog() }
 
         // ── Update panel — hidden until update found ──────────────────
         layoutUpdate = LinearLayout(this)
@@ -316,11 +326,10 @@ class MainActivity : Activity() {
         layoutUpdate.addView(btnLater)
 
         col.addView(tvTitle)
-        col.addView(tvStatus)
         col.addView(btnWatchAd)
         col.addView(tvTimer)
         col.addView(btnPlay)
-        col.addView(tvPrivacy)
+        col.addView(btnChangelog)
         col.addView(layoutUpdate)
         root.addView(col, colParams)
         setContentView(root)

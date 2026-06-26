@@ -24,8 +24,6 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
-        buildConfigField "String", "ADMOB_AD_UNIT_ID",
-            "\"${secret('ADMOB_AD_UNIT_ID', 'ADMOB_AD_UNIT_ID')}\""
     }
 
     signingConfigs {
@@ -77,6 +75,4 @@ android {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.3.20"
-    implementation "com.google.android.gms:play-services-ads:25.4.0"
-    implementation "com.google.android.ump:user-messaging-platform:4.0.0"
 }
