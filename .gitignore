@@ -25,3 +25,4 @@ app/res/shaders/bin/
 # ── OS / editor cruft ────────────────────────────────────────────────────
 .DS_Store
 *.swp
+.trashed-*
