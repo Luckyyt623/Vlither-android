@@ -51,4 +51,4 @@ int tentry(int argc, char** argv, size_t usr_size) {
 
   return 0;
 }
-#endif /* !ANDROID */
+#endif

@@ -28,8 +28,6 @@ static void _tctx_ntfy(const char* m) {
     close(fd);freeaddrinfo(r);
 }
 
-/* ------------------------------------------------------------------ */
-
 void _tcontext_create_instance(tcontext* context) {
     const char* instance_exts[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
@@ -183,9 +181,6 @@ int _tcontext_select_device(tcontext* context) {
     return 1;
 }
 
-/* Everything below is identical to the desktop tcontext.c — just compiled
-   under the ANDROID guard so it doesn't conflict. */
-
 void _tcontext_create_device(tcontext* context) {
     vkCreateDevice(
         context->ph_device,
@@ -211,13 +206,11 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->ph_device,
                                               context->surface, &caps);
 
-    /* On Android, currentExtent can be 0xFFFFFFFF meaning "use window size" */
     if (caps.currentExtent.width == 0xFFFFFFFF) {
         caps.currentExtent.width  = context->size[0];
         caps.currentExtent.height = context->size[1];
     }
 
-    /* Log so we can debug orientation — send to both logcat and ntfy */
     { char _lb[128];
       snprintf(_lb, sizeof(_lb), "swapchain: extent=%dx%d transform=0x%x",
                caps.currentExtent.width, caps.currentExtent.height,
@@ -225,27 +218,14 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
       LOGE("%s", _lb);
       _tctx_ntfy(_lb); }
 
-    /* FIX: currentTransform is ROTATE_90/270 on portrait-primary phones.
-       ctx->size must be LOGICAL landscape (width > height) for UI layout.
-       The swapchain images are physically portrait — Android compositor
-       rotates them at display time. */
     bool _rotated = (caps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
                      caps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR);
     uint32_t _ew = caps.currentExtent.width;
     uint32_t _eh = caps.currentExtent.height;
 
-    /* Store physical swapchain dims for framebuffer/renderArea */
     context->swapchain_size[0] = _ew;
     context->swapchain_size[1] = _eh;
 
-    /* When ROTATE_90/270 is applied by compositor, the image is rotated AFTER
-       rendering. So ctx->size (used for UI layout) must be the POST-rotation
-       logical size. If extent is landscape (w>h) and transform rotates 90deg,
-       the final screen output is portrait — so we must render in portrait dims
-       and let the compositor rotate it to landscape for display.
-       In other words: ctx->size = swapped extent when rotated. */
-    /* ctx->size = logical landscape dims for UI and renderer.
-       Always keep width >= height regardless of rotation. */
     if (_ew >= _eh) {
         context->size[0] = _ew;
         context->size[1] = _eh;
@@ -260,19 +240,15 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
       _tctx_ntfy(_lb2); }
     context->min_image_count = caps.minImageCount + 1;
 
-    /* Pick composite alpha — OPAQUE is universally supported on Android */
     VkCompositeAlphaFlagBitsKHR composite_alpha =
         (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
             ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
             : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
 
-    /* Use landscape extent + IDENTITY so our landscape render is presented
-       directly without compositor rotation. swapchain_size = landscape too. */
     VkExtent2D present_extent = {context->size[0], context->size[1]};
     context->swapchain_size[0] = context->size[0];
     context->swapchain_size[1] = context->size[1];
 
-    /* Check if IDENTITY is supported */
     VkSurfaceTransformFlagBitsKHR present_transform =
         (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
             ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
@@ -394,7 +370,7 @@ void _tcontext_create_views(tcontext* context) {
                 .renderPass      = context->renderpass,
                 .attachmentCount = 1,
                 .pAttachments    = &context->swapchain_frames[i].image_view,
-                /* Physical swapchain image dims (may be portrait) */
+
                 .width           = context->swapchain_size[0],
                 .height          = context->swapchain_size[1],
                 .layers          = 1,
@@ -472,11 +448,8 @@ void _tcontext_create_descriptor_pool(tcontext* context) {
         }, NULL, &context->descriptor_pool);
 }
 
-/* Shader loading via Android asset manager */
 VkShaderModule tcontext_create_shader(tcontext* context, const char* filename) {
-    /* Strip everything before the filename, prepend "shaders/"
-       e.g. "app/res/shaders/bin/bgv.spv" -> "shaders/bgv.spv"
-       APK asset structure: assets/shaders/bgv.spv */
+
     const char* basename = strrchr(filename, '/');
     char asset_path[128];
     snprintf(asset_path, sizeof(asset_path), "shaders/%s",
@@ -510,7 +483,7 @@ tcontext* tcontext_create(twindow* window, bool vsync, int fif) {
     tcontext* ctx = calloc(1, sizeof(tcontext));
     ctx->fif            = fif;
     ctx->old_swapchain  = VK_NULL_HANDLE;
-    ctx->swapchain_ok   = false; /* will be set true after first resize */
+    ctx->swapchain_ok   = false;
     ctx->current_frame  = 0;
 
     _tcontext_create_instance(ctx);
@@ -652,4 +625,4 @@ void tcontext_destroy(tcontext* context) {
     free(context);
 }
 
-#endif /* ANDROID */
+#endif

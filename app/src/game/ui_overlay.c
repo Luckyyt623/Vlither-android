@@ -1,6 +1,6 @@
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
-/* IM_COL32 lives in the C++ imgui.h only — define it here for C files */
+
 #ifndef IM_COL32
 #define IM_COL32(R,G,B,A) \
   (((ImU32)(A)<<24)|((ImU32)(B)<<16)|((ImU32)(G)<<8)|((ImU32)(R)<<0))
@@ -37,11 +37,11 @@ void ui_overlay(tenv* env) {
                           1;
 
       if (usrs->hotkeys[HOTKEY_ASSIST].active) {
-        /* On Android ms->pos is always (0,0) — use touch cursor instead */
+
 #ifdef ANDROID
         float laser_tx = gdata->touch_ctrl.tp_cursor_x;
         float laser_ty = gdata->touch_ctrl.tp_cursor_y;
-        /* If cursor not yet initialized, fall back to screen centre */
+
         if (laser_tx == 0.0f && laser_ty == 0.0f) {
           laser_tx = mww2;
           laser_ty = mhh2;
@@ -121,13 +121,6 @@ void ui_overlay(tenv* env) {
       display_hotkeys(usr, (icon_sz.x - char_sz.x) * 0.5f,
                       usrs->stats_font_size);
 
-      /* ── In-game quick-toggles (shown alongside hotkey list) ── */
-      igText("");
-      igPushFont(usr->imgui_data.mono_font[usrs->stats_font_size],
-                 usr->imgui_data.mono_font[usrs->stats_font_size]->LegacySize);
-      igTextColored((ImVec4){1, 1, 0.5f, 0.6f}, "Options");
-      igCheckbox("Boost arrow glow", &usrs->boost_arrow_anim);
-      igPopFont();
     }
 
     float px = (((gdata->data.view_xx - gdata->data.grd) * 2) /
@@ -146,11 +139,9 @@ void ui_overlay(tenv* env) {
 
     igTextColored((ImVec4){1, 1, 1, 0.3}, "\ue9d9");
     igSameLine(0, -1);
-    // igPushFont(
-    //     usr->imgui_data.mono_font_bold[usrs->stats_font_size],
-    //     usr->imgui_data.mono_font_bold[usrs->stats_font_size]->LegacySize);
+
     igTextColored((ImVec4){1, 1, 1, 0.7}, "%d", gdata->data.rank);
-    // igPopFont();
+
     igSameLine(0, 0);
     igTextColored((ImVec4){1, 1, 1, 0.5}, " / %d", gdata->data.slither_count);
 
@@ -208,7 +199,7 @@ void ui_overlay(tenv* env) {
             igPushFont(
                 usr->imgui_data.mono_font[usrs->lb_font_size],
                 usr->imgui_data.mono_font[usrs->lb_font_size]->LegacySize);
-            itcolor.w = 0.6f;  // .7f * (.3f + .7f * (1 - (1 + row) / 10.0f));
+            itcolor.w = 0.6f;
           }
 
           igTableNextRow(ImGuiTableRowFlags_None, 0);
@@ -251,19 +242,9 @@ void ui_overlay(tenv* env) {
   }
 
 #ifdef ANDROID
-  /* Signal to twindow_android.c that the overlay is active this frame */
+
   { extern bool g_overlay_drawn_this_frame; g_overlay_drawn_this_frame = true; }
 
-  /* ============================================================
-   * TOUCH CONTROLS OVERLAY
-   * Joystick mode  – virtual joystick ring (bottom left or right)
-   * Trackpad mode  – NO placeholder ring; only cursor dot shown
-   * Boost          – circle (bottom right or left, based on swap)
-   * Swap button    – small fade button at top centre
-   * Active ONLY during gameplay (follow_view == true)
-   * ============================================================ */
-
-  /* Keep global swap-state in sync */
   extern bool g_ctrl_swap_sides;
   g_ctrl_swap_sides = usrs->ctrl_swap_sides;
 
@@ -276,14 +257,11 @@ void ui_overlay(tenv* env) {
     bool  boost_on  = env->wnd->touch.boost_down;
     bool  swapped   = usrs->ctrl_swap_sides;
 
-    /* ── Zoom slider globals (read by twindow_android + tentry) ── */
     extern float g_zslider_left, g_zslider_top, g_zslider_right, g_zslider_bottom;
     extern float g_zslider_half_h;
     extern float g_zoom_sensitivity;
     g_zoom_sensitivity = usrs->zoom_sensitivity;
 
-    /* ── compute layout positions ──────────────────────────────── */
-    /* Boost - custom or auto from swap */
     float br, bcx, bcy;
     if (usrs->boost_pos_custom) {
         br  = sh * usrs->boost_rel_size;
@@ -295,7 +273,6 @@ void ui_overlay(tenv* env) {
         bcy = sh - br - margin;
     }
 
-    /* Joystick/trackpad ring - custom or auto */
     float jr, jcx, jcy;
     if (usrs->joy_pos_custom) {
         jr  = sh * usrs->joy_rel_size;
@@ -307,15 +284,13 @@ void ui_overlay(tenv* env) {
         jcy = sh - jr - margin;
     }
 
-    /* Expose button positions for twindow_android.c circle-only detection */
     { extern float g_boost_cx,g_boost_cy,g_boost_r,g_joy_cx,g_joy_cy,g_joy_r;
       extern bool  g_is_trackpad_mode, g_panel_open;
       g_boost_cx = bcx; g_boost_cy = bcy; g_boost_r = br;
       g_joy_cx   = jcx; g_joy_cy   = jcy; g_joy_r   = jr;
       g_is_trackpad_mode = usrs->ctrl_mode_trackpad;
-      (void)g_panel_open; /* read in game move suppression below */ }
+      (void)g_panel_open;  }
 
-    /* ── JOYSTICK (only in joystick mode) ──────────────────────── */
     if (!usrs->ctrl_mode_trackpad) {
       bool  joy_on = gdata->touch_ctrl.joy_tracking;
 
@@ -334,6 +309,7 @@ void ui_overlay(tenv* env) {
         (ImVec2){jcx, jcy - jr * 0.78f}, (ImVec2){jcx, jcy + jr * 0.78f}, cross, 1.5f);
 
       float jtx = jcx, jty = jcy;
+      static float s_joy_last_dx = 0.0f, s_joy_last_dy = 0.0f;
       if (joy_on) {
         float dx   = env->wnd->touch.x - gdata->touch_ctrl.joy_anchor_x;
         float dy   = env->wnd->touch.y - gdata->touch_ctrl.joy_anchor_y;
@@ -342,6 +318,12 @@ void ui_overlay(tenv* env) {
         float sc   = (dist > cap && dist > 0.001f) ? cap / dist : 1.0f;
         jtx = jcx + dx * sc;
         jty = jcy + dy * sc;
+        s_joy_last_dx = jtx - jcx;
+        s_joy_last_dy = jty - jcy;
+      } else {
+
+        jtx = jcx + s_joy_last_dx;
+        jty = jcy + s_joy_last_dy;
       }
       ImDrawList_AddCircleFilled(dl,
         (ImVec2){jtx, jty}, jr * 0.29f,
@@ -355,12 +337,8 @@ void ui_overlay(tenv* env) {
         IM_COL32(255, 255, 255, 65), "MOVE", NULL, 0.0f, NULL);
 
     } else {
-      /* ── TRACKPAD MODE: polygon arrow cursor (snake-colour + boost glow) ── */
 
-      /* ── Derive arrow colour from the player snake's colour (cv).
-       *   AS formula: arrow_color = 0.25*256 + 0.75*snake_rgb
-       *   i.e. blend 25 % white with 75 % of the snake body colour.        */
-      float ar = 0.776f, ag = 0.263f, ab = 0.310f;  /* fallback: original red */
+      float ar = 0.776f, ag = 0.263f, ab = 0.310f;
       {
         int sl2 = tdarray_length(gdata->data.snakes);
         if (sl2 > 0) {
@@ -380,12 +358,9 @@ void ui_overlay(tenv* env) {
         }
       }
 
-      /* ── Boost animation state — matches AS accel_a / accel_fr logic.
-       *   accel_a: smooth 0→1 fade-in when boosting, 1→0 fade-out when not.
-       *   accel_fr: running counter driving the pulsing cos() glow.         */
       static float s_accel_a  = 0.0f;
       static float s_accel_fr = 0.0f;
-      bool is_boosting = boost_on;  /* same flag that lights the boost button */
+      bool is_boosting = boost_on;
       float vfr2 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
 
       if (is_boosting) {
@@ -395,10 +370,10 @@ void ui_overlay(tenv* env) {
         s_accel_a -= vfr2 * 0.03f;
         if (s_accel_a < 0.0f) s_accel_a = 0.0f;
       }
-      s_accel_fr += vfr2 * 0.22f;  /* same rate as AS */
+      s_accel_fr += vfr2 * 0.22f;
 
       if (gdata->touch_ctrl.tp_tracking && gdata->touch_ctrl.tp_visible
-          && !usrs->hotkeys[HOTKEY_BOT].active) {
+          && !usrs->hotkeys[HOTKEY_BOT].active && !usrs->arrow_invisible) {
         float acx = gdata->touch_ctrl.tp_cursor_x;
         float acy = gdata->touch_ctrl.tp_cursor_y;
 
@@ -407,23 +382,18 @@ void ui_overlay(tenv* env) {
         float cs   = cosf(rot);
         float sn_v = sinf(rot);
 
-        /* Arrow size scales with boost (AS: scaleX = 0.5 + 0.25*accel_a,
-         * base is 0.5, so boost makes it up to 1.5× larger at full accel) */
         float boost_sz = 1.0f + 0.5f * s_accel_a;
         float aw = sh * 0.11f  * usrs->arrow_size * boost_sz;
         float ah = sh * 0.066f * usrs->arrow_size * boost_sz;
 
-        /* Rotate local point (px,py) around cursor (acx,acy) */
         #define ARPT(px, py) \
           (ImVec2){ acx + (px)*cs - (py)*sn_v, \
                     acy + (px)*sn_v + (py)*cs }
 
-        /* ── Pass 1: base arrow (snake colour, AS fill alpha 230/255) ── */
         ImU32 fill_col   = IM_COL32((int)(ar*255),(int)(ag*255),(int)(ab*255), 230);
-        /* Border: 70 % brightness of fill */
+
         ImU32 border_col = IM_COL32((int)(ar*178),(int)(ag*178),(int)(ab*178), 255);
 
-        /* Body rectangle */
         ImVec2 body[4] = {
           ARPT(-0.10f*aw, -0.25f*ah),
           ARPT( 0.50f*aw, -0.25f*ah),
@@ -432,21 +402,18 @@ void ui_overlay(tenv* env) {
         };
         ImDrawList_AddConvexPolyFilled(dl, body, 4, fill_col);
 
-        /* Top arrowhead wing */
         ImDrawList_AddTriangleFilled(dl,
           ARPT(-0.10f*aw, -0.50f*ah),
           ARPT(-0.10f*aw, -0.25f*ah),
           ARPT(-0.50f*aw,  0.00f   ),
           fill_col);
 
-        /* Bottom arrowhead wing */
         ImDrawList_AddTriangleFilled(dl,
           ARPT(-0.10f*aw,  0.25f*ah),
           ARPT(-0.10f*aw,  0.50f*ah),
           ARPT(-0.50f*aw,  0.00f   ),
           fill_col);
 
-        /* Border outline */
         ImVec2 outline[7] = {
           ARPT(-0.10f*aw, -0.50f*ah),
           ARPT(-0.10f*aw, -0.25f*ah),
@@ -459,10 +426,6 @@ void ui_overlay(tenv* env) {
         ImDrawList_AddPolyline(dl, outline, 7, border_col,
           ImDrawFlags_Closed, 3.0f);
 
-        /* ── Pass 2: additive boost glow (matches AS arrow_add_batch).
-         *   alpha = accel_a * (0.5 + 0.5*cos(accel_fr)), max ~200.
-         *   Drawn slightly larger (+15 %) to look like an additive halo.
-         *   Skipped when the user has disabled boost arrow animation.    */
         if (s_accel_a > 0.0f && usrs->boost_arrow_anim) {
           float pulse = s_accel_a * (0.5f + 0.5f * cosf(s_accel_fr));
           int   ga    = (int)(pulse * 200.0f);
@@ -493,11 +456,8 @@ void ui_overlay(tenv* env) {
       }
     }
 
-    /* ── BOOST BUTTON ───────────────────────────────────────────────────
-     * Matches AS: boost_a transitions 0.3 (idle) ↔ 0.6 (boosting) at
-     * speed 0.05*vfr.  Button is tinted with the player snake colour.    */
     {
-      /* Snake colour (same brightened formula as arrow) */
+
       float bbr = 0.863f, bbg = 0.314f, bbb = 0.216f;
       {
         int sl3 = tdarray_length(gdata->data.snakes);
@@ -514,7 +474,7 @@ void ui_overlay(tenv* env) {
           }
         }
       }
-      /* Smooth alpha: AS boost_a 0.3 idle → 0.6 boosting, rate 0.05*vfr */
+
       static float s_boost_a = 0.3f;
       float vfr3 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
       if (boost_on) { s_boost_a += vfr3*0.05f; if (s_boost_a>0.6f) s_boost_a=0.6f; }
@@ -542,9 +502,6 @@ void ui_overlay(tenv* env) {
 
   }
 
-  /* ── ON-SCREEN HOTKEY BUTTONS ──────────────────────────────────────
-     Each enabled hotkey shows as a small tap button along the top.
-     Tapping toggles the hotkey active state.                            */
   if (gdata->data.follow_view) {
     float sh = (float)ctx->size[1];
     float sw = (float)ctx->size[0];
@@ -578,7 +535,7 @@ void ui_overlay(tenv* env) {
       ImDrawList_AddText_FontPtr(hkdl, igGetFont(), fsz,
         (ImVec2){bx + btn_w*0.5f - tsz.x*tsc*0.5f, by + btn_h*0.5f - fsz*0.5f},
         hk_txt, hk_short[hi], NULL, 0, NULL);
-      /* Tap to toggle */
+
       ImGuiIO* hkio = igGetIO_Nil();
       if (hkio && igIsMouseClicked_Bool(0, false)) {
         float mx = hkio->MousePos.x, my = hkio->MousePos.y;
@@ -588,92 +545,132 @@ void ui_overlay(tenv* env) {
     }
   }
 
-    /* ═══════════════════════════════════════════════════════════════════
-     ZOOM SLIDER  –  always visible during PLAYING, right side (default)
-     3rd-finger drag:  up = zoom out, down = zoom in
-     Thumb animates back to centre when released.
-     ═══════════════════════════════════════════════════════════════════ */
   if (gdata->data.follow_view) {
-    /* Expose globals for twindow_android.c touch routing */
+
     extern float g_zslider_left, g_zslider_top, g_zslider_right, g_zslider_bottom;
     extern float g_zslider_half_h;
+    extern bool  g_zslider_horizontal;
 
-    ImDrawList* zdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
     float sw2 = (float)ctx->size[0];
     float sh2 = (float)ctx->size[1];
 
-    /* Slider geometry from settings */
     float zs_half_h = sh2 * usrs->zslider_rel_h;
-    float zs_half_w = sh2 * 0.022f;             /* thin bar */
+    float zs_half_w = sh2 * 0.022f;
     float zs_cx     = sw2 * usrs->zslider_rel_x;
     float zs_cy     = sh2 * usrs->zslider_rel_y;
 
-    /* Expose for touch routing */
-    g_zslider_half_h = zs_half_h;
-    g_zslider_left   = zs_cx - zs_half_w * 1.5f;
-    g_zslider_right  = zs_cx + zs_half_w * 1.5f;
-    g_zslider_top    = zs_cy - zs_half_h;
-    g_zslider_bottom = zs_cy + zs_half_h;
+    g_zslider_horizontal = usrs->zslider_horizontal;
 
-    float zopa = usrs->zslider_opacity;
-    ImU32 track_col = IM_COL32(255, 255, 255, (int)(50  * zopa));
-    ImU32 track_brd = IM_COL32(255, 255, 255, (int)(90  * zopa));
-    ImU32 thumb_col = IM_COL32(255, 255, 255, (int)(180 * zopa));
-    ImU32 thumb_brd = IM_COL32(255, 255, 255, (int)(230 * zopa));
+    if (usrs->zslider_hidden) {
 
-    /* Track bar */
-    ImDrawList_AddRectFilled(zdl,
-      (ImVec2){zs_cx - zs_half_w * 0.18f, zs_cy - zs_half_h},
-      (ImVec2){zs_cx + zs_half_w * 0.18f, zs_cy + zs_half_h},
-      track_col, zs_half_w * 0.18f, 0);
+      g_zslider_left = g_zslider_right = g_zslider_top = g_zslider_bottom = 0;
+      g_zslider_half_h = 1;
+    } else {
+      ImDrawList* zdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
+      float zopa = usrs->zslider_opacity;
+      ImU32 track_col = IM_COL32(255, 255, 255, (int)(50  * zopa));
+      ImU32 track_brd = IM_COL32(255, 255, 255, (int)(90  * zopa));
+      ImU32 thumb_col = IM_COL32(255, 255, 255, (int)(180 * zopa));
+      ImU32 thumb_brd = IM_COL32(255, 255, 255, (int)(230 * zopa));
 
-    /* Zoom labels */
-    float lbl_sz = zs_half_w * 1.1f;
-    ImVec2 lbl_in_sz; igCalcTextSize(&lbl_in_sz, "+", NULL, false, -1.0f);
-    float lbl_sc = lbl_sz / igGetFontSize();
-    ImDrawList_AddText_FontPtr(zdl, igGetFont(), lbl_sz,
-      (ImVec2){zs_cx - lbl_in_sz.x * lbl_sc * 0.5f, zs_cy + zs_half_h + 4},
-      IM_COL32(255,255,255,(int)(120*zopa)), "+", NULL, 0, NULL);
-    ImVec2 lbl_out_sz; igCalcTextSize(&lbl_out_sz, "-", NULL, false, -1.0f);
-    ImDrawList_AddText_FontPtr(zdl, igGetFont(), lbl_sz,
-      (ImVec2){zs_cx - lbl_out_sz.x * lbl_sc * 0.5f, zs_cy - zs_half_h - lbl_sz - 4},
-      IM_COL32(255,255,255,(int)(120*zopa)), "-", NULL, 0, NULL);
+      static float s_thumb_vis_offset = 0.0f;
+      float target_offset = env->wnd->touch.zslider_offset;
+      s_thumb_vis_offset += (target_offset - s_thumb_vis_offset) * 0.25f;
+      bool  touching = (env->wnd->touch.zslider_ptr_id != -1);
 
-    /* Thumb: animate toward current offset position */
-    static float s_thumb_vis_offset = 0.0f;
-    float target_offset = env->wnd->touch.zslider_offset;
-    s_thumb_vis_offset += (target_offset - s_thumb_vis_offset) * 0.25f;
-    float thumb_y = zs_cy + s_thumb_vis_offset;
-    float thumb_h = zs_half_w * 1.4f;
-    float thumb_w = zs_half_w * 1.1f;
-    bool  touching = (env->wnd->touch.zslider_ptr_id != -1);
+      if (touching && target_offset != 0.0f) {
+        float half = zs_half_h > 1.0f ? zs_half_h : 1.0f;
+        float norm = target_offset / half;
+        if (norm >  1.0f) norm =  1.0f;
+        if (norm < -1.0f) norm = -1.0f;
 
-    /* ── Direct zoom update ─────────────────────────────────────────
-       Apply zoom straight to ms_zoom here — this is far more reliable
-       than the dwheel chain which depends on call order and connection
-       state.  ui_overlay runs inside game_loop so gdata is accessible. */
-    if (touching && target_offset != 0.0f) {
-      float half = zs_half_h > 1.0f ? zs_half_h : 1.0f;
-      float norm = target_offset / half;
-      if (norm >  1.0f) norm =  1.0f;
-      if (norm < -1.0f) norm = -1.0f;
-      /* norm > 0 → thumb below centre → zoom IN */
-      gdata->data.ms_zoom *= expf(norm * 4.0f
-                                  * usrs->zoom_sensitivity
-                                  * usrs->zoom_step);
-      if (gdata->data.ms_zoom > MAX_ZOOM_IN)  gdata->data.ms_zoom = MAX_ZOOM_IN;
-      if (gdata->data.ms_zoom < MAX_ZOOM_OUT) gdata->data.ms_zoom = MAX_ZOOM_OUT;
-    }
-    ImU32 t_fill   = touching ? IM_COL32(180,220,255,(int)(220*zopa))
+        gdata->data.ms_zoom *= expf(norm * 4.0f
+                                    * usrs->zoom_sensitivity
+                                    * usrs->zoom_step);
+        if (gdata->data.ms_zoom > MAX_ZOOM_IN)  gdata->data.ms_zoom = MAX_ZOOM_IN;
+        if (gdata->data.ms_zoom < MAX_ZOOM_OUT) gdata->data.ms_zoom = MAX_ZOOM_OUT;
+      }
+
+      ImU32 t_fill = touching ? IM_COL32(180,220,255,(int)(220*zopa))
                                : IM_COL32(255,255,255,(int)(160*zopa));
-    ImDrawList_AddRectFilled(zdl,
-      (ImVec2){zs_cx - thumb_w, thumb_y - thumb_h},
-      (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},
-      t_fill, thumb_w * 0.5f, 0);
-    ImDrawList_AddRect(zdl,
-      (ImVec2){zs_cx - thumb_w, thumb_y - thumb_h},
-      (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},
-      thumb_brd, thumb_w * 0.5f, 0, 1.8f);
+
+      if (usrs->zslider_horizontal) {
+
+        float half_l = zs_half_h;
+        float half_t = zs_half_w;
+
+        g_zslider_left   = zs_cx - half_l * 1.5f;
+        g_zslider_right  = zs_cx + half_l * 1.5f;
+        g_zslider_top    = zs_cy - half_t * 1.5f;
+        g_zslider_bottom = zs_cy + half_t * 1.5f;
+        g_zslider_half_h = half_l;
+
+        ImDrawList_AddRectFilled(zdl,
+          (ImVec2){zs_cx - half_l, zs_cy - half_t * 0.18f},
+          (ImVec2){zs_cx + half_l, zs_cy + half_t * 0.18f},
+          track_col, half_t * 0.18f, 0);
+
+        float lbl_sz = half_t * 1.1f;
+        ImVec2 lbl_m_sz; igCalcTextSize(&lbl_m_sz, "-", NULL, false, -1.0f);
+        ImVec2 lbl_p_sz; igCalcTextSize(&lbl_p_sz, "+", NULL, false, -1.0f);
+        float  lbl_sc = lbl_sz / igGetFontSize();
+        ImDrawList_AddText_FontPtr(zdl, igGetFont(), lbl_sz,
+          (ImVec2){zs_cx - half_l - lbl_m_sz.x * lbl_sc - 4,
+                   zs_cy - lbl_sz * 0.5f},
+          IM_COL32(255,255,255,(int)(120*zopa)), "-", NULL, 0, NULL);
+        ImDrawList_AddText_FontPtr(zdl, igGetFont(), lbl_sz,
+          (ImVec2){zs_cx + half_l + 4, zs_cy - lbl_sz * 0.5f},
+          IM_COL32(255,255,255,(int)(120*zopa)), "+", NULL, 0, NULL);
+
+        float thumb_x = zs_cx + s_thumb_vis_offset;
+        float thumb_hw = half_t * 1.4f;
+        float thumb_hh = half_t * 1.1f;
+        ImDrawList_AddRectFilled(zdl,
+          (ImVec2){thumb_x - thumb_hw, zs_cy - thumb_hh},
+          (ImVec2){thumb_x + thumb_hw, zs_cy + thumb_hh},
+          t_fill, thumb_hw * 0.5f, 0);
+        ImDrawList_AddRect(zdl,
+          (ImVec2){thumb_x - thumb_hw, zs_cy - thumb_hh},
+          (ImVec2){thumb_x + thumb_hw, zs_cy + thumb_hh},
+          thumb_brd, thumb_hw * 0.5f, 0, 1.8f);
+
+      } else {
+
+        g_zslider_half_h = zs_half_h;
+        g_zslider_left   = zs_cx - zs_half_w * 1.5f;
+        g_zslider_right  = zs_cx + zs_half_w * 1.5f;
+        g_zslider_top    = zs_cy - zs_half_h;
+        g_zslider_bottom = zs_cy + zs_half_h;
+
+        ImDrawList_AddRectFilled(zdl,
+          (ImVec2){zs_cx - zs_half_w * 0.18f, zs_cy - zs_half_h},
+          (ImVec2){zs_cx + zs_half_w * 0.18f, zs_cy + zs_half_h},
+          track_col, zs_half_w * 0.18f, 0);
+
+        float lbl_sz = zs_half_w * 1.1f;
+        ImVec2 lbl_in_sz;  igCalcTextSize(&lbl_in_sz,  "+", NULL, false, -1.0f);
+        ImVec2 lbl_out_sz; igCalcTextSize(&lbl_out_sz, "-", NULL, false, -1.0f);
+        float lbl_sc = lbl_sz / igGetFontSize();
+        ImDrawList_AddText_FontPtr(zdl, igGetFont(), lbl_sz,
+          (ImVec2){zs_cx - lbl_in_sz.x  * lbl_sc * 0.5f, zs_cy + zs_half_h + 4},
+          IM_COL32(255,255,255,(int)(120*zopa)), "+", NULL, 0, NULL);
+        ImDrawList_AddText_FontPtr(zdl, igGetFont(), lbl_sz,
+          (ImVec2){zs_cx - lbl_out_sz.x * lbl_sc * 0.5f, zs_cy - zs_half_h - lbl_sz - 4},
+          IM_COL32(255,255,255,(int)(120*zopa)), "-", NULL, 0, NULL);
+
+        float thumb_y = zs_cy + s_thumb_vis_offset;
+        float thumb_h = zs_half_w * 1.4f;
+        float thumb_w = zs_half_w * 1.1f;
+        ImDrawList_AddRectFilled(zdl,
+          (ImVec2){zs_cx - thumb_w, thumb_y - thumb_h},
+          (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},
+          t_fill, thumb_w * 0.5f, 0);
+        ImDrawList_AddRect(zdl,
+          (ImVec2){zs_cx - thumb_w, thumb_y - thumb_h},
+          (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},
+          thumb_brd, thumb_w * 0.5f, 0, 1.8f);
+      }
+    }
   }
-#endif /* ANDROID */
+#endif
 }

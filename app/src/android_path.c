@@ -16,4 +16,4 @@ const char* android_get_files_dir(void) {
     return g_files_dir;
 }
 
-#endif /* ANDROID */
+#endif

@@ -14,10 +14,7 @@
 
 #define UNLOCK_FILENAME "vlither_unlock_expiry.txt"
 
-/* g_android_app is defined in thermite/src/core/tentry_android.c */
 extern struct android_app* g_android_app;
-
-/* ── get_unlock_remaining_ms — reads file, zero JNI ─────────────────── */
 
 long android_jni_get_unlock_remaining_ms(void) {
     const char* files_dir = android_get_files_dir();
@@ -30,7 +27,7 @@ long android_jni_get_unlock_remaining_ms(void) {
     snprintf(path, sizeof(path), "%s/%s", files_dir, UNLOCK_FILENAME);
 
     FILE* f = fopen(path, "r");
-    if (!f) return -1L;  /* file missing = no ad watched yet */
+    if (!f) return -1L;
 
     long long expiry_ms = 0LL;
     int n = fscanf(f, "%lld", &expiry_ms);
@@ -49,8 +46,6 @@ long android_jni_get_unlock_remaining_ms(void) {
     long long remaining = expiry_ms - now_ms;
     return (remaining > 0LL) ? (long)remaining : -1L;
 }
-
-/* ── request_ad — JNI call via g_android_app ────────────────────────── */
 
 void android_jni_request_ad(void) {
     if (!g_android_app || !g_android_app->activity ||
@@ -99,8 +94,6 @@ cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
-/* ── notify_game_ready — hides the loading overlay in GameActivity ───── */
-
 void android_jni_notify_game_ready(void) {
     if (!g_android_app || !g_android_app->activity ||
         !g_android_app->activity->vm) {
@@ -148,4 +141,82 @@ cleanup2:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
-#endif /* ANDROID */
+void android_jni_open_url(const char* url) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm) {
+        AJNI_LOG("open_url: g_android_app not ready");
+        return;
+    }
+
+    JavaVM*  vm  = g_android_app->activity->vm;
+    jobject  act = g_android_app->activity->clazz;
+    JNIEnv*  env = NULL;
+    bool did_attach = false;
+
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) {
+            AJNI_LOG("open_url: AttachCurrentThread failed");
+            return;
+        }
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        AJNI_LOG("open_url: GetEnv failed status=%d", status);
+        return;
+    }
+
+    jclass  uri_cls    = (*env)->FindClass(env, "android/net/Uri");
+    jclass  intent_cls = (*env)->FindClass(env, "android/content/Intent");
+    if (!uri_cls || !intent_cls) {
+        AJNI_LOG("open_url: class lookup failed");
+        (*env)->ExceptionClear(env);
+        goto ou_cleanup;
+    }
+
+    {
+
+        jmethodID uri_parse = (*env)->GetStaticMethodID(
+            env, uri_cls, "parse",
+            "(Ljava/lang/String;)Landroid/net/Uri;");
+        jstring url_jstr = (*env)->NewStringUTF(env, url);
+        jobject uri = (*env)->CallStaticObjectMethod(
+            env, uri_cls, uri_parse, url_jstr);
+        (*env)->DeleteLocalRef(env, url_jstr);
+        if (!uri || (*env)->ExceptionCheck(env)) {
+            AJNI_LOG("open_url: Uri.parse failed");
+            (*env)->ExceptionClear(env);
+            goto ou_cleanup;
+        }
+
+        jfieldID av_fid = (*env)->GetStaticFieldID(
+            env, intent_cls, "ACTION_VIEW", "Ljava/lang/String;");
+        jstring action_view = (jstring)(*env)->GetStaticObjectField(
+            env, intent_cls, av_fid);
+
+        jmethodID ctor = (*env)->GetMethodID(
+            env, intent_cls, "<init>",
+            "(Ljava/lang/String;Landroid/net/Uri;)V");
+        jobject intent = (*env)->NewObject(
+            env, intent_cls, ctor, action_view, uri);
+        if (!intent || (*env)->ExceptionCheck(env)) {
+            AJNI_LOG("open_url: Intent ctor failed");
+            (*env)->ExceptionClear(env);
+            goto ou_cleanup;
+        }
+
+        jclass act_cls = (*env)->GetObjectClass(env, act);
+        jmethodID sa   = (*env)->GetMethodID(
+            env, act_cls, "startActivity",
+            "(Landroid/content/Intent;)V");
+        (*env)->CallVoidMethod(env, act, sa, intent);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+
+        (*env)->DeleteLocalRef(env, intent);
+        (*env)->DeleteLocalRef(env, uri);
+    }
+
+ou_cleanup:
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
+#endif

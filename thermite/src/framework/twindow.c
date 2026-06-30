@@ -137,4 +137,4 @@ void twindow_destroy(twindow* window) {
   glfwTerminate();
   free(window);
 }
-#endif /* !ANDROID */
+#endif

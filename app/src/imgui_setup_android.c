@@ -39,7 +39,6 @@ void imgui_init(tenv* env) {
 
     AAssetManager* am = g_android_app->activity->assetManager;
 
-    /* Icon glyph ranges — stored in variable to avoid comma-in-macro issues */
     static const ImWchar icon_ranges[] = {0xe900, 0xeaea, 0};
 
     for (int i = 0; i < NUM_FONT_SIZES; i++) {
@@ -104,8 +103,6 @@ void imgui_init(tenv* env) {
     io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io->IniFilename  = NULL;
 
-    /* Scale UI for mobile screen density */
-    /* Scale UI for mobile but cap at 1.2 to prevent layout overflow */
     float scale = (float)env->ctx->size[0] / 1080.0f;
     if (scale < 1.0f) scale = 1.0f;
     if (scale > 1.2f) scale = 1.2f;
@@ -151,7 +148,6 @@ void imgui_init(tenv* env) {
     style->Colors[ImGuiCol_ButtonActive]     = (ImVec4){0.14f, 0.14f, 0.14f, 1.00f};
 }
 
-/* Global flag read by twindow_android.c to show/hide soft keyboard */
 bool g_imgui_wants_keyboard = false;
 
 void imgui_prerender(void) {
@@ -159,7 +155,6 @@ void imgui_prerender(void) {
 
     ImGuiIO* io = igGetIO_Nil();
 
-    /* DeltaTime is required every frame — without it ImGui renders nothing */
     static struct timespec _last_time = {0, 0};
     struct timespec _now;
     clock_gettime(CLOCK_MONOTONIC, &_now);
@@ -179,11 +174,6 @@ void imgui_prerender(void) {
         if (wnd->size[0] > 0 && wnd->size[1] > 0)
             io->DisplaySize = (ImVec2){(float)wnd->size[0], (float)wnd->size[1]};
 
-        /* ── Swipe-to-scroll for the settings panel ───────────────────────
-           Android has no mouse wheel, so we translate vertical finger drag
-           into io->MouseWheel before igNewFrame() consumes it.
-           Only active when the panel is open so normal game touches are
-           never mis-interpreted as scroll events.                        */
         extern bool g_panel_open;
         static float s_scroll_last_y   = 0.0f;
         static bool  s_scroll_was_down = false;
@@ -191,9 +181,9 @@ void imgui_prerender(void) {
             bool down_now = io->MouseDown[0];
             if (down_now && s_scroll_was_down) {
                 float dy = io->MousePos.y - s_scroll_last_y;
-                /* Dead zone of 2 px avoids converting taps into micro-scrolls */
+
                 if (dy < -2.0f || dy > 2.0f)
-                    io->MouseWheel += dy / 30.0f; /* px → scroll lines */
+                    io->MouseWheel += dy / 30.0f;
             }
             s_scroll_was_down = down_now;
             s_scroll_last_y   = down_now ? io->MousePos.y : 0.0f;
@@ -216,4 +206,4 @@ void imgui_destroy(void) {
     igDestroyContext(NULL);
 }
 
-#endif /* ANDROID */
+#endif

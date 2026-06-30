@@ -74,7 +74,6 @@ void game_loop(tenv* env) {
       redraw(env);
       ui_overlay(env);
 
-      // special hotkeys
       if (usrs->hotkeys[HOTKEY_QUIT].active ||
           (usrs->quit_mc &&
            tmouse_button_pressed(env->ms, GLFW_MOUSE_BUTTON_MIDDLE))) {

@@ -17,7 +17,7 @@ void ui_viewport(tenv* env) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
   ImGuiStyle* style = igGetStyle();
-  
+
   ImDrawList_AddImage(
       igGetBackgroundDrawList(igGetMainViewport()),
       (ImTextureRef){

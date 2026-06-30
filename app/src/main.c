@@ -10,7 +10,6 @@
 #endif
 #include <math.h>
 
-/* IM_COL32 is defined in imgui.h (C++ only); provide it for this C file */
 #ifndef IM_COL32
 #define IM_COL32(R,G,B,A) \
   (((ImU32)(A)<<24)|((ImU32)(B)<<16)|((ImU32)(G)<<8)|((ImU32)(R)<<0))
@@ -48,7 +47,6 @@ void tinput(tenv* env) {
     save_user_settings(usrs);
   }
 
-  /* F11 fullscreen is PC-only — no keyboard on Android */
 #ifndef ANDROID
   if (tkeyboard_key_pressed(env->kb, GLFW_KEY_F11)) {
     twindow_toggle_fullscreen(env->wnd);
@@ -127,18 +125,11 @@ void trender(tenv* env) {
   if (!tcontext_begin(ctx)) return;
 
   if (usr->r) {
-    /* 1. Offscreen pass — must finish (including its pipeline barrier) BEFORE
-          the swapchain render pass opens.  Opening tcontext_clear first and
-          then starting a second render pass inside renderer_render violated
-          Vulkan render-pass nesting rules and left the swapchain framebuffer
-          in its cleared-black state on mobile drivers (Adreno / Mali). */
+
     renderer_render(usr->r, ctx, (vec4){0.086f, 0.109f, 0.133f, 1});
-    /* Clear instances AFTER rendering them, so the UI can push new ones below */
+
     renderer_clear_instances(usr->r);
 
-    /* 2. Now open the swapchain render pass.  The offscreen texture is already
-          in SHADER_READ_ONLY_OPTIMAL (barrier emitted by renderer_render), so
-          ImGui can safely sample it in the same command buffer. */
     tcontext_clear(ctx, (vec4){0, 0, 0, 1.0f});
 
     imgui_prerender();
@@ -170,33 +161,25 @@ void trender(tenv* env) {
     }
     igEnd();
 
-    /* ═══════════════════════════════════════════════════════════════
-       QUICK SETTINGS  –  gear button (top-right, always faded) +
-       slide-out panel from the right with the Swap Sides toggle.
-       Visible on TITLE_SCREEN and PLAYING only.
-       ═══════════════════════════════════════════════════════════════ */
     {
       static bool s_qs_open = false;
       int scr = usr->gdata.curr_screen;
-      bool qs_visible = (scr == PLAYING); /* hidden on title screen */
+      bool qs_visible = (scr == PLAYING);
 
       if (qs_visible) {
         float sw2 = (float)ctx->size[0];
         float sh2 = (float)ctx->size[1];
 
-        /* ── Gear button geometry ─────────────────────────────────── */
-        float gbr = sh2 * 0.032f;           /* button radius        */
-        float gbx = sw2 * 0.5f;             /* top-centre           */
+        float gbr = sh2 * 0.032f;
+        float gbx = sw2 * 0.5f;
         float gby = gbr * 1.5f;
 
-        /* ── Panel geometry (pre-computed for click-outside test) ─── */
         float pw  = sw2 * 0.27f;
         if (pw < 190.0f) pw = 190.0f;
         float ph  = sh2 * 0.30f;
         float px  = sw2 - pw - sw2 * 0.012f;
         float py  = sh2 * 0.010f;
 
-        /* ── Single click capture for this frame ─────────────────── */
         ImGuiIO* io2 = igGetIO_Nil();
         bool clicked2 = io2 && igIsMouseClicked_Bool(0, false);
         float mpx = (io2 && clicked2) ? io2->MousePos.x : -9999.0f;
@@ -206,11 +189,9 @@ void trender(tenv* env) {
         bool gear_hit = clicked2 && sqrtf(gdx*gdx + gdy*gdy) <= gbr;
 
         if (gear_hit) {
-          s_qs_open = !s_qs_open;              /* toggle panel        */
+          s_qs_open = !s_qs_open;
         }
-        /* click-outside-close is re-evaluated below with full panel height */
 
-        /* ── Draw gear button (foreground draw list) ─────────────── */
         ImDrawList* fdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
 
         ImU32 gb_bg  = IM_COL32(255,255,255, s_qs_open ? 50  : 22);
@@ -220,15 +201,14 @@ void trender(tenv* env) {
         ImDrawList_AddCircleFilled(fdl, (ImVec2){gbx, gby}, gbr, gb_bg, 32);
         ImDrawList_AddCircle(fdl, (ImVec2){gbx, gby}, gbr, gb_brd, 32, 1.5f);
 
-        /* 8 gear teeth as small quads around center */
         float tooth_r = gbr * 0.44f;
         float tooth_hw = gbr * 0.13f;
         float tooth_hh = gbr * 0.20f;
         for (int t = 0; t < 8; t++) {
-          float ang = (float)t * 0.7853982f; /* 2pi/8 */
+          float ang = (float)t * 0.7853982f;
           float cs_t = cosf(ang), sn_t = sinf(ang);
           float tx = gbx + cs_t * tooth_r, ty = gby + sn_t * tooth_r;
-          /* corner vectors: along and perp to ang */
+
           float ax = cs_t * tooth_hh, ay = sn_t * tooth_hh;
           float px2 = -sn_t * tooth_hw, py2 = cs_t * tooth_hw;
           ImVec2 tq[4] = {
@@ -239,13 +219,11 @@ void trender(tenv* env) {
           };
           ImDrawList_AddConvexPolyFilled(fdl, tq, 4, gb_ico);
         }
-        /* Center hub */
+
         ImDrawList_AddCircleFilled(fdl, (ImVec2){gbx, gby}, gbr * 0.30f, gb_ico, 20);
-        /* Center hole */
+
         ImDrawList_AddCircleFilled(fdl, (ImVec2){gbx, gby}, gbr * 0.13f, gb_bg, 16);
 
-        /* ── Slide-out settings panel ─────────────────────────────── */
-        /* Close when clicking outside (use full panel height) */
         float ph_full = sh2 * 0.82f;
         {
           bool ph_hit = clicked2 &&
@@ -256,7 +234,7 @@ void trender(tenv* env) {
         }
 
         if (s_qs_open) {
-          /* Single igSetNext* — no duplicates */
+
           igSetNextWindowPos((ImVec2){px, py}, ImGuiCond_Always, (ImVec2){0.0f, 0.0f});
           igSetNextWindowSize((ImVec2){pw, ph_full}, ImGuiCond_Always);
           igSetNextWindowBgAlpha(0.91f);
@@ -265,11 +243,8 @@ void trender(tenv* env) {
             ImGuiWindowFlags_NoTitleBar  | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove      | ImGuiWindowFlags_NoNav    |
             ImGuiWindowFlags_NoCollapse;
-            /* NOTE: NoDecoration was removed because it bakes in
-               NoScrollbar + NoScrollWithMouse, which breaks panel scroll.
-               NoCollapse is the only extra flag from NoDecoration we want. */
 
-          static int s_qs_page = 0;  /* 0=main, 1=custom controls, 2=hotkeys */
+          static int s_qs_page = 0;
 
           if (igBegin("##qs_panel", NULL, pf)) {
             ImGuiStyle* pst = igGetStyle();
@@ -277,7 +252,6 @@ void trender(tenv* env) {
             bool swapped = up->ctrl_swap_sides;
             float sb_w = pw - pst->WindowPadding.x * 2.0f;
 
-            /* ─── PAGE 0: Main controls ─── */
             if (s_qs_page == 0) {
               igTextColored((ImVec4){0.75f,0.75f,0.75f,1.0f}, "\ue991 Controls");
               igSeparator();
@@ -315,18 +289,15 @@ void trender(tenv* env) {
               if (igButton("Keyboard Buttons", (ImVec2){sb_w, 0.0f}))
                 s_qs_page = 2;
 
-            /* ─── PAGE 1: Custom controls editor ─── */
             } else if (s_qs_page == 1) {
               if (igButton("< Back", (ImVec2){sb_w * 0.4f, 0.0f}))
                 s_qs_page = 0;
               igSeparator();
 
-              /* helper macros */
               #define CC_HEADER(label) \
                 igTextColored((ImVec4){0.75f,0.85f,1.0f,1.0f}, label); \
                 igSeparator();
 
-              /* ── BOOST ── */
               CC_HEADER("Boost Button")
               igCheckbox("Custom position##b", &up->boost_pos_custom);
               if (up->boost_pos_custom) {
@@ -343,17 +314,19 @@ void trender(tenv* env) {
               igSliderFloat("Opacity##bo", &up->boost_opacity, 0.0f, 1.0f, "%.2f", 0);
               igSpacing();
 
-              /* ── ARROW CURSOR ── */
               CC_HEADER("Arrow Cursor")
               igSliderFloat("Size##aw",        &up->arrow_size,        0.40f, 2.50f, "%.2f", 0);
               igSliderFloat("Sensitivity##as", &up->arrow_sensitivity, 0.25f, 3.00f, "%.2f", 0);
+              igCheckbox("Boost arrow glow##bag", &up->boost_arrow_anim);
+              igCheckbox("Invisible arrow##iva", &up->arrow_invisible);
               if (igButton("Reset arrow##ar", (ImVec2){sb_w, 0.0f})) {
                 up->arrow_size        = 1.0f;
                 up->arrow_sensitivity = 1.0f;
+                up->boost_arrow_anim  = true;
+                up->arrow_invisible   = false;
               }
               igSpacing();
 
-              /* ── JOYSTICK ── */
               CC_HEADER("Joystick Ring")
               igCheckbox("Custom position##j", &up->joy_pos_custom);
               if (up->joy_pos_custom) {
@@ -370,13 +343,14 @@ void trender(tenv* env) {
               igSliderFloat("Opacity##jo", &up->joy_opacity, 0.0f, 1.0f, "%.2f", 0);
               igSpacing();
 
-              /* ── ZOOM SLIDER ── */
               CC_HEADER("Zoom Slider")
               igSliderFloat("X pos##zx",   &up->zslider_rel_x, 0.02f, 0.98f, "%.2f", 0);
               igSliderFloat("Y pos##zy",   &up->zslider_rel_y, 0.10f, 0.90f, "%.2f", 0);
               igSliderFloat("Height##zh",  &up->zslider_rel_h, 0.08f, 0.48f, "%.2f", 0);
               igSliderFloat("Opacity##zo", &up->zslider_opacity, 0.0f, 1.0f, "%.2f", 0);
               igSliderFloat("Speed##zs",   &up->zoom_sensitivity, 0.2f, 3.0f, "%.1f", 0);
+              igCheckbox("Horizontal##zhz", &up->zslider_horizontal);
+              igCheckbox("Hide zoom bar##zhd", &up->zslider_hidden);
               if (igButton("Reset zoom slider##zr", (ImVec2){sb_w, 0.0f})) {
                 up->zoom_sensitivity   = 1.0f;
                 up->zslider_rel_x      = 0.968f;
@@ -384,15 +358,14 @@ void trender(tenv* env) {
                 up->zslider_rel_h      = 0.280f;
                 up->zslider_opacity    = 1.0f;
                 up->zslider_horizontal = false;
+                up->zslider_hidden     = false;
               }
               igSpacing();
 
               #undef CC_HEADER
 
-              /* Save whenever user changes anything */
               save_user_settings(up);
 
-            /* ─── PAGE 2: Hotkey on-screen buttons ─── */
             } else if (s_qs_page == 2) {
               if (igButton("< Back##hk", (ImVec2){sb_w * 0.4f, 0.0f}))
                 s_qs_page = 0;
@@ -402,7 +375,6 @@ void trender(tenv* env) {
                 "Toggle to show a tap button in-game.");
               igSpacing();
 
-              /* Hotkey on-screen button toggles (hk_show_btn persisted) */
               static const char* hk_labels[NUM_HOTKEYS] = {
                 "HUD", "Show Names", "Big Food",
                 "Assist", "Bot", "Menu", "Restart", "Quit"
@@ -429,15 +401,12 @@ void trender(tenv* env) {
           igEnd();
         }
       }
-      /* Update panel-open flag for twindow_android.c touch routing */
-      { extern bool g_panel_open; g_panel_open = s_qs_open; }
-    } /* end quick-settings */
 
-    /* Cursor must be submitted BEFORE igRender()/imgui_render() so it stays
-       inside the swapchain render pass opened by tcontext_clear.
-       Calling it after imgui_render() put it outside the render pass -> crash. */
+      { extern bool g_panel_open; g_panel_open = s_qs_open; }
+    }
+
     renderer_render_cursor(usr->r, ctx);
-    /* on-screen custom key buttons — visible on title + in-game */
+
     if (usr->gdata.curr_screen == PLAYING ||
         usr->gdata.curr_screen == TITLE_SCREEN)
       ui_key_buttons(env);
@@ -451,9 +420,6 @@ void trender(tenv* env) {
 
 void tresize(tenv* env) { ui_viewport_resize(env); }
 
-/* FIX: TDEF_ENTRY() expands to int main() which calls tentry().
-   On Android, android_main() in tentry_android.c is the entry point —
-   tentry() does not exist. Guard this so it only compiles on PC. */
 #ifndef ANDROID
 TDEF_ENTRY();
 #endif

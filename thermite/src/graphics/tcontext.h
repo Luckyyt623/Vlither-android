@@ -9,7 +9,7 @@
 
 #ifdef ANDROID
 #include <android_native_app_glue.h>
-/* Declared in tentry_android.c */
+
 extern struct android_app* g_android_app;
 #endif
 
@@ -55,8 +55,8 @@ typedef struct tcontext {
 
   uint32_t          queue_family;
   VkSurfaceFormatKHR surface_format;
-  ivec2             size;           /* logical landscape dims for UI */
-  ivec2             swapchain_size;  /* physical swapchain image dims */
+  ivec2             size;
+  ivec2             swapchain_size;
 } tcontext;
 
 VkShaderModule tcontext_create_shader(tcontext* context, const char* filename);

@@ -13,34 +13,29 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-/* Zoom-slider screen rect — set every frame by ui_overlay.c */
 float g_zslider_left    = 0;
 float g_zslider_top     = 0;
 float g_zslider_right   = 0;
 float g_zslider_bottom  = 0;
-float g_zslider_half_h  = 1;     /* half-height of the slider in pixels */
+float g_zslider_half_h  = 1;
+bool  g_zslider_horizontal = false;
 float g_zoom_sensitivity = 1.0f;
-/* Set true by ui_overlay.c each PLAYING frame; cleared in tmouse_update.
-   Guards the zoom-slot routing so it never steals taps on other screens. */
-bool  g_overlay_drawn_this_frame = false;
-bool  g_overlay_was_active    = false; /* previous-frame overlay status   */
 
-/* Boost/joy button positions — set by ui_overlay.c each gameplay frame.
-   Used for circle-only hit detection instead of broad screen zones.    */
+bool  g_overlay_drawn_this_frame = false;
+bool  g_overlay_was_active    = false;
+
 float g_boost_cx = -9999, g_boost_cy = -9999, g_boost_r = 0;
 float g_joy_cx   = -9999, g_joy_cy   = -9999, g_joy_r   = 0;
 bool  g_is_trackpad_mode = true;
-bool  g_panel_open       = false; /* true when settings panel is open */
+bool  g_panel_open       = false;
 
 extern struct android_app* g_android_app;
 
-/* Forward declarations from cimgui */
 typedef struct ImGuiIO ImGuiIO;
 extern ImGuiIO* igGetIO_Nil(void);
 extern void ImGuiIO_AddInputCharacter(ImGuiIO* self, unsigned int c);
 extern void ImGuiIO_AddKeyEvent(ImGuiIO* self, int key, bool down);
 
-/* Show/hide the Android soft keyboard via JNI */
 static void _android_set_keyboard(bool show) {
     JNIEnv* env = NULL;
     JavaVM* vm = g_android_app->activity->vm;
@@ -49,7 +44,6 @@ static void _android_set_keyboard(bool show) {
     jobject activity = g_android_app->activity->clazz;
     jclass cls = (*env)->GetObjectClass(env, activity);
 
-    /* Get the InputMethodManager via getSystemService */
     jmethodID getSystemService = (*env)->GetMethodID(env, cls,
         "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
     jstring ime_str = (*env)->NewStringUTF(env, "input_method");
@@ -58,7 +52,6 @@ static void _android_set_keyboard(bool show) {
 
     jclass imm_cls = (*env)->GetObjectClass(env, imm);
 
-    /* Get the window token */
     jmethodID getWindow = (*env)->GetMethodID(env, cls,
         "getWindow", "()Landroid/view/Window;");
     jobject window = (*env)->CallObjectMethod(env, activity, getWindow);
@@ -86,15 +79,10 @@ static void _android_set_keyboard(bool show) {
 
 static bool g_keyboard_shown = false;
 
-/* -----------------------------------------------------------------------
- * Sticky immersive fullscreen — hides nav bar + status bar and keeps
- * them hidden after accidental edge swipes.
- * Safe to call from any point after android_main starts.
- * ----------------------------------------------------------------------- */
 static void _android_set_immersive_fullscreen(void) {
     ANativeActivity_setWindowFlags(
         g_android_app->activity,
-        0x00000400 /* AWINDOW_FLAG_FULLSCREEN */,
+        0x00000400 ,
         0);
 
     JNIEnv* env = NULL;
@@ -108,7 +96,6 @@ static void _android_set_immersive_fullscreen(void) {
     jclass act_class = (*env)->GetObjectClass(env, activity);
     if (!act_class) { (*env)->ExceptionClear(env); (*vm)->DetachCurrentThread(vm); return; }
 
-    /* getWindow() */
     jmethodID getWindow = (*env)->GetMethodID(env, act_class,
         "getWindow", "()Landroid/view/Window;");
     if (!getWindow || (*env)->ExceptionCheck(env)) {
@@ -117,7 +104,6 @@ static void _android_set_immersive_fullscreen(void) {
     if (!window || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env); (*vm)->DetachCurrentThread(vm); return; }
 
-    /* getDecorView() */
     jclass win_class = (*env)->GetObjectClass(env, window);
     if (!win_class) { (*env)->ExceptionClear(env); (*vm)->DetachCurrentThread(vm); return; }
     jmethodID getDecorView = (*env)->GetMethodID(env, win_class,
@@ -128,7 +114,6 @@ static void _android_set_immersive_fullscreen(void) {
     if (!decor_view || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env); (*vm)->DetachCurrentThread(vm); return; }
 
-    /* setSystemUiVisibility(flags) */
     jclass view_class = (*env)->GetObjectClass(env, decor_view);
     if (!view_class) { (*env)->ExceptionClear(env); (*vm)->DetachCurrentThread(vm); return; }
     jmethodID setUiVis = (*env)->GetMethodID(env, view_class,
@@ -136,23 +121,18 @@ static void _android_set_immersive_fullscreen(void) {
     if (!setUiVis || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env); (*vm)->DetachCurrentThread(vm); return; }
 
-    /* LAYOUT_STABLE | LAYOUT_HIDE_NAV | LAYOUT_FULLSCREEN |
-       HIDE_NAVIGATION | FULLSCREEN | IMMERSIVE_STICKY        */
     jint flags = 0x100 | 0x200 | 0x400 | 0x002 | 0x004 | 0x1000;
     (*env)->CallVoidMethod(env, decor_view, setUiVis, flags);
-    (*env)->ExceptionClear(env);   /* deprecated on API30+ but harmless */
+    (*env)->ExceptionClear(env);
 
     (*vm)->DetachCurrentThread(vm);
 }
 
-/* FIX: ANativeWindow_getWidth/Height return pre-rotation (portrait) dimensions
-   on many Android devices even when the app is locked to landscape.
-   Since this app is landscape-only, width must always be the larger value. */
 static void set_window_size(twindow* wnd, ANativeWindow* win) {
     int w = ANativeWindow_getWidth(win);
     int h = ANativeWindow_getHeight(win);
     LOGI("Raw window dims: %dx%d", w, h);
-    /* Swap if portrait — landscape means width > height */
+
     wnd->size[0] = (w >= h) ? w : h;
     wnd->size[1] = (w >= h) ? h : w;
     LOGI("Using window size: %dx%d", wnd->size[0], wnd->size[1]);
@@ -176,7 +156,7 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
                 wnd->native_window = app->window;
                 set_window_size(wnd, app->window);
                 g_state.surface_ready = true;
-                /* Apply sticky immersive fullscreen once the window exists */
+
                 _android_set_immersive_fullscreen();
             }
             break;
@@ -204,7 +184,7 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
 
         case APP_CMD_GAINED_FOCUS:
             wnd->focused = true;
-            /* Re-apply immersive fullscreen (system bars may have come back) */
+
             _android_set_immersive_fullscreen();
             break;
 
@@ -223,14 +203,13 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
     twindow* wnd = (twindow*)app->userData;
     if (!wnd) return 0;
 
-    /* Forward key events from soft keyboard to ImGui */
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
         int32_t action   = AKeyEvent_getAction(event);
         int32_t keycode  = AKeyEvent_getKeyCode(event);
         int32_t meta     = AKeyEvent_getMetaState(event);
 
         if (action == AKEY_EVENT_ACTION_DOWN || action == AKEY_EVENT_ACTION_MULTIPLE) {
-            /* Get unicode character */
+
             JNIEnv* jenv = NULL;
             (*g_android_app->activity->vm)->AttachCurrentThread(
                 g_android_app->activity->vm, &jenv, NULL);
@@ -249,11 +228,10 @@ ImGuiIO* _io = igGetIO_Nil();
                 if (_io) ImGuiIO_AddInputCharacter(_io, (unsigned int)unicode);
             }
 
-            /* Handle backspace */
             if (keycode == AKEYCODE_DEL) {
 ImGuiIO* _io = igGetIO_Nil();
                 if (_io) {
-                    ImGuiIO_AddKeyEvent(_io, 523 /* ImGuiKey_Backspace */, true);
+                    ImGuiIO_AddKeyEvent(_io, 523 , true);
                     ImGuiIO_AddKeyEvent(_io, 523, false);
                 }
             }
@@ -264,14 +242,10 @@ ImGuiIO* _io = igGetIO_Nil();
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION) {
         int32_t action        = AMotionEvent_getAction(event);
         int32_t action_masked = action & AMOTION_EVENT_ACTION_MASK;
-        /* Index of the pointer that triggered this event (for UP/DOWN) */
+
         int32_t ptr_idx = (action >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT) &
                           AMOTION_EVENT_ACTION_POINTER_INDEX_MASK;
 
-        /* ---- classify a touch as "boost" based on screen-side threshold ----
-           g_ctrl_swap_sides is set by the UI swap button via an extern.
-           Default (false): boost zone = right 20 %.
-           Swapped  (true):  boost zone = left  20 %.                        */
         extern bool g_ctrl_swap_sides;
         float sw = (float)wnd->size[0];
 
@@ -282,32 +256,23 @@ ImGuiIO* _io = igGetIO_Nil();
                 float y   = AMotionEvent_getY(event, 0);
                 int   pid = (int)AMotionEvent_getPointerId(event, 0);
 
-                /* ── Priority 1: Zoom slider (circle rect) ── */
                 bool in_zslider = g_overlay_was_active &&
                                   (g_zslider_right > g_zslider_left) &&
                                   x >= g_zslider_left && x <= g_zslider_right &&
                                   y >= g_zslider_top  && y <= g_zslider_bottom;
 
-                /* ── Priority 2: Boost button ──────────────────────────────────
-                   Use the actual circle (enlarged 40% for tap forgiveness) when
-                   the overlay has drawn at least once (g_boost_r > 0).
-                   Fall back to right/left zone on the very first frame so the
-                   first-frame case never causes an ID swap.                  */
                 float dbx = x - g_boost_cx, dby = y - g_boost_cy;
                 bool in_boost_circle;
                 if (g_boost_r > 0) {
                     float det_r = g_boost_r * 1.4f;
                     in_boost_circle = (dbx*dbx + dby*dby) <= (det_r * det_r);
                 } else {
-                    /* Overlay not yet drawn — fall back to screen-zone */
+
                     in_boost_circle = g_ctrl_swap_sides
                                       ? (x < sw * 0.22f)
                                       : (x > sw * 0.78f);
                 }
 
-                /* ── Priority 3: Movement / trackpad ──
-                   Trackpad mode: any touch not taken above.
-                   Joystick mode: only within the joystick ring. */
                 float djx = x - g_joy_cx, djy = y - g_joy_cy;
                 bool in_joy_ring = g_joy_r > 0 &&
                                    (djx*djx + djy*djy) <= (g_joy_r * g_joy_r);
@@ -316,7 +281,7 @@ ImGuiIO* _io = igGetIO_Nil();
 
                 if (in_zslider && wnd->touch.zslider_ptr_id == -1) {
                     wnd->touch.zslider_ptr_id = pid;
-                    wnd->touch.zslider_y      = y;
+                    wnd->touch.zslider_y      = g_zslider_horizontal ? x : y;
                     wnd->touch.zslider_offset = 0.0f;
                 } else if (in_boost_circle && !wnd->touch.boost_down) {
                     wnd->touch.boost_x         = x;
@@ -331,8 +296,7 @@ ImGuiIO* _io = igGetIO_Nil();
                     wnd->touch.just_down   = true;
                     wnd->touch.move_ptr_id = pid;
                 } else if (!wnd->touch.down) {
-                    /* Touch outside all game zones (e.g. UI tap when panel closed).
-                       Still register as ImGui mouse so buttons work. */
+
                     wnd->touch.x         = x;
                     wnd->touch.y         = y;
                     wnd->touch.down      = true;
@@ -343,8 +307,7 @@ ImGuiIO* _io = igGetIO_Nil();
             }
 
             case AMOTION_EVENT_ACTION_POINTER_DOWN: {
-                /* ptr_idx is unreliable on many devices — find the NEW finger
-                   by scanning all pointers and excluding already-tracked IDs.  */
+
                 int32_t cnt2  = (int32_t)AMotionEvent_getPointerCount(event);
                 int     pid   = -1;
                 float   x = 0, y = 0;
@@ -359,25 +322,14 @@ ImGuiIO* _io = igGetIO_Nil();
                         break;
                     }
                 }
-                if (pid == -1) break; /* couldn't identify new finger */
+                if (pid == -1) break;
 
-                /* ── Early reconciliation ─────────────────────────────────────
-                   A POINTER_UP sets pending_reconcile and defers clearing slots
-                   until the next MOVE event.  But if a new POINTER_DOWN arrives
-                   first (e.g. player re-touches the trackpad while still holding
-                   boost), touch.down is still stale-true and none of the routing
-                   branches below match — the new finger gets silently dropped.
-                   Fix: run reconciliation here too, using this event's pointer
-                   list, which contains exactly the fingers genuinely still down. */
                 if (wnd->touch.pending_reconcile) {
                     wnd->touch.pending_reconcile = false;
                     bool move_alive2 = false, boost_alive2 = false;
                     for (int32_t ri = 0; ri < cnt2; ri++) {
                         int rpid = (int)AMotionEvent_getPointerId(event, ri);
-                        /* Skip the NEW finger (pid) — Android can reuse pointer IDs
-                           immediately after a POINTER_UP, which would make the old
-                           slot appear "alive" even though it was just lifted.
-                           We only count IDs that belong to fingers already held. */
+
                         if (rpid == pid) continue;
                         if (rpid == wnd->touch.move_ptr_id)  move_alive2  = true;
                         if (rpid == wnd->touch.boost_ptr_id) boost_alive2 = true;
@@ -394,24 +346,23 @@ ImGuiIO* _io = igGetIO_Nil();
                     }
                 }
 
-                /* Zoom slider — highest priority */
                 bool in_zslider2 = g_overlay_was_active &&
                                    (g_zslider_right > g_zslider_left) &&
                                    x >= g_zslider_left && x <= g_zslider_right &&
                                    y >= g_zslider_top  && y <= g_zslider_bottom;
                 if (in_zslider2 && wnd->touch.zslider_ptr_id == -1) {
                     wnd->touch.zslider_ptr_id = pid;
-                    wnd->touch.zslider_y      = y;
+                    wnd->touch.zslider_y      = g_zslider_horizontal ? x : y;
                     wnd->touch.zslider_offset = 0.0f;
                 } else if (wnd->touch.down && !wnd->touch.boost_down) {
-                    /* Move active, boost free — new finger = boost */
+
                     wnd->touch.boost_x         = x;
                     wnd->touch.boost_y         = y;
                     wnd->touch.boost_down      = true;
                     wnd->touch.boost_just_down = true;
                     wnd->touch.boost_ptr_id    = pid;
                 } else if (!wnd->touch.down && wnd->touch.boost_down && !g_panel_open) {
-                    /* Boost active, move free — new finger = move */
+
                     float djx2 = x - g_joy_cx, djy2 = y - g_joy_cy;
                     bool joy_ok = g_is_trackpad_mode ||
                                   (g_joy_r > 0 && (djx2*djx2+djy2*djy2) <= g_joy_r*g_joy_r);
@@ -423,7 +374,7 @@ ImGuiIO* _io = igGetIO_Nil();
                         wnd->touch.move_ptr_id = pid;
                     }
                 } else if (!wnd->touch.down && !wnd->touch.boost_down && !g_panel_open) {
-                    /* Neither taken — use circle detection */
+
                     float dbx2 = x - g_boost_cx, dby2 = y - g_boost_cy;
                     bool boost_hit = g_boost_r > 0 &&
                                      (dbx2*dbx2 + dby2*dby2) <= (g_boost_r * g_boost_r);
@@ -452,10 +403,6 @@ ImGuiIO* _io = igGetIO_Nil();
             case AMOTION_EVENT_ACTION_MOVE: {
                 int32_t count = (int32_t)AMotionEvent_getPointerCount(event);
 
-                /* ── Deferred reconciliation ──────────────────────────────────
-                   After a POINTER_UP we didn't know which finger left (ptr_idx
-                   is unreliable).  This MOVE comes only from fingers still down,
-                   so we can now safely clear any slot whose ID is absent.      */
                 if (wnd->touch.pending_reconcile) {
                     wnd->touch.pending_reconcile = false;
                     bool move_alive = false, boost_alive = false, zoom_alive = false;
@@ -481,7 +428,6 @@ ImGuiIO* _io = igGetIO_Nil();
                     }
                 }
 
-                /* ── Normal per-pointer position update (by ID) ─────────────── */
                 for (int32_t i = 0; i < count; i++) {
                     int   pid = (int)AMotionEvent_getPointerId(event, i);
                     float x   = AMotionEvent_getX(event, i);
@@ -494,9 +440,10 @@ ImGuiIO* _io = igGetIO_Nil();
                         wnd->touch.boost_y = y;
                     } else if (wnd->touch.zslider_ptr_id != -1 &&
                                pid == wnd->touch.zslider_ptr_id) {
-                        float dy = y - wnd->touch.zslider_y;
-                        wnd->touch.zslider_y       = y;
-                        wnd->touch.zslider_offset += dy;
+                        float pos = g_zslider_horizontal ? x : y;
+                        float delta = pos - wnd->touch.zslider_y;
+                        wnd->touch.zslider_y       = pos;
+                        wnd->touch.zslider_offset += delta;
                         if (wnd->touch.zslider_offset >  g_zslider_half_h)
                             wnd->touch.zslider_offset =  g_zslider_half_h;
                         if (wnd->touch.zslider_offset < -g_zslider_half_h)
@@ -507,7 +454,7 @@ ImGuiIO* _io = igGetIO_Nil();
             }
 
             case AMOTION_EVENT_ACTION_UP: {
-                /* Last finger is gone — clear everything immediately */
+
                 wnd->touch.down              = false;
                 wnd->touch.just_down         = false;
                 wnd->touch.boost_down        = false;
@@ -521,9 +468,7 @@ ImGuiIO* _io = igGetIO_Nil();
             }
 
             case AMOTION_EVENT_ACTION_POINTER_UP: {
-                /* Don't clear slots here — ptr_idx is unreliable on many devices.
-                   Instead, set a flag and reconcile on the very next MOVE event,
-                   which only contains pointers that are genuinely still down. */
+
                 wnd->touch.pending_reconcile = true;
                 break;
             }
@@ -586,8 +531,6 @@ void twindow_poll_input(twindow* window) {
         }
     }
 
-    /* Show/hide soft keyboard based on ImGui WantTextInput.
-       Use extern declaration to avoid including cimgui headers here. */
     extern bool g_imgui_wants_keyboard;
     if (g_imgui_wants_keyboard != g_keyboard_shown) {
         g_keyboard_shown = g_imgui_wants_keyboard;
@@ -636,4 +579,4 @@ void twindow_destroy(twindow* window) {
     free(window);
 }
 
-#endif /* ANDROID */
+#endif

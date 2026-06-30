@@ -19,7 +19,6 @@ int        tkeyboard_key_pressed(tkeyboard* keyboard, int key);
 int        tkeyboard_key_released(tkeyboard* keyboard, int key);
 void       tkeyboard_destroy(tkeyboard* keyboard);
 
-/* Android: no physical keyboard — define GLFW key codes as stubs */
 #ifdef ANDROID
 #define GLFW_KEY_LEFT    263
 #define GLFW_KEY_RIGHT   262
@@ -37,7 +36,7 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_Z        90
 #define GLFW_KEY_R        82
 #define GLFW_KEY_Q        81
-/* Letters */
+
 #define GLFW_KEY_A        65
 #define GLFW_KEY_B        66
 #define GLFW_KEY_C        67
@@ -54,7 +53,7 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_W        87
 #define GLFW_KEY_X        88
 #define GLFW_KEY_Y        89
-/* Digits */
+
 #define GLFW_KEY_0        48
 #define GLFW_KEY_1        49
 #define GLFW_KEY_2        50
@@ -65,7 +64,7 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_7        55
 #define GLFW_KEY_8        56
 #define GLFW_KEY_9        57
-/* Function keys */
+
 #define GLFW_KEY_F1       290
 #define GLFW_KEY_F2       291
 #define GLFW_KEY_F3       292
@@ -77,7 +76,7 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_F9       298
 #define GLFW_KEY_F10      299
 #define GLFW_KEY_F12      301
-/* Special */
+
 #define GLFW_KEY_ESCAPE         256
 #define GLFW_KEY_ENTER          257
 #define GLFW_KEY_TAB            258

@@ -85,7 +85,6 @@ void redraw(tenv* env) {
     gdata->data.fpy2 = gdata->data.view_yy + (mhh2 / gdata->data.gsc + 24);
   }
 
-  // draw foods and preys:
   int foods_len = tdarray_length(gdata->data.foods);
   int preys_len = tdarray_length(gdata->data.preys);
   if (mode->uniform_food_color) {
@@ -171,7 +170,6 @@ void redraw(tenv* env) {
     }
   }
 
-  // draw snakes:
   int snakes_len = tdarray_length(gdata->data.snakes);
   for (int i = snakes_len - 1; i >= 0; i--) {
     snake* o = gdata->data.snakes + i;
@@ -640,7 +638,7 @@ void redraw(tenv* env) {
           float shadow_strength = 0.25f;
 
           if (mode->show_shadows) {
-            // draw last 4 body parts' shadow:
+
             int start = bp >= 4 ? bp - 4 : 0;
             for (j = start; j < bp; j++) {
               if (gdata->data.pbu[(int)j] >= 1) {
@@ -662,7 +660,6 @@ void redraw(tenv* env) {
             }
           }
 
-          // draw body parts:
           if (o->cusk) {
             for (j = bp - 1; j >= 0; j--)
               if (gdata->data.pbu[(int)j] >= 1) {
@@ -754,7 +751,7 @@ void redraw(tenv* env) {
           }
         } else if (mode->render_mode == 1) {
           if (mode->show_shadows) {
-            // draw last 4 body parts' shadow:
+
             int start = bp >= 4 ? bp - 4 : 0;
             for (j = start; j < bp; j++) {
               if (gdata->data.pbu[(int)j] >= 1) {
@@ -778,7 +775,6 @@ void redraw(tenv* env) {
             }
           }
 
-          // draw body parts:
           if (o->cusk) {
             for (j = bp - 1; j >= 0; j--)
               if (gdata->data.pbu[(int)j] >= 1) {
@@ -877,7 +873,7 @@ void redraw(tenv* env) {
           }
         } else if (mode->render_mode == 2) {
           if (mode->show_shadows) {
-            // draw last 4 body parts' shadow:
+
             int start = bp >= 4 ? bp - 4 : 0;
             for (j = start; j < bp; j++) {
               if (gdata->data.pbu[(int)j] >= 1) {
@@ -901,7 +897,6 @@ void redraw(tenv* env) {
             }
           }
 
-          // draw body parts:
           if (o->cusk) {
             for (j = bp - 1; j >= 0; j--)
               if (gdata->data.pbu[(int)j] >= 1) {
@@ -997,30 +992,6 @@ void redraw(tenv* env) {
               }
           }
         }
-
-        // debugging
-        // for (int bpi = pts_len - 1; bpi >= 0; bpi--) {
-        //   body_part* po = o->pts + bpi;
-        //   float fix = ((po->xx - gdata->data.view_xx) * gdata->data.gsc) +
-        //   mww2; float fiy = ((po->yy - gdata->data.view_yy) *
-        //   gdata->data.gsc) + mhh2;
-
-        //   ImDrawList_AddCircleFilled(igGetWindowDrawList(), (ImVec2){fix,
-        //   fiy}, 5, UINT32_MAX, 10);
-        // }
-
-        // if (o->id == gdata->data.snake_id) {
-        //   ImDrawList_AddLine(igGetWindowDrawList(), (ImVec2){mww2, mhh2},
-        //   (ImVec2){mww2 + 120 * cosf(o->ang), mhh2 + 120 * sinf(o->ang)},
-        //   igColorConvertFloat4ToU32((ImVec4){1, 0, 0, 1}), 2);
-        //   ImDrawList_AddLine(igGetWindowDrawList(), (ImVec2){mww2, mhh2},
-        //   (ImVec2){mww2 + 120 * cosf(o->wang), mhh2 + 120 * sinf(o->wang)},
-        //   igColorConvertFloat4ToU32((ImVec4){0, 1, 0, 1}), 2);
-        //   ImDrawList_AddLine(igGetWindowDrawList(), (ImVec2){mww2, mhh2},
-        //   (ImVec2){mww2 + 120 * cosf(o->pts[pts_len - 1].iang), mhh2 + 120 *
-        //   sinf(o->pts[pts_len - 1].iang)},
-        //   igColorConvertFloat4ToU32((ImVec4){0.3f, 0.3f, 1, 1}), 2);
-        // }
 
         if (mode->death_effect && o->dead) {
           float falf = (.15 + .15 * fabsf(sinf(5 * PI * o->dead_amt))) *
@@ -1138,7 +1109,7 @@ void redraw(tenv* env) {
                   }
               }
             }
-            // boost effect 2:
+
             if (mode->boost_type == 0 && o->tsp > o->fsp) {
               float glsz = lsz * 3 * gdata->data.gsc;
               float strength = 0.7f * mode->boost_strength;
@@ -1214,7 +1185,7 @@ void redraw(tenv* env) {
               }
             }
           } else {
-            // boost effect 1:
+
             if (o->tsp > o->fsp) {
               m = a * fmaxf(0, fminf(1, (o->tsp - o->ssp) / (o->msp - o->ssp)));
               om = m * .37;
@@ -1294,7 +1265,7 @@ void redraw(tenv* env) {
                   }
               }
             }
-            // boost effect 2:
+
             if (mode->boost_type == 0 && o->tsp > o->fsp) {
               float glsz = lsz * 3 * gdata->data.gsc;
               float strength = 0.7f * mode->boost_strength;
@@ -1374,10 +1345,9 @@ void redraw(tenv* env) {
           }
         }
 
-        // draw eyes:
-        float ed = 6 * ssc;   // o->ed
-        float esp = 6 * ssc;  // o->esp
-        float er = 6;         // o->er
+        float ed = 6 * ssc;
+        float esp = 6 * ssc;
+        float er = 6;
         default_skin_data* dfs = gdata->dfs + ((1 - o->cusk) * (1 + o->cv));
         float pr = dfs->pr;
         float iris_r = er * ssc * gdata->data.gsc;
@@ -1443,7 +1413,6 @@ void redraw(tenv* env) {
                 gdata->cg_uvs[BLANK_UV],
                 {dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, ea}});
 
-        // accessory:
         if (mode->show_accessories && o->accessory < NUM_ACCESSORIES) {
           accessory_data* acc = gdata->accessories + o->accessory;
           ex = acc->of * cosf(fang) * ed;
@@ -1458,35 +1427,6 @@ void redraw(tenv* env) {
                   {acx - m, acy - m, m * 2, fang}, acc->uv, {1, 1, 1, ea}});
         }
 
-        // ex = cosf(fang) * lsz;
-        // ey = sinf(fang) * lsz;
-        // float sz = 2 * gdata->data.gsc;
-
-        // bp_renderer_push(
-        //     usr->r->astr,
-        //     &(bp_instance){
-        //         {(mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc)
-        //         -
-        //              (sz + 2),
-        //          (mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc)
-        //          -
-        //              (sz + 2),
-        //          (sz + 2) * 2, 0},
-        //         gdata->cg_uvs[BLANK_UV],
-        //         {0, 0, 0, a}});
-
-        // bp_renderer_push(
-        //     usr->r->astr,
-        //     &(bp_instance){
-        //         {(mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc)
-        //         -
-        //              sz,
-        //          (mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc)
-        //          -
-        //              sz,
-        //          sz * 2, 0},
-        //         gdata->cg_uvs[BLANK_UV],
-        //         {1, 1, 1, a}});
       }
     }
   }
@@ -1531,7 +1471,6 @@ void redraw(tenv* env) {
     gdata->data.fps_ltm = gdata->data.ctm;
   }
 
-  // ping calc
   float sum = 0;
   for (int i = 0; i < PING_SAMPLE_COUNT; i++) {
     sum += gdata->data.pings[i];

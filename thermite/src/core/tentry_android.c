@@ -5,10 +5,6 @@
 #include "../framework/tkeyboard.h"
 #include "android_jni.h"
 
-/* ------------------------------------------------------------------ */
-/*  Debug logger — sends log lines to ntfy.sh so you can read them    */
-/*  in any browser at: https://ntfy.sh/vlither-debug-4821             */
-/* ------------------------------------------------------------------ */
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -57,7 +53,6 @@ static void ntfy_log(const char* msg) {
 #include <stdlib.h>
 #include <string.h>
 
-/* App user data type */
 #include "user.h"
 #include "android_path.h"
 
@@ -99,11 +94,8 @@ static void crash_handler(int sig) {
     raise(sig);
 }
 
-/* FIX: g_android_app defined ONCE here.
-   twindow_android.c uses extern to reference it. */
 struct android_app* g_android_app = NULL;
 
-/* Forward declarations of app callbacks (defined in main.c) */
 void tlaunch(tenv* env);
 void tinit(tenv* env);
 void tinput(tenv* env);
@@ -111,21 +103,13 @@ void trender(tenv* env);
 void tresize(tenv* env);
 void tdestroy(tenv* env);
 
-/* ------------------------------------------------------------------ */
-/*  glfwGetTime / glfwSetTime                                           */
-/* ------------------------------------------------------------------ */
-
-/* FIX: g_time_base declared BEFORE glfwGetTime so it can be read.
-   Previously it was declared after, so glfwGetTime always returned
-   raw monotonic time (seconds since boot) instead of time since
-   glfwSetTime(0), breaking all game timing. */
 static double g_time_base = -1.0;
 
 double glfwGetTime(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    /* Subtract base so time starts from 0 when glfwSetTime(0) was called */
+
     return (g_time_base >= 0.0) ? (now - g_time_base) : now;
 }
 
@@ -136,10 +120,6 @@ void glfwSetTime(double t) {
         g_time_base = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
     }
 }
-
-/* ------------------------------------------------------------------ */
-/*  Android keyboard/mouse stubs                                        */
-/* ------------------------------------------------------------------ */
 
 tkeyboard* tkeyboard_create(twindow* window) {
     (void)window;
@@ -160,47 +140,39 @@ void tmouse_update(tmouse* ms) {
         ms->pos[1] = ms->window->touch.y;
     }
     ms->dwheel = 0;
-    /* Zoom is applied directly to ms_zoom in ui_overlay.c — no dwheel needed */
-    /* If the overlay was NOT drawn this frame (not in gameplay), clear the
-       zoom-slider rect so it cannot steal taps on the settings screen etc. */
+
     {
         extern bool  g_overlay_drawn_this_frame;
         extern bool  g_overlay_was_active;
         extern float g_zslider_left, g_zslider_top;
         extern float g_zslider_right, g_zslider_bottom;
-        /* Pass this frame's status to next frame's input routing */
+
         g_overlay_was_active = g_overlay_drawn_this_frame;
         if (!g_overlay_drawn_this_frame) {
             g_zslider_left = g_zslider_top = 0.0f;
             g_zslider_right = g_zslider_bottom = 0.0f;
-            /* Also release zoom-slider touch slot so it doesn't persist */
+
             if (ms->window) {
                 ms->window->touch.zslider_ptr_id = -1;
                 ms->window->touch.zslider_offset = 0.0f;
             }
         }
-        g_overlay_drawn_this_frame = false; /* reset for next frame */
+        g_overlay_drawn_this_frame = false;
     }
 }
 int  tmouse_button_pressed(tmouse* ms, int button)  { (void)button; return ms->window ? ms->window->touch.just_down : 0; }
 int  tmouse_button_released(tmouse* ms, int button) { (void)ms; (void)button; return 0; }
 void tmouse_destroy(tmouse* ms) { free(ms); }
 
-/* ------------------------------------------------------------------ */
-/*  android_main — NDK entry point (replaces int main())                */
-/* ------------------------------------------------------------------ */
-
 void android_main(struct android_app* app) {
     g_android_app = app;
 
-    /* Open log file on SD card so we can read it from Termux */
     g_log_file = fopen("/sdcard/vlither_log.txt", "w");
     signal(SIGSEGV, crash_handler);
     signal(SIGABRT, crash_handler);
     signal(SIGBUS,  crash_handler);
     DLOG("android_main started");
 
-    /* Store writable path so user_settings.c can use it */
     android_set_files_dir(app->activity->internalDataPath);
     DLOG("files_dir: %s", app->activity->internalDataPath);
 
@@ -243,7 +215,7 @@ void android_main(struct android_app* app) {
     bool g_first_frame_done = false;
     while (env.config.running) {
         if (!env.ctx->swapchain_ok) {
-            /* Swapchain is out of date — poll events then rebuild it */
+
             twindow_poll_input(env.wnd);
             if (g_android_app->destroyRequested) break;
             if (env.wnd->size[0] > 0 && env.wnd->size[1] > 0) {
@@ -278,4 +250,4 @@ void android_main(struct android_app* app) {
     free(env.usr);
 }
 
-#endif /* ANDROID */
+#endif

@@ -32,18 +32,18 @@ typedef struct accessory_data {
 typedef struct game_data {
   screen curr_screen;
   conn_status conn;
-  
+
   uint8_t default_skins[NUM_DEFAULT_SKINS][64];
   char ntl_cg_map[NUM_COLOR_GROUPS];
   vec4s cg_uvs[NUM_COLOR_GROUPS];
-  vec3s cg_colors[NUM_COLOR_GROUPS]; // original rgbs
+  vec3s cg_colors[NUM_COLOR_GROUPS];
   accessory_data accessories[NUM_ACCESSORIES];
-  vec3s cg_glow_colors[NUM_COLOR_GROUPS]; // glow color rgbs
-  bool cg_colors_ct[NUM_COLOR_GROUPS]; // original rgbs' contrasts
-  float worm_effect[WORM_EFFECT_LEN]; // skin effect for default skins
-  float fsz[NUM_FOOD_SIZES]; // food sizes
-  float psz[NUM_PREY_SIZES]; // prey sizes
-  default_skin_data dfs[NUM_DEFAULT_SKINS + 1]; // + 1 for custom skin
+  vec3s cg_glow_colors[NUM_COLOR_GROUPS];
+  bool cg_colors_ct[NUM_COLOR_GROUPS];
+  float worm_effect[WORM_EFFECT_LEN];
+  float fsz[NUM_FOOD_SIZES];
+  float psz[NUM_PREY_SIZES];
+  default_skin_data dfs[NUM_DEFAULT_SKINS + 1];
   int u_m[7];
   sbot bot;
 
@@ -51,29 +51,44 @@ typedef struct game_data {
   vec4s CURSOR_UV;
   vec4s SKIN_LESS_UV;
 
-  /* ---- Android touch joystick state ---- */
   struct {
-    float joy_anchor_x;  /* X where finger first touched (joystick base) */
-    float joy_anchor_y;  /* Y where finger first touched (joystick base) */
-    bool  joy_tracking;  /* a left-zone drag is currently active          */
+    float joy_anchor_x;
+    float joy_anchor_y;
+    bool  joy_tracking;
+    int   joy_last_xm;
+    int   joy_last_ym;
 
-    /* ---- NTL Trackpad state ---- */
-    float tp_cursor_x;         /* virtual cursor X on screen               */
-    float tp_cursor_y;         /* virtual cursor Y on screen               */
-    float tp_anchor_x;         /* cursor X at touch-start (spawn pos)      */
-    float tp_anchor_y;         /* cursor Y at touch-start (spawn pos)      */
-    float tp_vx;               /* smoothed velocity X (for arrow rotation) */
-    float tp_vy;               /* smoothed velocity Y                      */
-    float tp_last_touch_x;     /* finger screen X when touch began         */
-    float tp_last_touch_y;     /* finger screen Y when touch began         */
-    float tp_disappear_angle;  /* angle saved when finger lifts            */
-    float tp_cursor_angle_deg; /* arrow rotation angle toward center       */
-    bool  tp_tracking;         /* finger is currently on trackpad          */
-    bool  tp_visible;          /* cursor should be drawn                   */
+    float tp_cursor_x;
+    float tp_cursor_y;
+    float tp_anchor_x;
+    float tp_anchor_y;
+    float tp_vx;
+    float tp_vy;
+    float tp_last_touch_x;
+    float tp_last_touch_y;
+    float tp_disappear_angle;
+    float tp_cursor_angle_deg;
+    bool  tp_tracking;
+    bool  tp_visible;
   } touch_ctrl;
 
   struct mg_mgr network_manager;
   struct mg_connection* connection;
+
+  struct {
+    bool fetching;
+    bool fetched;
+    bool fetch_error;
+    bool retry_https;
+    volatile int pinging;
+    volatile int ping_stop;
+    volatile int pings_done;
+    int pings[MAX_SERVER_LIST];
+    int sorted_order[MAX_SERVER_LIST];
+    char ips[MAX_SERVER_LIST][MAX_SERVER_IP_LEN + 1];
+    int count;
+    struct mg_mgr mgr;
+  } server_list;
 
   bool restart_req;
   bool closed;
@@ -128,9 +143,9 @@ typedef struct game_data {
     float fpy2;
     float ping_follow;
     float ms_zoom;
-    /* on-screen key button state — set by key_buttons.c, read by input.c */
-    bool fake_key_down[512];    /* currently held    */
-    bool fake_key_pressed[512]; /* just pressed this frame, cleared in input.c */
+
+    bool fake_key_down[512];
+    bool fake_key_pressed[512];
     float lkstm;
 
     double play_etm;
@@ -162,7 +177,7 @@ typedef struct game_data {
 
     float* fmlts;
     float* fpsls;
-    
+
     float pings[PING_SAMPLE_COUNT];
     float xfas[GD_EEZ];
     float afas[GD_AFC];

@@ -4,7 +4,9 @@
 #define CLIENT_VERSION 291
 
 #define MAX_NICKNAME_LEN 24
-#define MAX_IPV4_LEN 19
+#define MAX_IPV4_LEN 22
+#define MAX_SERVER_LIST 300
+#define MAX_SERVER_IP_LEN 22
 #define MAX_SKIN_CODE_LEN 256
 #define NUM_COLOR_GROUPS 42
 #define NUM_DEFAULT_SKINS 66
@@ -29,7 +31,6 @@
 
 #define USER_SETTINGS_FILE "user.dat"
 
-// game data constants:
 #define PROTOCOL_VERSION 19
 #define GD_FLXC 38
 #define GD_EEZ 53
@@ -41,13 +42,11 @@
 #define GD_K64A (PI2 / 65536.0f)
 #define GD_NSEP 4.5f
 
-// render constants:
 #define MAX_BOOST_INSTANCES 131072
 #define MAX_FOOD_INSTANCES 131072
 #define MAX_SPRITE_INSTANCES 131072
 #define MAX_PREYS 2048
 
-// hotkeys:
 #define MAX_HOTKEY_DESC_LENGTH 64
 #define HOTKEY_HUD 0
 #define HOTKEY_SHOW_NAMES 1
@@ -58,7 +57,7 @@
 #define HOTKEY_RESTART 6
 #define HOTKEY_QUIT 7
 #define NUM_HOTKEYS 8
-#define MAX_KEY_BTNS 16   /* custom on-screen key buttons */
+#define MAX_KEY_BTNS 16
 
 typedef enum conn_status {
   DISCONNECTED = 0,

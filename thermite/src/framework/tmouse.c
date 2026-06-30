@@ -62,4 +62,4 @@ void tmouse_destroy(tmouse* mouse) {
   tdarray_destroy(mouse->buttons_pressed);
   free(mouse);
 }
-#endif /* !ANDROID */
+#endif

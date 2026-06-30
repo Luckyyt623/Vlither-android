@@ -53,7 +53,7 @@ typedef struct snake {
   float wsep;
   float sep;
   float fchl;
-  
+
   float fxs[GD_EEZ];
   float fys[GD_EEZ];
   float fchls[GD_EEZ];

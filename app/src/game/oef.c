@@ -56,7 +56,6 @@ void oef(tenv* env) {
                                    0.25f * gdata->data.vfr)
                         : gdata->data.ms_zoom;
 
-  // update flux:
   if (gdata->data.vfrb > 0) {
     if (gdata->data.flx_tg > 0) {
       int ki = gdata->data.vfrb;
@@ -80,7 +79,6 @@ void oef(tenv* env) {
     usr->r->global.lview[1] = -1;
   }
 
-  // update snakes:
   int snakes_len = _tdarray_length(gdata->data.snakes);
   for (int i = snakes_len - 1; i >= 0; i--) {
     snake* o = gdata->data.snakes + i;
@@ -241,8 +239,8 @@ void oef(tenv* env) {
         }
       }
     }
-    float wx = cosf(o->eang) * 2.3f;  // o.pma = 2.3
-    float wy = sinf(o->eang) * 2.3f;  // o.pma = 2.3
+    float wx = cosf(o->eang) * 2.3f;
+    float wy = sinf(o->eang) * 2.3f;
     if (o->rex < wx) {
       o->rex += gdata->data.vfr / 6.0f;
       if (o->rex >= wx) o->rex = wx;
@@ -309,7 +307,6 @@ void oef(tenv* env) {
     }
   }
 
-  // update preys:
   int preys_len = tdarray_length(gdata->data.preys);
   for (int i = preys_len - 1; i >= 0; i--) {
     prey* pr = gdata->data.preys + i;
@@ -387,7 +384,6 @@ void oef(tenv* env) {
     }
   }
 
-  // update foods:
   int cm1 = (int)tdarray_length(gdata->data.foods) - 1;
   for (int i = cm1; i >= 0; i--) {
     food* fo = gdata->data.foods + i;

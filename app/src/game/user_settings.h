@@ -35,15 +35,14 @@ typedef struct gameplay_mode {
   vec3 food_color;
 } gameplay_mode;
 
-
 typedef struct custom_key_btn {
-  bool  active;           /* slot is used                              */
-  int   glfw_key;         /* GLFW_KEY_* value                          */
-  char  label[8];         /* display label e.g. "H", "Boost", "Esc"   */
-  float rel_x;            /* centre X as fraction of screen width      */
-  float rel_y;            /* centre Y as fraction of screen height     */
-  float rel_size;         /* button size as fraction of screen height  */
-  float opacity;          /* 0.0 - 1.0                                 */
+  bool  active;
+  int   glfw_key;
+  char  label[8];
+  float rel_x;
+  float rel_y;
+  float rel_size;
+  float opacity;
 } custom_key_btn;
 
 typedef struct user_settings {
@@ -62,7 +61,6 @@ typedef struct user_settings {
   font_size snake_names_font_size;
   font_size stats_font_size;
 
-  // global settings:
   vec3 bd_color;
   vec4 laser_color;
   int laser_thickness;
@@ -78,20 +76,15 @@ typedef struct user_settings {
   int bot_radius_mult;
   int bot_follow_circle_score;
 
-  /* Control mode: false = joystick (default), true = NTL trackpad */
   bool ctrl_mode_trackpad;
 
-  /* Swap layout: false = joystick-left/boost-right (default),
-                  true  = joystick-right/boost-left
-     In trackpad mode only boost side is swapped. */
   bool ctrl_swap_sides;
 
-  /* ── Custom control layout ──────────────────────────────────── */
-  bool  boost_pos_custom;  /* true = use boost_rel_* instead of auto   */
-  float boost_rel_x;       /* boost centre X as fraction of sw          */
-  float boost_rel_y;       /* boost centre Y as fraction of sh          */
-  float boost_rel_size;    /* boost radius as fraction of sh            */
-  float boost_opacity;     /* 0.0 – 1.0                                 */
+  bool  boost_pos_custom;
+  float boost_rel_x;
+  float boost_rel_y;
+  float boost_rel_size;
+  float boost_opacity;
 
   bool  joy_pos_custom;
   float joy_rel_x;
@@ -99,28 +92,25 @@ typedef struct user_settings {
   float joy_rel_size;
   float joy_opacity;
 
-  /* ── Arrow cursor (trackpad mode) ──────────────────────────── */
-  float arrow_size;         /* scale multiplier for arrow graphic (default 1.0) */
-  float arrow_sensitivity;  /* cursor speed multiplier per touch delta (default 1.0) */
-  bool  boost_arrow_anim;   /* show pulsing glow on arrow when boosting (default true) */
+  float arrow_size;
+  float arrow_sensitivity;
+  bool  boost_arrow_anim;
+  bool  arrow_invisible;
 
-  /* ── Zoom slider ────────────────────────────────────────────── */
-  float zoom_sensitivity;   /* slider speed multiplier (default 1.0)    */
-  float zslider_rel_x;      /* centre X fraction of sw                  */
-  float zslider_rel_y;      /* centre Y fraction of sh (vertical mode)  */
-  float zslider_rel_h;      /* half-height fraction of sh               */
-  float zslider_opacity;    /* 0.0 – 1.0                                */
-  bool  zslider_horizontal; /* false = vertical (default), true = horiz */
+  float zoom_sensitivity;
+  float zslider_rel_x;
+  float zslider_rel_y;
+  float zslider_rel_h;
+  float zslider_opacity;
+  bool  zslider_horizontal;
+  bool  zslider_hidden;
 
-  /* Which hotkeys show as on-screen tap buttons during gameplay */
   bool  hk_show_btn[NUM_HOTKEYS];
 
   gameplay_mode modes[2];
 
-  // hotkeys:
   hotkey hotkeys[NUM_HOTKEYS];
 
-  /* on-screen custom key buttons */
   custom_key_btn key_btns[MAX_KEY_BTNS];
 } user_settings;
 

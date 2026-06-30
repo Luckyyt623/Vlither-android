@@ -11,8 +11,6 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 extern struct android_app* g_android_app;
 
-/* Strip "app/res/" prefix to get APK asset-bundle relative path.
-   e.g. "app/res/textures/foo.png" -> "textures/foo.png" */
 static const char* _asset_path(const char* filename) {
     const char* prefix = "app/res/";
     if (strncmp(filename, prefix, 8) == 0)
@@ -38,7 +36,7 @@ static stbi_uc* _load_from_asset(const char* filename, int* w, int* h, int* c) {
         LOGE("stbi failed to decode texture asset: %s", path);
     return pixels;
 }
-#endif /* ANDROID */
+#endif
 
 texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
   texture* r = malloc(sizeof(texture));
@@ -220,7 +218,7 @@ texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
                                .levelCount = mip_levels,
                                .baseArrayLayer = 0,
                                .layerCount = 1}});
-                               
+
   vkEndCommandBuffer(ctx->transfer_cmd);
 
   vkQueueSubmit(ctx->queue, 1,

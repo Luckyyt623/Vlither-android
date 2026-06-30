@@ -140,18 +140,18 @@ static int convex_hull(v2* pts, int n, v2* out) {
 
   v2 stk[MAX_HULL_PTS * 2];
   int k = 0;
-  /* lower hull */
+
   for (int i = 0; i < n; i++) {
     while (k >= 2 && cross2(stk[k - 2], stk[k - 1], pts[i]) <= 0) k--;
     stk[k++] = pts[i];
   }
-  /* upper hull */
+
   int lo = k + 1;
   for (int i = n - 2; i >= 0; i--) {
     while (k >= lo && cross2(stk[k - 2], stk[k - 1], pts[i]) <= 0) k--;
     stk[k++] = pts[i];
   }
-  k--; /* remove last point (duplicate of first) */
+  k--;
   for (int i = 0; i < k; i++) out[i] = stk[i];
   return k;
 }
@@ -476,7 +476,7 @@ static void populate_pts(game_data* gdata) {
   B.bpts[B.bpts_n++] = (body_pt){B.x, B.y, 0.0f};
   float lx = B.x, ly = B.y, l = 0.0f;
   int pn = tdarray_length(me->pts);
-  /* Iterate oldest→newest (tail→head direction matches JS pts iteration) */
+
   for (int p = pn - 1; p >= 0 && B.bpts_n < MAX_BODY_PTS; p--) {
     body_part* po = me->pts + p;
     if (po->dying) continue;
@@ -569,8 +569,8 @@ static void determine_circle_dir(void) {
 }
 
 static void body_danger_zone(float offset, v2 target_pt,
-                             v2 target_norm,   /* closePointNormal */
-                             float close_dist, /* closePointDist   */
+                             v2 target_norm,
+                             float close_dist,
                              v2 past_target, v2 close_pt, poly_box* out) {
   int o = B.circle_dir;
   v2 raw[10];
@@ -768,7 +768,6 @@ static void follow_circle_self(game_data* gdata) {
   v2 goal = {B.x + goal_dir.x * 4.0f * B.width,
              B.y + goal_dir.y * 4.0f * B.width};
 
-  /* smooth update */
   if (fabsf(goal.x - B.goal.x) < 1000.0f &&
       fabsf(goal.y - B.goal.y) < 1000.0f) {
     B.goal.x = roundf(goal.x * 0.25f + B.goal.x * 0.75f);

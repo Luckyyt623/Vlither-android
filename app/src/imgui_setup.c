@@ -30,7 +30,6 @@ void imgui_init(tenv* env) {
       .UseDynamicRendering = false});
   igImplGlfw_InitForVulkan(env->wnd->handle, true);
   ImGuiIO* io = igGetIO_Nil();
-  // io->MouseDrawCursor = true;
 
   for (int i = 0; i < NUM_FONT_SIZES; i++) {
     ImFontConfig icons_config = {.FontDataOwnedByAtlas = true,
@@ -72,7 +71,7 @@ void imgui_init(tenv* env) {
                                    20 + i * 4, &icons_config,
                                    (const ImWchar[]){0xe900, 0xeaea, 0});
   }
-  
+
   io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   io->IniFilename = NULL;
 
@@ -139,4 +138,4 @@ void imgui_destroy() {
   igImplGlfw_Shutdown();
   igImplVulkan_Shutdown();
   igDestroyContext(NULL);
-}#endif /* !ANDROID */
+}#endif

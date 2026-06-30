@@ -127,9 +127,9 @@ void ui_skin_editor(tenv* env) {
   }
 
   float ssc = scale / 29;
-  float ed = 6 * ssc;   // o->ed
-  float esp = 6 * ssc;  // o->esp
-  float er = 6;         // o->er
+  float ed = 6 * ssc;
+  float esp = 6 * ssc;
+  float er = 6;
   default_skin_data* dfs =
       gdata->dfs + ((1 - usrs->custom_skin) * (1 + usrs->default_skin));
   float pr = dfs->pr;
@@ -177,8 +177,6 @@ void ui_skin_editor(tenv* env) {
            ((last_bp_pos[1] + scale / 2) + ey) - pupil_r, pupil_r * 2},
           gdata->cg_uvs[BLANK_UV],
           {dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, 1}});
-
-
 
   if (usrs->accessory < NUM_ACCESSORIES) {
     accessory_data* acc = gdata->accessories + usrs->accessory;

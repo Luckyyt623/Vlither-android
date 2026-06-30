@@ -411,9 +411,6 @@ void renderer_render(renderer* r, tcontext* ctx, vec4 clear_color) {
   mm_renderer_render(r->mmr, ctx);
   vkCmdEndRenderPass(ctx->frames[ctx->current_frame].cmd);
 
-  /* Mobile GPUs (Mali/Adreno) require an explicit barrier here.
-     Without it, the swapchain renderpass reads the offscreen texture
-     before the color attachment writes are visible -> black screen. */
   vkCmdPipelineBarrier(
       ctx->frames[ctx->current_frame].cmd,
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,

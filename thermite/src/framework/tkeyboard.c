@@ -48,4 +48,4 @@ void tkeyboard_destroy(tkeyboard* keyboard) {
   tdarray_destroy(keyboard->keys_pressed);
   free(keyboard);
 }
-#endif /* !ANDROID */
+#endif

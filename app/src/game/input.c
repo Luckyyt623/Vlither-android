@@ -69,19 +69,14 @@ void input(tenv* env) {
         }
 
 #ifdef ANDROID
-      /* env->ms->pos is always (0,0) on Android because tmouse_create does not
-       * set ms->window – use wnd->touch.x/y directly instead.             */
+
       float tx = env->wnd->touch.x;
       float ty = env->wnd->touch.y;
 
       if (usrs->ctrl_mode_trackpad) {
-        /* ============================================================
-         * NTL TRACKPAD MODE
-         * touch.down = movement finger (never the boost finger)
-         * touch.boost_down = independent boost finger
-         * ============================================================ */
-        #define NTL_FORBIDDEN_R  23.0f   /* dead-zone radius at centre   */
-        #define NTL_SPAWN_R      44.0f   /* spawn offset from centre     */
+
+        #define NTL_FORBIDDEN_R  23.0f
+        #define NTL_SPAWN_R      44.0f
         #define NTL_VEL_DECAY    0.85f
         #define NTL_VEL_WEIGHT   0.15f
 
@@ -90,59 +85,35 @@ void input(tenv* env) {
         float cx = sw * 0.5f;
         float cy = sh * 0.5f;
 
-        /* Movement touch – boost_down is now independent so no exclusion needed */
         bool touch_down = env->wnd->touch.down;
 
         if (touch_down) {
           if (env->wnd->touch.just_down || !gdata->touch_ctrl.tp_tracking) {
-            /* ---- Touch start ------------------------------------------------
-             * Real slither.io (control_mode 2) logic:
-             *   fing.xx  = cos(twang) * scale * 39   ← spawn at current heading
-             *   fing.ofx = fing.xx                   ← save as anchor
-             *   fing.sx  = stageX - halfW            ← save initial touch pos
-             *
-             * We do the same: cursor spawns at the snake's current heading,
-             * the spawn position is saved as tp_anchor, and the finger's
-             * initial screen position is saved in tp_last_touch_x/y.
-             * NO delta accumulation — the move path uses absolute offset. */
+
             float ang = me->eang;
             float spawn_x = cx + NTL_SPAWN_R * cosf(ang);
             float spawn_y = cy + NTL_SPAWN_R * sinf(ang);
 
             gdata->touch_ctrl.tp_tracking     = true;
             gdata->touch_ctrl.tp_visible      = true;
-            gdata->touch_ctrl.tp_anchor_x     = spawn_x; /* cursor spawn = anchor */
+            gdata->touch_ctrl.tp_anchor_x     = spawn_x;
             gdata->touch_ctrl.tp_anchor_y     = spawn_y;
-            gdata->touch_ctrl.tp_last_touch_x = tx;      /* initial finger pos    */
+            gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
             gdata->touch_ctrl.tp_cursor_x     = spawn_x;
             gdata->touch_ctrl.tp_cursor_y     = spawn_y;
             gdata->touch_ctrl.tp_vx           = 0.0f;
             gdata->touch_ctrl.tp_vy           = 0.0f;
           } else {
-            /* ---- Touch move -------------------------------------------------
-             * Real slither.io:
-             *   fing.xx = fing.ofx + (stageX - halfW) - fing.sx
-             *           = anchor + (current_touch - initial_touch)
-             *
-             * cursor = anchor + (current_finger - initial_finger) * sensitivity
-             *
-             * This is NOT a running delta. It is an absolute offset from the
-             * spawn position. This means:
-             *   • No cursor jump on re-touch (anchor always resets on just_down)
-             *   • No drift accumulation across frames
-             *   • Even if just_down is missed once, the worst result is the
-             *     cursor sitting at a slightly wrong offset, not a sudden snap */
+
             float nx = gdata->touch_ctrl.tp_anchor_x
                      + (tx - gdata->touch_ctrl.tp_last_touch_x) * usrs->arrow_sensitivity;
             float ny = gdata->touch_ctrl.tp_anchor_y
                      + (ty - gdata->touch_ctrl.tp_last_touch_y) * usrs->arrow_sensitivity;
 
-            /* Clamp to screen */
             nx = GLM_MAX(0.0f, GLM_MIN(sw, nx));
             ny = GLM_MAX(0.0f, GLM_MIN(sh, ny));
 
-            /* Keep outside forbidden centre zone */
             float fdx  = nx - cx;
             float fdy  = ny - cy;
             float dist = sqrtf(fdx * fdx + fdy * fdy);
@@ -152,7 +123,6 @@ void input(tenv* env) {
               ny = cy + sinf(a) * NTL_FORBIDDEN_R;
             }
 
-            /* Per-frame velocity for arrow rotation smoothing */
             float mdx = nx - gdata->touch_ctrl.tp_cursor_x;
             float mdy = ny - gdata->touch_ctrl.tp_cursor_y;
             gdata->touch_ctrl.tp_vx =
@@ -164,21 +134,16 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_cursor_y = ny;
           }
 
-          /* Arrow angle = direction from cursor toward screen centre */
           gdata->touch_ctrl.tp_cursor_angle_deg =
               atan2f(cy - gdata->touch_ctrl.tp_cursor_y,
                      cx  - gdata->touch_ctrl.tp_cursor_x) *
               (180.0f / PI);
 
-          /* Use cursor position as direction vector for snake.
-           * On the very first contact frame this is a no-op: the cursor
-           * was just spawned at (NTL_SPAWN_R, me->eang) above, so this
-           * recomputes the exact same angle the snake already had. */
           xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
           ym = (int)(gdata->touch_ctrl.tp_cursor_y - cy);
 
         } else {
-          /* ---- Touch lift ---- */
+
           if (gdata->touch_ctrl.tp_tracking) {
             gdata->touch_ctrl.tp_disappear_angle =
                 atan2f(gdata->touch_ctrl.tp_cursor_y - cy,
@@ -186,40 +151,40 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_tracking = false;
             gdata->touch_ctrl.tp_visible  = false;
           }
-          /* No active touch – keep last heading */
+
           xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
           ym = (int)(gdata->touch_ctrl.tp_cursor_y - cy);
         }
 
       } else {
-        /* ============================================================
-         * JOYSTICK MODE
-         * touch.down = joystick finger (independent of boost)
-         * ============================================================ */
+
         if (env->wnd->touch.down) {
-          /* Record anchor on the very first frame of a new touch */
+
           if (env->wnd->touch.just_down || !gdata->touch_ctrl.joy_tracking) {
             gdata->touch_ctrl.joy_anchor_x = tx;
             gdata->touch_ctrl.joy_anchor_y = ty;
             gdata->touch_ctrl.joy_tracking = true;
           }
-          /* Direction = displacement from anchor, ×4 so ~25 px = full deflection */
+
           xm = (int)((tx - gdata->touch_ctrl.joy_anchor_x) * 4.0f);
           ym = (int)((ty - gdata->touch_ctrl.joy_anchor_y) * 4.0f);
+
+          gdata->touch_ctrl.joy_last_xm = xm;
+          gdata->touch_ctrl.joy_last_ym = ym;
         } else {
           if (!env->wnd->touch.down) gdata->touch_ctrl.joy_tracking = false;
-          /* No joystick touch – keep snake heading toward last touch absolute pos */
-          xm = (int)tx - ctx->size[0] / 2;
-          ym = (int)ty - ctx->size[1] / 2;
+
+          xm = gdata->touch_ctrl.joy_last_xm;
+          ym = gdata->touch_ctrl.joy_last_ym;
         }
-      } /* end ctrl_mode_trackpad / joystick branch */
+      }
 #else
       xm = (int)env->ms->pos[0] - ctx->size[0] / 2;
       ym = (int)env->ms->pos[1] - ctx->size[1] / 2;
 #endif
     }
 #ifdef ANDROID
-    /* Boost fires only when the finger is in the right 20 % of the screen */
+
     gdata->data.wmd = env->wnd->touch.boost_down || gdata->bot.output.accel;
 #else
     gdata->data.wmd = twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
@@ -273,7 +238,6 @@ void input(tenv* env) {
   gdata->data.ms_zoom =
       GLM_MAX(MAX_ZOOM_OUT, GLM_MIN(gdata->data.ms_zoom, MAX_ZOOM_IN));
 
-  // hotkeys
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;
 
@@ -290,7 +254,7 @@ void input(tenv* env) {
     else
       hk->active ^= (real_pressed || fake_pressed);
   }
-  /* Clear fake_key_pressed after processing (one-shot per frame) */
+
   memset(gdata->data.fake_key_pressed, 0,
          sizeof(gdata->data.fake_key_pressed));
 

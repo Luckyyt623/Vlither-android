@@ -10,7 +10,7 @@ typedef struct body_part {
   float fys[GD_EEZ];
   float fltns[GD_EEZ];
   float fsmus[GD_EEZ];
-  
+
   int fpos;
   int ftg;
 

@@ -13,23 +13,22 @@ typedef void (*trender_func)(tenv* env);
 typedef void (*tresize_func)(tenv* env);
 
 typedef struct {
-    /* Primary / movement touch */
+
     float x, y;
     bool  down;
     bool  just_down;
-    /* Secondary / boost touch (independent finger) */
+
     float boost_x, boost_y;
     bool  boost_down;
     bool  boost_just_down;
-    /* Android pointer IDs so we route MOVE events by ID, not proximity.
-       -1 = slot is empty.  Fixes arrow+boost simultaneous input. */
+
     int   move_ptr_id;
     int   boost_ptr_id;
-    /* Tertiary touch: zoom slider (3rd finger) */
-    int   zslider_ptr_id;   /* -1 = none */
-    float zslider_y;        /* last Y of zoom-slider touch         */
-    float zslider_offset;   /* displacement from center (+ = zoom in) */
-    /* Set after POINTER_UP; cleared when MOVE reconciliation runs */
+
+    int   zslider_ptr_id;
+    float zslider_y;
+    float zslider_offset;
+
     bool  pending_reconcile;
 } touch_state;
 

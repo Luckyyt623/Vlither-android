@@ -218,7 +218,6 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->ph_device,
                                             context->surface, &capabilities);
 
-  /* Log surface capabilities so we can debug orientation on device */
   #ifdef ANDROID
   { char _tb[128];
     snprintf(_tb, sizeof(_tb), "surface: extent=%dx%d transform=0x%x supported=0x%x",
@@ -230,15 +229,13 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
     __android_log_print(ANDROID_LOG_ERROR, "vlither", "%s", _tb); }
   #endif
 
-  /* Use currentTransform (required by most Android drivers).
-     Set ctx->size to logical landscape dims for UI layout. */
   uint32_t _ew = capabilities.currentExtent.width;
   uint32_t _eh = capabilities.currentExtent.height;
   bool _rotated = (capabilities.currentTransform ==
                        VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
                    capabilities.currentTransform ==
                        VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR);
-  /* Logical size: always landscape (width >= height) */
+
   context->size[0] = _rotated ? (_ew > _eh ? _ew : _eh) : (_ew >= _eh ? _ew : _eh);
   context->size[1] = _rotated ? (_ew < _eh ? _ew : _eh) : (_ew >= _eh ? _eh : _ew);
   context->swapchain_size[0] = _ew;
@@ -686,4 +683,4 @@ void tcontext_destroy(tcontext* context) {
 
   free(context);
 }
-#endif /* !ANDROID */
+#endif

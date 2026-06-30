@@ -21,8 +21,6 @@ static void _gd_ntfy(const char* m) {
 #define DLOG(fmt,...) do{}while(0)
 #endif
 
-
-
 #include "../user.h"
 #include "../network/server.h"
 
@@ -322,18 +320,14 @@ void set_default_skin_data(default_skin_data* dfs) {
     dfs[i].pr = 3.5f;
   }
 
-  // black eyes (cv = 63):
   dfs[1 + 63].ec = (vec3s){0, 0, 0};
   dfs[1 + 63].ppc = (vec3s){0.8f, 0.8f, 0.8f};
   dfs[1 + 63].pr = 2.5f;
 
-  // yellow eyes (cv = 64):
   dfs[1 + 64].ec = (vec3s){1, 1, 0.50196f};
 
-  // orange eyes (cv = 25):
   dfs[1 + 25].ec = (vec3s){1, 0.3373f, 0.0353f};
 
-  // grey eyes (cv = 44):
   dfs[1 + 44].ec = (vec3s){0.8314f, 0.8314f, 0.8314f};
 }
 
@@ -341,15 +335,11 @@ void game_data_init(tenv* env) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
 
-  /* FIX: The original compound literal "*gdata = (game_data){...}" created a
-     ~2MB+ temporary on the stack, causing a silent stack overflow on Android
-     before any DLOG could fire. Zero the struct first, then set fields. */
   memset(gdata, 0, sizeof(game_data));
 
   gdata->curr_screen = TITLE_SCREEN;
   gdata->conn = DISCONNECTED;
 
-  /* cg_colors_ct */
   gdata->cg_colors_ct[11] = 1; gdata->cg_colors_ct[13] = 1; gdata->cg_colors_ct[14] = 1;
   gdata->cg_colors_ct[16] = 1; gdata->cg_colors_ct[19] = 1; gdata->cg_colors_ct[20] = 1;
   gdata->cg_colors_ct[21] = 1; gdata->cg_colors_ct[27] = 1; gdata->cg_colors_ct[28] = 1;
@@ -358,7 +348,6 @@ void game_data_init(tenv* env) {
   gdata->cg_colors_ct[35] = 1; gdata->cg_colors_ct[36] = 1; gdata->cg_colors_ct[38] = 1;
   gdata->cg_colors_ct[39] = 1; gdata->cg_colors_ct[41] = 1;
 
-  /* cg_colors */
   gdata->cg_colors[0]  = (vec3s){0.75f, 0.5f, 0.99609375f};
   gdata->cg_colors[1]  = (vec3s){0.5625f, 0.59765625f, 0.99609375f};
   gdata->cg_colors[2]  = (vec3s){0.5f, 0.8125f, 0.8125f};
@@ -402,7 +391,6 @@ void game_data_init(tenv* env) {
   gdata->cg_colors[40] = (vec3s){1, 1, 1};
   gdata->cg_colors[41] = (vec3s){0.5f, 0.5f, 0.99609375f};
 
-  /* default_skins */
   { uint8_t ds[][64] = {
     {1, 0},{1, 1},{1, 2},{1, 3},{1, 4},{1, 5},{1, 6},{1, 7},{1, 8},
     {20, 7,9,7,9,7,9,7,9,7,9,7,10,10,10,10,10,10,10,10,10},
@@ -449,7 +437,6 @@ void game_data_init(tenv* env) {
     memcpy(gdata->default_skins[_i], ds[_i], sizeof(ds[_i]));
   }
 
-  /* ntl_cg_map */
   { char m[] = {'z','x','c','v','b','n','m',',','a','s','d','f','g','h','j',
                  'k','l','q','w','e','r','t','y','u','i','o','p','1','2','3',
                  '4','5','6','7','8','9','*','0','*','-','*','*'};
@@ -559,6 +546,8 @@ void game_data_init(tenv* env) {
 
   DLOG("gdi: server_init");
   server_init(env);
+  DLOG("gdi: server_list_init");
+  server_list_init(env);
   DLOG("gdi: done");
 }
 
@@ -637,8 +626,9 @@ void game_data_destroy(tenv* env) {
   game_data* gdata = &usr->gdata;
 
   server_destroy(env);
+  server_list_destroy(env);
   sbot_destroy(env);
-  
+
   tdarray_destroy(gdata->data.fpsls);
   tdarray_destroy(gdata->data.fmlts);
   int gptz_dp_len = tdarray_length(gdata->data.gptz_dp);

@@ -274,11 +274,6 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       int skl = a[m];
       m++;
       if (skl > 0) {
-        // printf("TAG DATA:\n");
-        // for (int unread = 0; unread < 8; unread++) {
-        //   printf("[%d] = %d\n", unread, a[m + unread]);
-        // }
-        // printf("TAG DATA END:\n");
 
         for (int j = 8; j < skl; j += 2) {
           for (int i = 0; i < a[m + j]; i++) {
@@ -313,7 +308,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
         lx = xx;
         ly = yy;
         if (!fp) {
-          // tail
+
           xx = (a[m] << 16 | a[m + 1] << 8 | a[m + 2]) / 5.0f;
           m += 3;
           yy = (a[m] << 16 | a[m + 1] << 8 | a[m + 2]) / 5.0f;
@@ -322,7 +317,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
           ly = yy;
           fp = true;
         } else if (m == alen_m2) {
-          // head
+
           float iang = a[m] << 8 | a[m + 1];
           po.iang = iang;
           m += 2;
@@ -330,7 +325,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
           xx += cosf(ang) * gdata->data.default_msl;
           yy += sinf(ang) * gdata->data.default_msl;
         } else {
-          // body
+
           xx += (a[m] - 127) / 2.0f;
           m++;
           yy += (a[m] - 127) / 2.0f;
@@ -374,7 +369,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       };
 
       if (gdata->data.dead) {
-        // player snake:
+
         usr->r->global.lview[0] = gdata->data.lview_xx;
         usr->r->global.lview[1] = gdata->data.lview_yy;
 
@@ -1160,7 +1155,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
         .ang = ang,
         .sp = speed,
         .gfr = rand() % 64,
-        .gr = 0.5f + ((float)rand() / (float)RAND_MAX) * 0.15f + 0.1f * 6, // * rad
+        .gr = 0.5f + ((float)rand() / (float)RAND_MAX) * 0.15f + 0.1f * 6,
         .cv2 = GLM_MIN(NUM_PREY_SIZES - 1, GLM_MAX(0, (int)floorf(NUM_PREY_SIZES * rad / 9)))
       }));
     }

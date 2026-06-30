@@ -14,7 +14,6 @@ typedef struct tmouse {
   vec2  delta;
   float dwheel;
 
-  /* Android: back-reference to window for touch state */
   twindow* window;
 } tmouse;
 

@@ -290,7 +290,6 @@ void ui_settings(tenv* env) {
     }
     igEndChild();
 
-    /* Column 3 — empty */
     igTableSetColumnIndex(3);
     igBeginChild_Str("empty_col", (ImVec2){-1, child_window_height},
                      ImGuiChildFlags_None, ImGuiWindowFlags_None);
@@ -300,7 +299,6 @@ void ui_settings(tenv* env) {
     igEndTable();
   }
 
-  /* Reset + OK stacked vertically below hotkeys column (col index 2 = 3rd col) */
   float btn_w = ctx->size[0] * 0.25f - style->ItemSpacing.x * 2;
   float btn_h = frame_height * 1.8f;
   float col2_x = ctx->size[0] * 0.5f + style->WindowPadding.x;

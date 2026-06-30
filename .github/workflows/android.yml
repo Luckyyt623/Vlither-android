@@ -40,14 +40,12 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          ADMOB_AD_UNIT_ID: ${{ secrets.ADMOB_AD_UNIT_ID }}
         run: |
           echo "$KEYSTORE_B64" | base64 -d > android/app/vlither.keystore
           cat > android/app/keystore.properties <<EOF
           STORE_PASSWORD=$STORE_PASSWORD
           KEY_ALIAS=$KEY_ALIAS
           KEY_PASSWORD=$KEY_PASSWORD
-          ADMOB_AD_UNIT_ID=$ADMOB_AD_UNIT_ID
           EOF
           echo "Keystore + properties ready"
 
@@ -117,7 +115,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          REPO="Lucky63-dot/apk"
+          REPO="Luckyyt623/Vlither_android"
           TAG="v${VERSION}"
           RELEASE_NAME="Vlither v${VERSION}"
 

@@ -1,26 +1,8 @@
-/**
- * key_buttons.c
- *
- * Custom on-screen key buttons — place any keyboard key anywhere on screen.
- * Each button:
- *   - Fires GLFW keydown on press, keyup on release
- *   - Draggable and resizable in edit mode
- *   - Position/size saved in user_settings (persisted to user.dat)
- *
- * UI flow:
- *   - Small "KB" edit button always visible (bottom-right, above zoom slider)
- *   - Tap "KB" → enter edit mode → shows all placed buttons + keyboard picker
- *   - Keyboard picker: full key grid, tap any key → places a new button
- *   - In edit mode: drag buttons to move, drag resize handle to resize
- *   - Tap "×" on a button to delete it
- *   - Tap "Done" to exit edit mode and save
- */
 
 #include "key_buttons.h"
 #include "../user.h"
 #include "../game/game_data.h"
 
-/* IM_COL32 is defined in imgui.h (C++ only) — define it here for C */
 #ifndef IM_COL32
 #define IM_COL32(R,G,B,A)     (((ImU32)(A)<<24)|((ImU32)(B)<<16)|((ImU32)(G)<<8)|((ImU32)(R)<<0))
 #endif
@@ -35,19 +17,18 @@
 #define KBLOG(...) (void)0
 #endif
 
-/* ── State ────────────────────────────────────────────────────────────── */
 static struct {
     bool edit_mode;
     bool picker_open;
-    /* which slot is being dragged */
-    int  drag_idx;        /* -1 = none */
+
+    int  drag_idx;
     float drag_off_x;
     float drag_off_y;
-    /* which slot is being resized */
+
     int  resize_idx;
     float resize_start_y;
     float resize_start_size;
-    /* which buttons are currently pressed (for keyup) */
+
     bool pressed[MAX_KEY_BTNS];
 } s_kb = {
     .edit_mode   = false,
@@ -56,11 +37,10 @@ static struct {
     .resize_idx  = -1,
 };
 
-/* ── Key table ────────────────────────────────────────────────────────── */
 typedef struct { int glfw; const char* label; } key_entry;
 
 static const key_entry KEY_TABLE[] = {
-    /* Letters */
+
     {GLFW_KEY_A,"A"},{GLFW_KEY_B,"B"},{GLFW_KEY_C,"C"},{GLFW_KEY_D,"D"},
     {GLFW_KEY_E,"E"},{GLFW_KEY_F,"F"},{GLFW_KEY_G,"G"},{GLFW_KEY_H,"H"},
     {GLFW_KEY_I,"I"},{GLFW_KEY_J,"J"},{GLFW_KEY_K,"K"},{GLFW_KEY_L,"L"},
@@ -68,16 +48,16 @@ static const key_entry KEY_TABLE[] = {
     {GLFW_KEY_Q,"Q"},{GLFW_KEY_R,"R"},{GLFW_KEY_S,"S"},{GLFW_KEY_T,"T"},
     {GLFW_KEY_U,"U"},{GLFW_KEY_V,"V"},{GLFW_KEY_W,"W"},{GLFW_KEY_X,"X"},
     {GLFW_KEY_Y,"Y"},{GLFW_KEY_Z,"Z"},
-    /* Digits */
+
     {GLFW_KEY_0,"0"},{GLFW_KEY_1,"1"},{GLFW_KEY_2,"2"},{GLFW_KEY_3,"3"},
     {GLFW_KEY_4,"4"},{GLFW_KEY_5,"5"},{GLFW_KEY_6,"6"},{GLFW_KEY_7,"7"},
     {GLFW_KEY_8,"8"},{GLFW_KEY_9,"9"},
-    /* Function keys */
+
     {GLFW_KEY_F1,"F1"},{GLFW_KEY_F2,"F2"},{GLFW_KEY_F3,"F3"},
     {GLFW_KEY_F4,"F4"},{GLFW_KEY_F5,"F5"},{GLFW_KEY_F6,"F6"},
     {GLFW_KEY_F7,"F7"},{GLFW_KEY_F8,"F8"},{GLFW_KEY_F9,"F9"},
     {GLFW_KEY_F10,"F10"},{GLFW_KEY_F11,"F11"},{GLFW_KEY_F12,"F12"},
-    /* Special */
+
     {GLFW_KEY_SPACE,"SPC"},{GLFW_KEY_ENTER,"Ent"},
     {GLFW_KEY_ESCAPE,"Esc"},{GLFW_KEY_BACKSPACE,"BS"},
     {GLFW_KEY_TAB,"Tab"},{GLFW_KEY_CAPS_LOCK,"Caps"},
@@ -88,14 +68,12 @@ static const key_entry KEY_TABLE[] = {
 };
 static const int KEY_TABLE_COUNT = sizeof(KEY_TABLE) / sizeof(KEY_TABLE[0]);
 
-/* ── Find free slot ───────────────────────────────────────────────────── */
 static int find_free_slot(user_settings* usrs) {
     for (int i = 0; i < MAX_KEY_BTNS; i++)
         if (!usrs->key_btns[i].active) return i;
     return -1;
 }
 
-/* ── Add a button ─────────────────────────────────────────────────────── */
 static void add_key_btn(user_settings* usrs, int glfw_key, const char* label) {
     int idx = find_free_slot(usrs);
     if (idx < 0) return;
@@ -104,7 +82,7 @@ static void add_key_btn(user_settings* usrs, int glfw_key, const char* label) {
     b->glfw_key = glfw_key;
     strncpy(b->label, label, 7);
     b->label[7] = '\0';
-    /* Place in centre by default */
+
     b->rel_x    = 0.3f + (idx % 4) * 0.12f;
     b->rel_y    = 0.5f + (idx / 4) * 0.12f;
     b->rel_size = 0.08f;
@@ -112,7 +90,6 @@ static void add_key_btn(user_settings* usrs, int glfw_key, const char* label) {
     KBLOG("added key btn idx=%d key=%d label=%s", idx, glfw_key, label);
 }
 
-/* ── Lifecycle ────────────────────────────────────────────────────────── */
 void ui_key_buttons_init(tenv* env) {
     (void)env;
     memset(&s_kb, 0, sizeof(s_kb));
@@ -122,7 +99,6 @@ void ui_key_buttons_init(tenv* env) {
 
 void ui_key_buttons_destroy(tenv* env) { (void)env; }
 
-/* ── Main render ──────────────────────────────────────────────────────── */
 void ui_key_buttons(tenv* env) {
     tuser_data*    usr  = env->usr;
     tcontext*      ctx  = env->ctx;
@@ -142,11 +118,10 @@ void ui_key_buttons(tenv* env) {
     float mx = io ? io->MousePos.x : 0;
     float my = io ? io->MousePos.y : 0;
 
-    /* ── "KB" edit toggle button — bottom right ─────────────────────── */
     {
         ImDrawList* fdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
         float br  = sh * 0.028f;
-        float bx  = br * 1.8f;   /* left side */
+        float bx  = br * 1.8f;
         float by  = sh - br * 1.8f;
 
         ImU32 bg  = s_kb.edit_mode
@@ -168,7 +143,7 @@ void ui_key_buttons(tenv* env) {
             if (sqrtf(dx*dx+dy*dy) <= br) {
                 s_kb.edit_mode = !s_kb.edit_mode;
                 if (!s_kb.edit_mode) {
-                    /* Save on exit */
+
                     save_user_settings(usrs);
                     s_kb.picker_open = false;
                     s_kb.drag_idx    = -1;
@@ -178,12 +153,11 @@ void ui_key_buttons(tenv* env) {
         }
     }
 
-    /* ── Placed key buttons ──────────────────────────────────────────── */
     for (int i = 0; i < MAX_KEY_BTNS; i++) {
         custom_key_btn* b = &usrs->key_btns[i];
         if (!b->active) continue;
 
-        float bsz  = b->rel_size * sh;   /* button radius */
+        float bsz  = b->rel_size * sh;
         float bx   = b->rel_x * sw;
         float by_  = b->rel_y * sh;
 
@@ -207,14 +181,13 @@ void ui_key_buttons(tenv* env) {
         ImDrawList_AddCircleFilled(fdl, (ImVec2){bx,by_}, bsz, bg_col, 32);
         ImDrawList_AddCircle(fdl, (ImVec2){bx,by_}, bsz, brd_col, 32, 1.8f);
 
-        /* Label */
         ImVec2 tsz; igCalcTextSize(&tsz, b->label, NULL, false, -1);
         ImDrawList_AddText_Vec2(fdl,
             (ImVec2){bx - tsz.x*0.5f, by_ - tsz.y*0.5f},
             txt_col, b->label, NULL);
 
         if (s_kb.edit_mode) {
-            /* Delete × button — top-right of circle */
+
             float dx_b = bsz * 0.65f, dy_b = bsz * 0.65f;
             float del_x = bx + dx_b, del_y = by_ - dy_b;
             float del_r = bsz * 0.32f;
@@ -226,7 +199,6 @@ void ui_key_buttons(tenv* env) {
                 (ImVec2){del_x-xsz.x*0.5f, del_y-xsz.y*0.5f},
                 IM_COL32(255,255,255,255), x, NULL);
 
-            /* Resize handle — bottom-right */
             float res_x = bx + bsz * 0.7f, res_y = by_ + bsz * 0.7f;
             float res_r = bsz * 0.28f;
             ImDrawList_AddCircleFilled(fdl, (ImVec2){res_x,res_y},
@@ -235,22 +207,21 @@ void ui_key_buttons(tenv* env) {
                 (ImVec2){res_x-4.0f, res_y-6.0f},
                 IM_COL32(255,255,255,255), "⊞", NULL);
 
-            /* Hit tests in edit mode */
             if (mouse_clicked) {
-                /* Delete? */
+
                 float dxd = mx-del_x, dyd = my-del_y;
                 if (sqrtf(dxd*dxd+dyd*dyd) <= del_r) {
                     b->active = false;
                     continue;
                 }
-                /* Resize start? */
+
                 float dxr = mx-res_x, dyr = my-res_y;
                 if (sqrtf(dxr*dxr+dyr*dyr) <= res_r) {
                     s_kb.resize_idx         = i;
                     s_kb.resize_start_y     = my;
                     s_kb.resize_start_size  = b->rel_size;
                 }
-                /* Drag start? */
+
                 float dxb = mx-bx, dyb = my-by_;
                 if (sqrtf(dxb*dxb+dyb*dyb) <= bsz &&
                     s_kb.resize_idx != i) {
@@ -260,20 +231,20 @@ void ui_key_buttons(tenv* env) {
                 }
             }
         } else {
-            /* Normal mode: press/release to fire key events */
+
             float dxb = mx - bx, dyb = my - by_;
             bool over = sqrtf(dxb*dxb + dyb*dyb) <= bsz;
 
             if (mouse_clicked && over && !s_kb.pressed[i]) {
                 s_kb.pressed[i] = true;
-                /* Inject fake key press — input.c picks this up next frame */
+
                 int key = b->glfw_key;
                 if (key > 0 && key < 512) {
                     usr->gdata.data.fake_key_pressed[key] = true;
                     usr->gdata.data.fake_key_down[key]    = true;
                 }
             }
-            /* Keep fake_key_down true while finger is held */
+
             if (s_kb.pressed[i]) {
                 int key = b->glfw_key;
                 if (key > 0 && key < 512)
@@ -281,7 +252,7 @@ void ui_key_buttons(tenv* env) {
             }
             if (mouse_released && s_kb.pressed[i]) {
                 s_kb.pressed[i] = false;
-                /* Release: clear fake_key_down */
+
                 int key = b->glfw_key;
                 if (key > 0 && key < 512)
                     usr->gdata.data.fake_key_down[key] = false;
@@ -289,12 +260,11 @@ void ui_key_buttons(tenv* env) {
         }
     }
 
-    /* ── Drag / resize update ────────────────────────────────────────── */
     if (s_kb.drag_idx >= 0 && mouse_down) {
         custom_key_btn* b = &usrs->key_btns[s_kb.drag_idx];
         b->rel_x = (mx - s_kb.drag_off_x) / sw;
         b->rel_y = (my - s_kb.drag_off_y) / sh;
-        /* Clamp */
+
         float sz = b->rel_size;
         if (b->rel_x < sz)        b->rel_x = sz;
         if (b->rel_x > 1.0f - sz) b->rel_x = 1.0f - sz;
@@ -316,9 +286,8 @@ void ui_key_buttons(tenv* env) {
         s_kb.resize_idx = -1;
     }
 
-    /* ── Key picker panel (edit mode) ────────────────────────────────── */
     if (s_kb.edit_mode) {
-        /* "Add Key" button */
+
         float add_bx = sw * 0.5f;
         float add_by = sh * 0.04f;
         float add_r  = sh * 0.032f;
