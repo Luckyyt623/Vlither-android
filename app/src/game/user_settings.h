@@ -96,7 +96,6 @@ typedef struct user_settings {
   float arrow_sensitivity;
   bool  boost_arrow_anim;
   bool  arrow_invisible;
-  bool  bot_vis;
 
   float zoom_sensitivity;
   float zslider_rel_x;

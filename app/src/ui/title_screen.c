@@ -111,11 +111,12 @@ void ui_title_screen(tenv* env) {
 
     if (gdata->server_list.fetching) {
       igTextColored((ImVec4){0.8f, 0.8f, 0.3f, 1.0f},
-                    "Fetching official server list...");
+                    "Fetching server list...");
     } else if (gdata->server_list.fetch_error) {
       igTextColored((ImVec4){0.9f, 0.4f, 0.4f, 1.0f},
-                    "Couldn't fetch official list \xe2\x80\x94 custom servers still available.");
+                    "Connection failed.");
     } else if (gdata->server_list.fetched && gdata->server_list.count > 0) {
+
       if (gdata->server_list.pinging) {
         char prog[56];
         snprintf(prog, sizeof(prog), "Pinging... %d/%d",
@@ -127,52 +128,38 @@ void ui_title_screen(tenv* env) {
                  gdata->server_list.count);
         igTextColored((ImVec4){0.5f, 0.9f, 0.5f, 1.0f}, hdr);
       }
-    }
+      igSeparator();
 
-    igSeparator();
-
-    if (gdata->server_list.count > 0) {
-      igBeginChild_Str("##sl_scroll", (ImVec2){340, 320},
+      igBeginChild_Str("##sl_scroll", (ImVec2){310, 320},
                        ImGuiChildFlags_None, 0);
 
       bool sorted = !gdata->server_list.pinging &&
                     gdata->server_list.pings_done > 0;
 
       for (int j = 0; j < gdata->server_list.count; j++) {
-        int i         = sorted ? gdata->server_list.sorted_order[j] : j;
-        int ping      = gdata->server_list.pings[i];
-        bool is_custom = i < gdata->server_list.custom_count;
+        int i    = sorted ? gdata->server_list.sorted_order[j] : j;
+        int ping = gdata->server_list.pings[i];
 
-        char name_buf[40];
-        if (is_custom) {
-          snprintf(name_buf, sizeof(name_buf), "\xe2\x98\x85 %s",
-                    CUSTOM_SERVER_NAMES[i]);
-        } else {
-          snprintf(name_buf, sizeof(name_buf), "%s", gdata->server_list.ips[i]);
-        }
-
-        char label[80];
+        char label[64];
         if (ping < 0) {
-          snprintf(label, sizeof(label), "%-26s  --", name_buf);
+          snprintf(label, sizeof(label), "%-21s  --",
+                   gdata->server_list.ips[i]);
         } else if (ping >= 9999) {
-          snprintf(label, sizeof(label), "%-26s  !!ms", name_buf);
+          snprintf(label, sizeof(label), "%-21s  !!ms",
+                   gdata->server_list.ips[i]);
         } else {
-          snprintf(label, sizeof(label), "%-26s  %dms", name_buf, ping);
+          snprintf(label, sizeof(label), "%-21s  %dms",
+                   gdata->server_list.ips[i], ping);
         }
 
-        bool pushed_color = false;
-        if (is_custom) {
-          igPushStyleColor_Vec4(ImGuiCol_Text,
-            (ImVec4){1.0f, 0.82f, 0.25f, 1.0f});
-          pushed_color = true;
-        } else if (ping >= 0 && ping < 9999) {
+        bool has_color = (ping >= 0 && ping < 9999);
+        if (has_color) {
           ImVec4 col;
           if      (ping <  80) col = (ImVec4){0.3f, 1.0f, 0.4f, 1.0f};
           else if (ping < 150) col = (ImVec4){1.0f, 1.0f, 0.3f, 1.0f};
           else if (ping < 300) col = (ImVec4){1.0f, 0.65f, 0.2f, 1.0f};
           else                  col = (ImVec4){1.0f, 0.4f, 0.4f, 1.0f};
           igPushStyleColor_Vec4(ImGuiCol_Text, col);
-          pushed_color = true;
         }
 
         if (igSelectable_Bool(label, false,
@@ -181,14 +168,13 @@ void ui_title_screen(tenv* env) {
           usrs->ipv4[MAX_IPV4_LEN] = '\0';
           igCloseCurrentPopup();
         }
-        if (is_custom && igIsItemHovered(0)) {
-          igSetTooltip("%s", gdata->server_list.ips[i]);
-        }
 
-        if (pushed_color) igPopStyleColor(1);
+        if (has_color) igPopStyleColor(1);
       }
       igEndChild();
       igSeparator();
+    } else if (gdata->server_list.fetched) {
+      igTextColored((ImVec4){0.9f, 0.8f, 0.3f, 1.0f}, "No servers found.");
     }
 
     if (!gdata->server_list.fetching) {

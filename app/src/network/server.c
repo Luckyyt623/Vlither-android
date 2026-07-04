@@ -66,29 +66,6 @@ void server_destroy(tenv* env) {
 #define SL_URL_HTTP  "http://slither.io/i80124.txt"
 #define SL_URL_HTTPS "https://slither.io/i80124.txt"
 
-static const char* CUSTOM_SERVER_IPS[CUSTOM_SERVER_COUNT] = {
-  "206.206.76.190:444",
-  "139.84.166.84:444",
-  "51.91.19.175:444",
-  "206.221.176.241:444",
-};
-const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT] = {
-  "Singapore Battledome",
-  "India Battledome",
-  "EU Battledome",
-  "USA Battledome",
-};
-
-static void server_list_seed_custom(game_data* gdata) {
-  gdata->server_list.count = 0;
-  for (int i = 0; i < CUSTOM_SERVER_COUNT; i++) {
-    strncpy(gdata->server_list.ips[i], CUSTOM_SERVER_IPS[i], MAX_SERVER_IP_LEN);
-    gdata->server_list.ips[i][MAX_SERVER_IP_LEN] = '\0';
-    gdata->server_list.count++;
-  }
-  gdata->server_list.custom_count = gdata->server_list.count;
-}
-
 static void server_list_parse(const char* data, int len,
                                char ips[][MAX_SERVER_IP_LEN + 1], int* count) {
 
@@ -111,9 +88,7 @@ static void server_list_parse(const char* data, int len,
     }
   }
 
-  /* NOTE: *count is NOT reset here — the caller may have pre-seeded
-     custom server entries at the start of the array, and this function
-     appends the fetched official servers right after them. */
+  *count = 0;
   if (hb_len > 0 && hb_len % 28 == 0) {
 
     for (int i = 0; i + 27 < hb_len && *count < MAX_SERVER_LIST; i += 28) {
@@ -206,11 +181,11 @@ void server_list_init(tenv* env) {
   gdata->server_list.pinging     = 0;
   gdata->server_list.ping_stop   = 0;
   gdata->server_list.pings_done  = 0;
+  gdata->server_list.count       = 0;
   for (int i = 0; i < MAX_SERVER_LIST; i++) {
     gdata->server_list.pings[i]        = -1;
     gdata->server_list.sorted_order[i] = i;
   }
-  server_list_seed_custom(gdata);
 }
 
 void server_list_fetch(tenv* env) {
@@ -222,11 +197,11 @@ void server_list_fetch(tenv* env) {
   gdata->server_list.fetched     = false;
   gdata->server_list.fetch_error = false;
   gdata->server_list.retry_https = false;
+  gdata->server_list.count       = 0;
   for (int i = 0; i < MAX_SERVER_LIST; i++) {
     gdata->server_list.pings[i]        = -1;
     gdata->server_list.sorted_order[i] = i;
   }
-  server_list_seed_custom(gdata);
   mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTP, sl_http_cb, gdata);
 }
 

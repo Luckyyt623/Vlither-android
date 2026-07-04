@@ -3,9 +3,6 @@
 
 #include <thermite.h>
 
-#define CUSTOM_SERVER_COUNT 4
-extern const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT];
-
 void server_init(tenv* env);
 void server_connect(tenv* env);
 void server_poll(tenv* env);

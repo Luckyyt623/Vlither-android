@@ -24,7 +24,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "3.7"
+        private const val CURRENT_VERSION   = "3.8"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -165,17 +165,18 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 3.7
+Update 3.8
 
-   •  Now you can see bot thinking.
-   • some known bugs are fixed.
-  
+ Nothing 
+
+
+
 
 Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v3.7")
+            .setTitle("What's New in v3.8")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()
@@ -264,7 +265,7 @@ Changes made by Lucky
         btnPlay.layoutParams = btnParams
         btnPlay.setOnClickListener { onPlayClicked() }
 
-        // Changelog — always visible (was: hidden until an update is detected)
+        // Changelog — hidden until an update is detected
         btnChangelog = Button(this)
         btnChangelog.text = "📋  What's New"
         btnChangelog.textSize = 13f
@@ -272,7 +273,7 @@ Changes made by Lucky
         btnChangelog.layoutParams = btnParams
         btnChangelog.setTextColor(0xFF5DADE2.toInt())
         btnChangelog.alpha = 0.85f
-        btnChangelog.visibility = View.VISIBLE
+        btnChangelog.visibility = View.GONE
         btnChangelog.setOnClickListener { showChangelog() }
 
         // ── Update panel — hidden until update found ──────────────────
