@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+sbot_dbg g_bot_dbg;
+
 #include "../user.h"
 
 #define ARC_SIZE (M_PI / 8.0f)
@@ -353,6 +355,12 @@ static void avoid_point(isect* ip) {
   float new_ang =
       is_left(head, end, pt) ? ip->a - (float)M_PI : ip->a + (float)M_PI;
   B.goal = heading_abs(new_ang);
+
+  g_bot_dbg.avoid_active  = true;
+  g_bot_dbg.avoid_ix      = ip->x;
+  g_bot_dbg.avoid_iy      = ip->y;
+  g_bot_dbg.avoid_fwd_x   = end.x;
+  g_bot_dbg.avoid_fwd_y   = end.y;
 }
 
 static void heading_best_angle(void) {
@@ -450,14 +458,17 @@ static bool check_encircle(game_data* gdata) {
       gdata->bot.output.accel = gdata->data.snakes[high_si].sp > 10.0f;
     else
       gdata->bot.output.accel = (bool)B.default_accel;
+    g_bot_dbg.encircle_state = 1;
     return true;
   }
   if (en_all > (int)(MAXARC * ENCIRCLE_ALL_THRESH)) {
     heading_best_angle();
     gdata->bot.output.accel = (bool)B.default_accel;
+    g_bot_dbg.encircle_state = 2;
     return true;
   }
   gdata->bot.output.accel = (bool)B.default_accel;
+  g_bot_dbg.encircle_state = 0;
   return false;
 }
 
@@ -919,6 +930,9 @@ void sbot_go(tenv* env) {
   B.radius_mult = usrs->bot_radius_mult;
   B.follow_circle_length = usrs->bot_follow_circle_score;
 
+  g_bot_dbg.avoid_active   = false;
+  g_bot_dbg.encircle_state = 0;
+
   if (tdarray_length(gdata->data.snakes) == 0) return;
 
   every(gdata);
@@ -941,6 +955,36 @@ void sbot_go(tenv* env) {
 
   bot->output.xm = (B.goal.x - gdata->data.view_xx) * gdata->data.gsc;
   bot->output.ym = (B.goal.y - gdata->data.view_yy) * gdata->data.gsc;
+
+  g_bot_dbg.active        = true;
+  g_bot_dbg.bx            = B.x;
+  g_bot_dbg.by            = B.y;
+  g_bot_dbg.brad          = B.radius;
+  g_bot_dbg.head_cx       = B.head_circle.x;
+  g_bot_dbg.head_cy       = B.head_circle.y;
+  g_bot_dbg.head_cr       = B.head_circle.r;
+  g_bot_dbg.has_food      = B.has_food;
+  g_bot_dbg.food_x        = B.current_food.x;
+  g_bot_dbg.food_y        = B.current_food.y;
+  g_bot_dbg.goal_x        = B.goal.x;
+  g_bot_dbg.goal_y        = B.goal.y;
+  g_bot_dbg.stage         = B.stage;
+  g_bot_dbg.accel         = bot->output.accel;
+  g_bot_dbg.encircle_r1   = B.radius * (float)B.radius_mult;
+  g_bot_dbg.encircle_r2   = B.radius * ENCIRCLE_DIST_MULT;
+  for (int _i = 0; _i < 16; _i++) {
+    g_bot_dbg.arc_coll[_i] = B.coll_angles_set[_i];
+    g_bot_dbg.arc_food[_i] = B.food_angles_set[_i];
+  }
+  g_bot_dbg.coll_n = 0;
+  for (int _i = 0; _i < B.coll_pts_n && _i < SBOT_DBG_MAX_COLL; _i++) {
+    g_bot_dbg.coll_x[_i]    = B.coll_pts[_i].x;
+    g_bot_dbg.coll_y[_i]    = B.coll_pts[_i].y;
+    g_bot_dbg.coll_r[_i]    = B.coll_pts[_i].r;
+    g_bot_dbg.coll_type[_i] = B.coll_pts[_i].type;
+    g_bot_dbg.coll_d2[_i]   = B.coll_pts[_i].d2;
+    g_bot_dbg.coll_n++;
+  }
 }
 
 void sbot_destroy(tenv* env) { (void)env; }

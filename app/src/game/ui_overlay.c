@@ -11,6 +11,7 @@
 #include <math.h>
 #include "../user.h"
 #include "user_settings.h"
+#include "sbot.h"
 
 void ui_overlay(tenv* env) {
   tuser_data* usr = env->usr;
@@ -670,6 +671,171 @@ void ui_overlay(tenv* env) {
           (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},
           thumb_brd, thumb_w * 0.5f, 0, 1.8f);
       }
+    }
+  }
+
+  if (usrs->hotkeys[HOTKEY_BOT].active && usrs->bot_vis) {
+    extern sbot_dbg g_bot_dbg;
+    if (g_bot_dbg.active) {
+      ImDrawList* bdl = igGetWindowDrawList();
+      float gsc = gdata->data.gsc;
+      float vx  = gdata->data.view_xx;
+      float vy  = gdata->data.view_yy;
+      double T  = igGetTime();
+#define W2SX(wx) (mww2 + ((wx) - vx) * gsc)
+#define W2SY(wy) (mhh2 + ((wy) - vy) * gsc)
+#define PULSE(base, spd) ((float)((base) * (0.5 + 0.5 * sin(T * (spd)))))
+
+      float shx = W2SX(g_bot_dbg.bx);
+      float shy = W2SY(g_bot_dbg.by);
+
+      /* 1. body segments (type=1): blue filled dots */
+      for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
+        if (g_bot_dbg.coll_type[_i] != 1) continue;
+        float cx = W2SX(g_bot_dbg.coll_x[_i]);
+        float cy = W2SY(g_bot_dbg.coll_y[_i]);
+        float cr = (g_bot_dbg.coll_r[_i] * 0.5f) * gsc;
+        if (cr < 3.0f) cr = 3.0f;
+        ImDrawList_AddCircleFilled(bdl, (ImVec2){cx, cy}, cr,
+          IM_COL32(50, 120, 255, 128), 16);
+      }
+
+      /* 2. gradient threat lines + heatmap (head -> each coll pt) */
+      for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
+        float cx  = W2SX(g_bot_dbg.coll_x[_i]);
+        float cy  = W2SY(g_bot_dbg.coll_y[_i]);
+        float d   = sqrtf(g_bot_dbg.coll_d2[_i]);
+        float rad = g_bot_dbg.brad;
+        ImU32 col;
+        if (d < rad * 5.0f) {
+          col = IM_COL32(255, 60,  0, 200);
+          /* heatmap: concentric red glow */
+          float hr = g_bot_dbg.coll_r[_i] * gsc * 3.0f;
+          ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr,  IM_COL32(255,0,0,30),20);
+          ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr*.6f,IM_COL32(255,80,0,50),16);
+          ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr*.3f,IM_COL32(255,165,0,70),12);
+        } else if (d < rad * 15.0f) {
+          col = IM_COL32(255, 220, 0, 180);
+          float hr = g_bot_dbg.coll_r[_i] * gsc * 2.0f;
+          ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr,  IM_COL32(255,165,0,25),16);
+          ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr*.5f,IM_COL32(255,220,0,40),12);
+        } else {
+          col = IM_COL32(50, 220, 80, 140);
+        }
+        ImDrawList_AddLine(bdl, (ImVec2){shx, shy}, (ImVec2){cx, cy}, col, 1.5f);
+      }
+
+      /* 3. collision point circles by type */
+      for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
+        float cx = W2SX(g_bot_dbg.coll_x[_i]);
+        float cy = W2SY(g_bot_dbg.coll_y[_i]);
+        float cr = g_bot_dbg.coll_r[_i] * gsc;
+        if (cr < 3.0f) cr = 3.0f;
+        if (g_bot_dbg.coll_type[_i] == 0) {
+          /* enemy head: red outline */
+          ImDrawList_AddCircle(bdl, (ImVec2){cx, cy}, cr,
+            IM_COL32(255, 50, 50, 220), 24, 2.0f);
+        } else if (g_bot_dbg.coll_type[_i] == 2) {
+          /* wall point: yellow outline */
+          ImDrawList_AddCircle(bdl, (ImVec2){cx, cy}, cr,
+            IM_COL32(255, 220, 0, 200), 16, 1.5f);
+        }
+      }
+
+      /* 4. head detection circle (yellow, pulsing) */
+      float hcx = W2SX(g_bot_dbg.head_cx);
+      float hcy = W2SY(g_bot_dbg.head_cy);
+      float hcr = g_bot_dbg.head_cr * gsc;
+      ImDrawList_AddCircle(bdl, (ImVec2){hcx, hcy}, hcr,
+        IM_COL32(255, 230, 0, (int)(PULSE(200.0f, 2.0f))), 32, 1.5f);
+
+      /* 5. encircle detection circles */
+      float er1 = g_bot_dbg.encircle_r1 * gsc;
+      float er2 = g_bot_dbg.encircle_r2 * gsc;
+      if (g_bot_dbg.encircle_state == 1) {
+        /* being encircled by one snake: red filled */
+        ImDrawList_AddCircleFilled(bdl, (ImVec2){shx, shy}, er1,
+          IM_COL32(255, 50, 50, (int)(PULSE(60.0f, 3.0f))), 48);
+        ImDrawList_AddCircle(bdl, (ImVec2){shx, shy}, er1,
+          IM_COL32(255, 50, 50, (int)(PULSE(200.0f, 3.0f))), 48, 2.0f);
+      } else if (g_bot_dbg.encircle_state == 2) {
+        /* all-around threat: yellow filled */
+        ImDrawList_AddCircleFilled(bdl, (ImVec2){shx, shy}, er2,
+          IM_COL32(255, 180, 0, (int)(PULSE(50.0f, 2.0f))), 48);
+        ImDrawList_AddCircle(bdl, (ImVec2){shx, shy}, er2,
+          IM_COL32(255, 180, 0, (int)(PULSE(180.0f, 2.0f))), 48, 2.0f);
+      } else {
+        /* no threat: quiet blue pulsing outline */
+        ImDrawList_AddCircle(bdl, (ImVec2){shx, shy}, er1,
+          IM_COL32(80, 180, 255, (int)(PULSE(120.0f, 1.0f))), 48, 1.5f);
+      }
+
+      /* 6. avoidance lines (orange forward + red to intersect) */
+      if (g_bot_dbg.avoid_active) {
+        float fwdx = W2SX(g_bot_dbg.avoid_fwd_x);
+        float fwdy = W2SY(g_bot_dbg.avoid_fwd_y);
+        float aix  = W2SX(g_bot_dbg.avoid_ix);
+        float aiy  = W2SY(g_bot_dbg.avoid_iy);
+        ImDrawList_AddLine(bdl, (ImVec2){shx, shy}, (ImVec2){fwdx, fwdy},
+          IM_COL32(255, 140, 0, 220), 2.0f);
+        ImDrawList_AddLine(bdl, (ImVec2){shx, shy}, (ImVec2){aix, aiy},
+          IM_COL32(255, 40, 40, 220), 2.0f);
+        ImDrawList_AddCircleFilled(bdl, (ImVec2){aix, aiy}, 6.0f,
+          IM_COL32(255, 40, 40, 255), 12);
+      }
+
+      /* 7. food target: green crosshair + dim line */
+      if (g_bot_dbg.has_food) {
+        float fx  = W2SX(g_bot_dbg.food_x);
+        float fy  = W2SY(g_bot_dbg.food_y);
+        float fcs = 12.0f;
+        ImDrawList_AddLine(bdl,(ImVec2){shx,shy},(ImVec2){fx,fy},
+          IM_COL32(50,220,80,80),1.0f);
+        ImDrawList_AddCircleFilled(bdl,(ImVec2){fx,fy},5.0f,
+          IM_COL32(50,255,100,230),12);
+        ImDrawList_AddLine(bdl,(ImVec2){fx-fcs,fy},(ImVec2){fx+fcs,fy},
+          IM_COL32(50,255,100,230),1.8f);
+        ImDrawList_AddLine(bdl,(ImVec2){fx,fy-fcs},(ImVec2){fx,fy+fcs},
+          IM_COL32(50,255,100,230),1.8f);
+      }
+
+      /* 8. goal: magenta crosshair + line from head */
+      float gx  = W2SX(g_bot_dbg.goal_x);
+      float gy  = W2SY(g_bot_dbg.goal_y);
+      float gcs = 14.0f;
+      ImDrawList_AddLine(bdl,(ImVec2){shx,shy},(ImVec2){gx,gy},
+        IM_COL32(255,80,255,160),1.5f);
+      ImDrawList_AddLine(bdl,(ImVec2){gx-gcs,gy},(ImVec2){gx+gcs,gy},
+        IM_COL32(255,80,255,255),2.0f);
+      ImDrawList_AddLine(bdl,(ImVec2){gx,gy-gcs},(ImVec2){gx,gy+gcs},
+        IM_COL32(255,80,255,255),2.0f);
+      ImDrawList_AddCircle(bdl,(ImVec2){gx,gy},6.0f,
+        IM_COL32(255,80,255,255),12,2.0f);
+
+      /* 9. stage badge */
+      const char* stage_lbl = g_bot_dbg.stage == 2 ? "BOT: COIL"
+                            : g_bot_dbg.stage == 1 ? "BOT: ENCIRCLE"
+                            :                        "BOT: AVOID";
+      ImU32 stage_col = g_bot_dbg.stage == 2 ? IM_COL32(255,160, 40,255)
+                      : g_bot_dbg.stage == 1 ? IM_COL32(255, 80, 80,255)
+                      :                        IM_COL32( 80,200,255,255);
+      float badge_x = mww2 * 0.06f;
+      float badge_y = mhh2 * 0.08f;
+      ImDrawList_AddRectFilled(bdl,
+        (ImVec2){badge_x - 6, badge_y - 4},
+        (ImVec2){badge_x + 170, badge_y + 46},
+        IM_COL32(0,0,0,160), 4.0f, 0);
+      ImDrawList_AddText_FontPtr(bdl, NULL, 18.0f,
+        (ImVec2){badge_x, badge_y}, stage_col, stage_lbl, NULL, 0, NULL);
+      const char* accel_lbl = g_bot_dbg.accel ? "  BOOST" : "  coast";
+      ImU32 accel_col = g_bot_dbg.accel ? IM_COL32(255,220,50,255)
+                                         : IM_COL32(160,160,160,180);
+      ImDrawList_AddText_FontPtr(bdl, NULL, 16.0f,
+        (ImVec2){badge_x, badge_y + 24}, accel_col, accel_lbl, NULL, 0, NULL);
+
+#undef PULSE
+#undef W2SX
+#undef W2SY
     }
   }
 #endif

@@ -362,6 +362,10 @@ void trender(tenv* env) {
               }
               igSpacing();
 
+              CC_HEADER("Bot")
+              igCheckbox("Show bot thinking##bv", &up->bot_vis);
+              igSpacing();
+
               #undef CC_HEADER
 
               save_user_settings(up);

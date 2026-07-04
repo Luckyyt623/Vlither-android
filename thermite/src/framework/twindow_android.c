@@ -355,12 +355,23 @@ ImGuiIO* _io = igGetIO_Nil();
                     wnd->touch.zslider_y      = g_zslider_horizontal ? x : y;
                     wnd->touch.zslider_offset = 0.0f;
                 } else if (wnd->touch.down && !wnd->touch.boost_down) {
-
-                    wnd->touch.boost_x         = x;
-                    wnd->touch.boost_y         = y;
-                    wnd->touch.boost_down      = true;
-                    wnd->touch.boost_just_down = true;
-                    wnd->touch.boost_ptr_id    = pid;
+                    float dbx3 = x - g_boost_cx, dby3 = y - g_boost_cy;
+                    bool in_boost_circle2;
+                    if (g_boost_r > 0) {
+                        float det_r2 = g_boost_r * 1.4f;
+                        in_boost_circle2 = (dbx3*dbx3 + dby3*dby3) <= (det_r2 * det_r2);
+                    } else {
+                        in_boost_circle2 = g_ctrl_swap_sides
+                                           ? (x < sw * 0.22f)
+                                           : (x > sw * 0.78f);
+                    }
+                    if (in_boost_circle2) {
+                        wnd->touch.boost_x         = x;
+                        wnd->touch.boost_y         = y;
+                        wnd->touch.boost_down      = true;
+                        wnd->touch.boost_just_down = true;
+                        wnd->touch.boost_ptr_id    = pid;
+                    }
                 } else if (!wnd->touch.down && wnd->touch.boost_down && !g_panel_open) {
 
                     float djx2 = x - g_joy_cx, djy2 = y - g_joy_cy;
@@ -468,8 +479,23 @@ ImGuiIO* _io = igGetIO_Nil();
             }
 
             case AMOTION_EVENT_ACTION_POINTER_UP: {
+                int up_pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
 
-                wnd->touch.pending_reconcile = true;
+                if (up_pid == wnd->touch.move_ptr_id) {
+                    wnd->touch.down        = false;
+                    wnd->touch.just_down   = false;
+                    wnd->touch.move_ptr_id = -1;
+                }
+                if (up_pid == wnd->touch.boost_ptr_id) {
+                    wnd->touch.boost_down      = false;
+                    wnd->touch.boost_just_down = false;
+                    wnd->touch.boost_ptr_id    = -1;
+                }
+                if (up_pid == wnd->touch.zslider_ptr_id) {
+                    wnd->touch.zslider_ptr_id = -1;
+                    wnd->touch.zslider_offset = 0.0f;
+                }
+                wnd->touch.pending_reconcile = false;
                 break;
             }
 

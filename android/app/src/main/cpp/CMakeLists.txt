@@ -49,7 +49,7 @@ target_compile_definitions(vlither PRIVATE
     MG_TLS=3
     CGLM_FORCE_DEPTH_ZERO_TO_ONE
     CIMGUI_NO_EXPORT
-    APP_VERSION="3.5"
+    APP_VERSION="3.7"
     SETTINGS_VERSION="1.8"
     VK_USE_PLATFORM_ANDROID_KHR
 )
