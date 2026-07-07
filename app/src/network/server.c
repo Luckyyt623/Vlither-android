@@ -4,15 +4,8 @@
 #include "callback.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <pthread.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
-#include <sys/select.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <errno.h>
 
 void server_init(tenv* env) {
   tuser_data* usr = env->usr;
@@ -66,6 +59,29 @@ void server_destroy(tenv* env) {
 #define SL_URL_HTTP  "http://slither.io/i80124.txt"
 #define SL_URL_HTTPS "https://slither.io/i80124.txt"
 
+static const char* CUSTOM_SERVER_IPS[CUSTOM_SERVER_COUNT] = {
+  "206.206.76.190:444",
+  "139.84.166.84:444",
+  "51.91.19.175:444",
+  "206.221.176.241:444",
+};
+const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT] = {
+  "Singapore Battledome",
+  "India Battledome",
+  "EU Battledome",
+  "USA Battledome",
+};
+
+static void server_list_seed_custom(game_data* gdata) {
+  gdata->server_list.count = 0;
+  for (int i = 0; i < CUSTOM_SERVER_COUNT; i++) {
+    strncpy(gdata->server_list.ips[i], CUSTOM_SERVER_IPS[i], MAX_SERVER_IP_LEN);
+    gdata->server_list.ips[i][MAX_SERVER_IP_LEN] = '\0';
+    gdata->server_list.count++;
+  }
+  gdata->server_list.custom_count = gdata->server_list.count;
+}
+
 static void server_list_parse(const char* data, int len,
                                char ips[][MAX_SERVER_IP_LEN + 1], int* count) {
 
@@ -88,7 +104,9 @@ static void server_list_parse(const char* data, int len,
     }
   }
 
-  *count = 0;
+  /* NOTE: *count is NOT reset here — the caller may have pre-seeded
+     custom server entries at the start of the array, and this function
+     appends the fetched official servers right after them. */
   if (hb_len > 0 && hb_len % 28 == 0) {
 
     for (int i = 0; i + 27 < hb_len && *count < MAX_SERVER_LIST; i += 28) {
@@ -181,11 +199,11 @@ void server_list_init(tenv* env) {
   gdata->server_list.pinging     = 0;
   gdata->server_list.ping_stop   = 0;
   gdata->server_list.pings_done  = 0;
-  gdata->server_list.count       = 0;
   for (int i = 0; i < MAX_SERVER_LIST; i++) {
     gdata->server_list.pings[i]        = -1;
     gdata->server_list.sorted_order[i] = i;
   }
+  server_list_seed_custom(gdata);
 }
 
 void server_list_fetch(tenv* env) {
@@ -197,11 +215,11 @@ void server_list_fetch(tenv* env) {
   gdata->server_list.fetched     = false;
   gdata->server_list.fetch_error = false;
   gdata->server_list.retry_https = false;
-  gdata->server_list.count       = 0;
   for (int i = 0; i < MAX_SERVER_LIST; i++) {
     gdata->server_list.pings[i]        = -1;
     gdata->server_list.sorted_order[i] = i;
   }
+  server_list_seed_custom(gdata);
   mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTP, sl_http_cb, gdata);
 }
 
@@ -216,8 +234,76 @@ void server_list_destroy(tenv* env) {
   mg_mgr_free(&gdata->server_list.mgr);
 }
 
-#define PING_BATCH   64
-#define PING_TIMEOUT 2000
+/* ------------------------------------------------------------------ *
+ * Server list ping probe.
+ *
+ * This mirrors the ping calculation used by the official web client:
+ * rather than just timing a raw TCP connect() to the server's game
+ * port (which only measures handshake latency and can be skewed by
+ * SYN-cookie/accept-queue behavior), it opens a real WebSocket to the
+ * server's dedicated ping-probe endpoint on port 80 at "/ptc", sends a
+ * single application-level ping byte (0x70), waits for the same byte
+ * to be echoed back, and repeats that round trip 4 times. The final
+ * reported ping is the *minimum* of those 4 samples, which is what the
+ * web client does to filter out one-off jitter/queueing delay and
+ * report the best achievable latency to that server.
+ * ------------------------------------------------------------------ */
+
+#define PING_BATCH    64
+#define PING_TIMEOUT  7000   /* ms, matches the web client's ipv4 probe timeout */
+#define PING_SAMPLES  4      /* number of ping/pong round trips sampled */
+#define PING_BYTE     0x70   /* 'p' - single-byte ping payload used by /ptc */
+
+typedef struct {
+  uint64_t start_ms;
+  int      sample_count;
+  int      samples[PING_SAMPLES];
+  bool     done;
+  int      result;
+} ping_probe;
+
+static void sl_ping_ws_cb(struct mg_connection* c, int ev, void* ev_data) {
+  ping_probe* p = (ping_probe*)c->fn_data;
+  if (p->done) return;
+
+  if (ev == MG_EV_WS_OPEN) {
+    p->start_ms = mg_millis();
+    uint8_t b = PING_BYTE;
+    mg_ws_send(c, &b, 1, WEBSOCKET_OP_BINARY);
+
+  } else if (ev == MG_EV_WS_MSG) {
+    struct mg_ws_message* wm = (struct mg_ws_message*)ev_data;
+    if (wm->data.len == 1 && (uint8_t)wm->data.buf[0] == PING_BYTE) {
+      int elapsed = (int)(mg_millis() - p->start_ms);
+      if (p->sample_count < PING_SAMPLES) p->samples[p->sample_count++] = elapsed;
+
+      if (p->sample_count < PING_SAMPLES) {
+        p->start_ms = mg_millis();
+        uint8_t b = PING_BYTE;
+        mg_ws_send(c, &b, 1, WEBSOCKET_OP_BINARY);
+      } else {
+        int best = 9999;
+        for (int i = 0; i < p->sample_count; i++)
+          if (p->samples[i] < best) best = p->samples[i];
+        p->result = best;
+        p->done   = true;
+        c->is_closing = 1;
+      }
+    }
+
+  } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+    if (!p->done) {
+      /* Connection dropped before all 4 samples came back. If we got at
+         least one good round trip, report the best of what we have
+         instead of throwing the whole probe away. */
+      int best = 9999;
+      for (int i = 0; i < p->sample_count; i++)
+        if (p->samples[i] < best) best = p->samples[i];
+      p->result = best;
+      p->done   = true;
+    }
+  }
+}
 
 static void* sl_ping_thread(void* arg) {
   game_data* gdata = (game_data*)arg;
@@ -229,92 +315,61 @@ static void* sl_ping_thread(void* arg) {
     int be  = (bs + PING_BATCH < n) ? bs + PING_BATCH : n;
     int bsz = be - bs;
 
-    int        fds[PING_BATCH];
-    bool       done_arr[PING_BATCH];
-    struct timeval t0;
+    struct mg_mgr ping_mgr;
+    mg_mgr_init(&ping_mgr);
 
-    gettimeofday(&t0, NULL);
-    memset(done_arr, 0, sizeof(done_arr));
+    ping_probe probes[PING_BATCH];
+    memset(probes, 0, sizeof(probes));
 
     for (int j = 0; j < bsz; j++) {
-      fds[j] = -1;
       int idx = bs + j;
       char ip_buf[32] = {0};
       int  port = 0;
       if (sscanf(gdata->server_list.ips[idx], "%31[^:]:%d", ip_buf, &port) != 2) {
-        gdata->server_list.pings[idx] = 9999;
-        gdata->server_list.pings_done++;
-        done_arr[j] = true;
+        probes[j].done   = true;
+        probes[j].result = 9999;
         continue;
       }
-      fds[j] = socket(AF_INET, SOCK_STREAM, 0);
-      if (fds[j] < 0) {
-        gdata->server_list.pings[idx] = 9999;
-        gdata->server_list.pings_done++;
-        done_arr[j] = true;
-        continue;
-      }
-      fcntl(fds[j], F_SETFL, fcntl(fds[j], F_GETFL, 0) | O_NONBLOCK);
-      struct sockaddr_in addr;
-      memset(&addr, 0, sizeof(addr));
-      addr.sin_family = AF_INET;
-      addr.sin_port   = htons((uint16_t)port);
-      inet_pton(AF_INET, ip_buf, &addr.sin_addr);
-      int r = connect(fds[j], (struct sockaddr*)&addr, sizeof(addr));
-      if (r == 0) {
-        struct timeval now; gettimeofday(&now, NULL);
-        long ms = (now.tv_sec - t0.tv_sec)*1000 + (now.tv_usec - t0.tv_usec)/1000;
-        gdata->server_list.pings[idx] = (int)ms;
-        close(fds[j]); fds[j] = -1;
-        done_arr[j] = true;
-        gdata->server_list.pings_done++;
+
+      char url[64];
+      snprintf(url, sizeof(url), "ws://%s:80/ptc", ip_buf);
+
+      struct mg_connection* c = mg_ws_connect(
+        &ping_mgr, url, sl_ping_ws_cb, &probes[j],
+        "%s:%s\r\n%s:%s\r\n",
+        "Origin", "https://slither.com",
+        "Host", "slither.com");
+
+      if (!c) {
+        probes[j].done   = true;
+        probes[j].result = 9999;
       }
     }
 
+    uint64_t t0 = mg_millis();
     while (!gdata->server_list.ping_stop) {
-      struct timeval now; gettimeofday(&now, NULL);
-      long elapsed = (now.tv_sec - t0.tv_sec)*1000 + (now.tv_usec - t0.tv_usec)/1000;
-      if (elapsed >= PING_TIMEOUT) break;
-
-      fd_set wfds, efds;
-      FD_ZERO(&wfds); FD_ZERO(&efds);
-      int max_fd = -1; bool all_done = true;
+      bool all_done = true;
       for (int j = 0; j < bsz; j++) {
-        if (!done_arr[j] && fds[j] >= 0) {
-          FD_SET(fds[j], &wfds); FD_SET(fds[j], &efds);
-          if (fds[j] > max_fd) max_fd = fds[j];
-          all_done = false;
-        }
+        if (!probes[j].done) { all_done = false; break; }
       }
-      if (all_done || max_fd < 0) break;
-
-      struct timeval tv = {0, 50000};
-      if (select(max_fd + 1, NULL, &wfds, &efds, &tv) > 0) {
-        gettimeofday(&now, NULL);
-        long ms = (now.tv_sec - t0.tv_sec)*1000 + (now.tv_usec - t0.tv_usec)/1000;
-        for (int j = 0; j < bsz; j++) {
-          if (done_arr[j] || fds[j] < 0) continue;
-          if (FD_ISSET(fds[j], &wfds) || FD_ISSET(fds[j], &efds)) {
-            int err = 0; socklen_t sl2 = sizeof(err);
-            getsockopt(fds[j], SOL_SOCKET, SO_ERROR, &err, &sl2);
-            int idx = bs + j;
-            gdata->server_list.pings[idx] = (err == 0) ? (int)ms : 9999;
-            close(fds[j]); fds[j] = -1;
-            done_arr[j] = true;
-            gdata->server_list.pings_done++;
-          }
-        }
-      }
+      if (all_done) break;
+      if (mg_millis() - t0 >= PING_TIMEOUT) break;
+      mg_mgr_poll(&ping_mgr, 50);
     }
 
     for (int j = 0; j < bsz; j++) {
-      if (fds[j] >= 0) {
-        close(fds[j]);
-        int idx = bs + j;
-        if (gdata->server_list.pings[idx] < 0) gdata->server_list.pings[idx] = 9999;
-        gdata->server_list.pings_done++;
+      int idx = bs + j;
+      if (!probes[j].done) {
+        int best = 9999;
+        for (int i = 0; i < probes[j].sample_count; i++)
+          if (probes[j].samples[i] < best) best = probes[j].samples[i];
+        probes[j].result = best;
       }
+      gdata->server_list.pings[idx] = probes[j].result;
+      gdata->server_list.pings_done++;
     }
+
+    mg_mgr_free(&ping_mgr);
   }
 
   if (!gdata->server_list.ping_stop) {

@@ -165,18 +165,19 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 3.8
+Update 3.9
 
- Nothing 
-
-
-
+   •  Now you can see bot thinking.
+   • Battledome server ip added.
+   • some known bugs are fixed.
+   
+  
 
 Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v3.8")
+            .setTitle("What's New in v3.9")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()
@@ -265,7 +266,7 @@ Changes made by Lucky
         btnPlay.layoutParams = btnParams
         btnPlay.setOnClickListener { onPlayClicked() }
 
-        // Changelog — hidden until an update is detected
+        // Changelog — always visible (was: hidden until an update is detected)
         btnChangelog = Button(this)
         btnChangelog.text = "📋  What's New"
         btnChangelog.textSize = 13f
@@ -273,7 +274,7 @@ Changes made by Lucky
         btnChangelog.layoutParams = btnParams
         btnChangelog.setTextColor(0xFF5DADE2.toInt())
         btnChangelog.alpha = 0.85f
-        btnChangelog.visibility = View.GONE
+        btnChangelog.visibility = View.VISIBLE
         btnChangelog.setOnClickListener { showChangelog() }
 
         // ── Update panel — hidden until update found ──────────────────

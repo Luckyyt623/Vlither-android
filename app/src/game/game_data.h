@@ -87,6 +87,7 @@ typedef struct game_data {
     int sorted_order[MAX_SERVER_LIST];
     char ips[MAX_SERVER_LIST][MAX_SERVER_IP_LEN + 1];
     int count;
+    int custom_count;
     struct mg_mgr mgr;
   } server_list;
 

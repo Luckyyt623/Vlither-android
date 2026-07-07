@@ -14,4 +14,7 @@ void server_list_poll(tenv* env);
 void server_list_destroy(tenv* env);
 void server_list_start_ping(tenv* env);
 
+#define CUSTOM_SERVER_COUNT 4
+extern const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT];
+
 #endif
