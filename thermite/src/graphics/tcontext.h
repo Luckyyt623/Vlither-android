@@ -62,6 +62,7 @@ typedef struct tcontext {
 VkShaderModule tcontext_create_shader(tcontext* context, const char* filename);
 tcontext*      tcontext_create(twindow* window, bool vsync, int fif);
 void           tcontext_resize(tcontext* context, const ivec2 size, bool vsync);
+void           tcontext_recreate_surface(tcontext* context, twindow* window, bool vsync);
 bool           tcontext_begin(tcontext* context);
 void           tcontext_clear(tcontext* context, const vec4 clear_color);
 void           tcontext_end(tcontext* context);

@@ -153,9 +153,24 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
     switch (cmd) {
         case APP_CMD_INIT_WINDOW:
             if (app->window) {
+                /* If a tcontext already exists, this ISN'T the very first
+                 * window (that one is consumed by the poll loop in
+                 * twindow_create(), before tcontext_create() ever runs).
+                 * It means we just resumed from the background and Android
+                 * has handed us a brand-new ANativeWindow -> the Vulkan
+                 * surface tied to the old one is dead and must be rebuilt,
+                 * not just resized. */
+                bool resuming = (wnd->env && wnd->env->ctx != NULL);
+
                 wnd->native_window = app->window;
                 set_window_size(wnd, app->window);
                 g_state.surface_ready = true;
+
+                if (resuming) {
+                    tcontext_recreate_surface(wnd->env->ctx, wnd,
+                                              wnd->env->config.vsync);
+                    if (wnd->_resize_func) wnd->_resize_func(wnd->env);
+                }
 
                 _android_set_immersive_fullscreen();
             }
@@ -164,6 +179,11 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
         case APP_CMD_TERM_WINDOW:
             g_state.surface_ready = false;
             wnd->native_window    = NULL;
+            /* Stop the render loop from touching Vulkan against a surface
+             * whose window is already gone; it'll come back true inside
+             * tcontext_recreate_surface() once APP_CMD_INIT_WINDOW fires. */
+            if (wnd->env && wnd->env->ctx)
+                wnd->env->ctx->swapchain_ok = false;
             break;
 
         case APP_CMD_WINDOW_RESIZED:

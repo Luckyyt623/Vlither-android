@@ -24,7 +24,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "3.8"
+        private const val CURRENT_VERSION   = "4.0"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -165,19 +165,16 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 3.9
+Update 4.0
 
-   •  Now you can see bot thinking.
-   • Battledome server ip added.
-   • some known bugs are fixed.
-   
+   • Known bugs are fixed 
   
 
 Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v3.9")
+            .setTitle("What's New in v4.0")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

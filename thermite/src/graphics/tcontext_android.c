@@ -518,6 +518,44 @@ void tcontext_resize(tcontext* context, const ivec2 size, bool vsync) {
     context->swapchain_ok = true;
 }
 
+/*
+ * Used when Android hands us a brand-new ANativeWindow after the previous
+ * one was torn down (APP_CMD_TERM_WINDOW -> APP_CMD_INIT_WINDOW, i.e. the
+ * app was backgrounded and resumed while the process stayed alive).
+ *
+ * tcontext_resize() alone is NOT enough here: it only rebuilds the
+ * swapchain and reuses context->surface, but that VkSurfaceKHR was created
+ * from the OLD ANativeWindow, which no longer exists. We have to destroy
+ * it and create a new one bound to the new window, then rebuild the
+ * swapchain on top of THAT.
+ */
+void tcontext_recreate_surface(tcontext* context, twindow* window, bool vsync) {
+    tcontext_wait_idle(context);
+
+    for (int i = 0; i < (int)context->image_count; i++) {
+        vkDestroyFramebuffer(context->device,
+                             context->swapchain_frames[i].framebuffer, NULL);
+        vkDestroyImageView(context->device,
+                           context->swapchain_frames[i].image_view, NULL);
+    }
+    free(context->swapchain_frames);
+
+    vkDestroySwapchainKHR(context->device, context->swapchain, NULL);
+    vkDestroySurfaceKHR(context->instance, context->surface, NULL);
+
+    _tcontext_create_surface(context, window);
+
+    /* No valid oldSwapchain to hand the driver: the previous swapchain
+     * belonged to a surface we just destroyed, so a fresh, non-hinted
+     * swapchain is the only correct option here. */
+    context->old_swapchain = VK_NULL_HANDLE;
+    _tcontext_create_swapchain(context, vsync);
+    _tcontext_create_views(context);
+
+    context->swapchain_ok = true;
+    LOGI("Vulkan surface + swapchain recreated after resume");
+}
+
 bool tcontext_begin(tcontext* context) {
     tcontext_frame* fr = context->frames + context->current_frame;
     vkWaitForFences(context->device, 1, &fr->wait_fence, VK_TRUE, UINT64_MAX);

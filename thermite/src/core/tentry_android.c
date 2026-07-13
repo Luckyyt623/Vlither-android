@@ -218,7 +218,12 @@ void android_main(struct android_app* app) {
 
             twindow_poll_input(env.wnd);
             if (g_android_app->destroyRequested) break;
-            if (env.wnd->size[0] > 0 && env.wnd->size[1] > 0) {
+            /* Re-check swapchain_ok: if we just resumed from background,
+             * handle_app_cmd() already rebuilt the surface + swapchain
+             * from inside twindow_poll_input() above (APP_CMD_INIT_WINDOW).
+             * Doing it again here would be a redundant, wasted rebuild. */
+            if (!env.ctx->swapchain_ok &&
+                env.wnd->size[0] > 0 && env.wnd->size[1] > 0) {
                 tcontext_resize(env.ctx, env.wnd->size, env.config.vsync);
                 tresize(&env);
                 DLOG("swapchain rebuilt: %dx%d",
