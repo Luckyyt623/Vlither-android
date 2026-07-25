@@ -18,8 +18,14 @@ void ui_settings(tenv* env) {
   float frame_height = igGetFrameHeight();
   float child_window_height =
       ctx->size[1] - style->WindowPadding.y * 4 - frame_height;
+#ifdef ANDROID
+  const int panel_columns = 2;
+  child_window_height = (child_window_height - style->ItemSpacing.y) * 0.5f;
+#else
+  const int panel_columns = 4;
+#endif
 
-  if (igBeginTable("settings_table", 4, ImGuiTableFlags_None, (ImVec2){}, 0)) {
+  if (igBeginTable("settings_table", panel_columns, ImGuiTableFlags_None, (ImVec2){}, 0)) {
     igTableNextRow(ImGuiTableRowFlags_None, 0);
     igTableSetColumnIndex(0);
 
@@ -119,12 +125,13 @@ void ui_settings(tenv* env) {
     }
     igEndChild();
 
-    for (int i = 0; i < 1; i++) {
-      igTableSetColumnIndex(i + 1);
+    igTableSetColumnIndex(1);
+    igBeginChild_Str("mode_settings_child_holder",
+                     (ImVec2){-1, child_window_height}, ImGuiChildFlags_None,
+                     ImGuiWindowFlags_None);
+    for (int i = 0; i < 2; i++) {
       igPushID_Int(i + 1);
       gameplay_mode* mode = usrs->modes + i;
-      igBeginChild_ID(igGetID_Int(i + 1), (ImVec2){-1, child_window_height},
-                      ImGuiChildFlags_None, ImGuiWindowFlags_None);
       igSeparatorText(i == 0 ? "Normal mode" : "Assist mode");
 
       if (igBeginTable("field:value", 2, ImGuiTableFlags_None, (ImVec2){}, 0)) {
@@ -149,6 +156,8 @@ void ui_settings(tenv* env) {
         igText("Background scale");
         igAlignTextToFramePadding();
         igText("Render mode");
+        igAlignTextToFramePadding();
+        igText("Transparent skin");
         igAlignTextToFramePadding();
         igText("Boost effect");
         igAlignTextToFramePadding();
@@ -181,6 +190,10 @@ void ui_settings(tenv* env) {
         igCombo_Str_arr("##render mode", &mode->render_mode,
                         (const char*[]){"Texture", "Solid", "Flat"}, 3, -1);
 
+        igBeginDisabled(mode->render_mode == 0);
+        igCheckbox("##transparent skin", &mode->transparent_skin);
+        igEndDisabled();
+
         igCheckbox("##boost", &mode->show_boost);
         igSameLine(0, -1);
         igBeginDisabled(!mode->show_boost);
@@ -209,11 +222,16 @@ void ui_settings(tenv* env) {
 
         igEndTable();
       }
-      igEndChild();
       igPopID();
     }
+    igEndChild();
 
+#ifdef ANDROID
+    igTableNextRow(ImGuiTableRowFlags_None, 0);
+    igTableSetColumnIndex(0);
+#else
     igTableSetColumnIndex(2);
+#endif
     igBeginChild_Str("hotkey_child_window", (ImVec2){-1, child_window_height},
                      ImGuiChildFlags_None, ImGuiWindowFlags_None);
     igSeparatorText("Hotkeys");
@@ -290,7 +308,11 @@ void ui_settings(tenv* env) {
     }
     igEndChild();
 
+#ifdef ANDROID
+    igTableSetColumnIndex(1);
+#else
     igTableSetColumnIndex(3);
+#endif
     igBeginChild_Str("empty_col", (ImVec2){-1, child_window_height},
                      ImGuiChildFlags_None, ImGuiWindowFlags_None);
     igSeparatorText("Hotkeys");

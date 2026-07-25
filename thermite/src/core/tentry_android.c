@@ -5,45 +5,14 @@
 #include "../framework/tkeyboard.h"
 #include "android_jni.h"
 
-#include <sys/socket.h>
-#include <netdb.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-
-#define NTFY_TOPIC "vlither-debug-4821"
-
-static void ntfy_log(const char* msg) {
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo("ntfy.sh", "80", &hints, &res) != 0) return;
-    int fd = socket(res->ai_family, res->ai_socktype, 0);
-    if (fd < 0) { freeaddrinfo(res); return; }
-    struct timeval tv = {3, 0};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    if (connect(fd, res->ai_addr, res->ai_addrlen) == 0) {
-        char req[2048];
-        int n = snprintf(req, sizeof(req),
-            "POST /" NTFY_TOPIC " HTTP/1.1\r\n"
-            "Host: ntfy.sh\r\n"
-            "Content-Length: %d\r\n"
-            "Connection: close\r\n"
-            "\r\n%s",
-            (int)strlen(msg), msg);
-        write(fd, req, n);
-    }
-    close(fd);
-    freeaddrinfo(res);
-}
 
 #define DLOG(fmt, ...) do { \
     char _dbuf[256]; \
     snprintf(_dbuf, sizeof(_dbuf), fmt, ##__VA_ARGS__); \
     __android_log_print(ANDROID_LOG_ERROR, "vlither", "%s", _dbuf); \
-    ntfy_log(_dbuf); \
 } while(0)
 #include "../framework/tmouse.h"
 #include "../graphics/tcontext.h"

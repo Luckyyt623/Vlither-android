@@ -2,9 +2,12 @@ package com.vlither
 
 import android.app.Activity
 import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
@@ -24,10 +27,13 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.0"
+        private const val CURRENT_VERSION   = "4.1"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
+
+        private const val PREFS_NAME         = "vlither_update_prefs"
+        private const val PREF_PENDING_DL_ID = "pending_download_id"
 
         private const val ADSTERRA_UNLOCK_PAGE_URL = "https://vlither-ads.onrender.com"
 
@@ -65,9 +71,20 @@ class MainActivity : Activity() {
 
     private var latestVersion:  String? = null
     private var apkDownloadUrl: String? = null
+    private var pendingDownloadId: Long = -1L
+    private var receiverRegistered = false
 
     private val executor    = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Fires the moment DownloadManager finishes the update APK — auto-opens the install prompt. */
+    private val downloadCompleteReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            if (id == -1L || id != pendingDownloadId) return
+            handleDownloadFinished(id)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,9 +94,32 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
         buildUi()
+        registerDownloadReceiver()
+        resumePendingDownloadIfAny()
         checkForUpdate()
         handleUnlockDeepLink(intent)
         refreshUnlockUi()
+    }
+
+    private fun registerDownloadReceiver() {
+        if (receiverRegistered) return
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadCompleteReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(downloadCompleteReceiver, filter)
+        }
+        receiverRegistered = true
+    }
+
+    /** Handles the case where the app was closed/killed while an update was still downloading. */
+    private fun resumePendingDownloadIfAny() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedId = prefs.getLong(PREF_PENDING_DL_ID, -1L)
+        if (savedId == -1L) return
+        pendingDownloadId = savedId
+        executor.execute { handleDownloadFinished(savedId) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -110,6 +150,10 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        if (receiverRegistered) {
+            try { unregisterReceiver(downloadCompleteReceiver) } catch (e: Exception) { /* already gone */ }
+            receiverRegistered = false
+        }
         executor.shutdown()
     }
 
@@ -165,16 +209,20 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 4.0
+Update 4.1
 
-   • Known bugs are fixed 
+  • Improved arrow controls.
+  • Controls can now be customized from a separate panel.
+  • Various improvements and bug fixes.
+
+   
   
 
 Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.0")
+            .setTitle("What's New in v4.1")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()
@@ -191,6 +239,7 @@ Changes made by Lucky
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 setTitle("Vlither v$latestVersion")
                 setDescription("Downloading update...")
+                setMimeType("application/vnd.android.package-archive")
                 setNotificationVisibility(
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalPublicDir(
@@ -198,17 +247,84 @@ Changes made by Lucky
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
             }
-            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            btnDownload.text = "Downloading... check notifications"
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val id = dm.enqueue(request)
+            pendingDownloadId = id
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putLong(PREF_PENDING_DL_ID, id).apply()
+
+            btnDownload.text = "Downloading update..."
             btnDownload.isEnabled = false
             android.widget.Toast.makeText(this,
-                "Downloading to Downloads folder",
+                "Downloading — the install prompt will open automatically when it's done",
                 android.widget.Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Log.e(TAG, "Download failed: ${e.message}")
             // Fallback: open browser
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             catch (e2: Exception) { Log.e(TAG, "Browser fallback failed: ${e2.message}") }
+        }
+    }
+
+    /** Called once DownloadManager reports the update APK finished (or on relaunch, if it finished while we were gone). */
+    private fun handleDownloadFinished(id: Long) {
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val cursor = dm.query(DownloadManager.Query().setFilterById(id))
+        var status = -1
+        cursor.use {
+            if (it.moveToFirst()) {
+                val idx = it.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                if (idx >= 0) status = it.getInt(idx)
+            }
+        }
+
+        // Not in DownloadManager's table anymore, or still running/queued/paused —
+        // this only happens on the relaunch-resume path, so just leave it be;
+        // the broadcast receiver (already registered) will catch it once it truly finishes.
+        if (status == DownloadManager.STATUS_RUNNING ||
+            status == DownloadManager.STATUS_PENDING ||
+            status == DownloadManager.STATUS_PAUSED) {
+            return
+        }
+
+        // Terminal state (success or failure) — clear the persisted id either way.
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .remove(PREF_PENDING_DL_ID).apply()
+        pendingDownloadId = -1L
+
+        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+            promptInstall(dm, id)
+        } else {
+            mainHandler.post {
+                btnDownload.text = "⬇  Download Update"
+                btnDownload.isEnabled = true
+                android.widget.Toast.makeText(this,
+                    "Update download failed. Please try again.",
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /** Opens the system "Install app" screen for the just-downloaded APK. */
+    private fun promptInstall(dm: DownloadManager, id: Long) {
+        mainHandler.post {
+            btnDownload.text = "⬇  Download Update"
+            btnDownload.isEnabled = true
+            try {
+                val apkUri = dm.getUriForDownloadedFile(id)
+                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(installIntent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Install prompt failed: ${e.message}")
+                android.widget.Toast.makeText(this,
+                    "Downloaded, but couldn't open the installer automatically. " +
+                    "Check your Downloads folder.",
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 

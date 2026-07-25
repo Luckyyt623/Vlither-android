@@ -49,8 +49,8 @@ target_compile_definitions(vlither PRIVATE
     MG_TLS=3
     CGLM_FORCE_DEPTH_ZERO_TO_ONE
     CIMGUI_NO_EXPORT
-    APP_VERSION="4.0"
-    SETTINGS_VERSION="1.8"
+    APP_VERSION="4.1"
+    SETTINGS_VERSION="1.9"
     VK_USE_PLATFORM_ANDROID_KHR
 )
 
@@ -72,4 +72,10 @@ target_link_options(vlither PRIVATE
     $<TARGET_FILE:android_native_app_glue>
     -Wl,--no-whole-archive
     -Wl,-z,max-page-size=16384
+)
+
+# Release-oriented native optimization for the Vulkan renderer. Android and
+# the device thermal governor still decide the actual sustainable clocks.
+target_compile_options(vlither PRIVATE
+    $<$<CONFIG:Release>:-O3;-ffast-math;-fno-math-errno;-fomit-frame-pointer>
 )

@@ -33,6 +33,12 @@ typedef struct game_data {
   screen curr_screen;
   conn_status conn;
 
+  /* True while a hidden "background preview" snake (bot-controlled) owns
+     the connection, e.g. while the Settings or Controls screen is open.
+     Used to keep that preview session from touching the player's real,
+     persisted stats. See game/bg_preview.h */
+  bool preview_active;
+
   uint8_t default_skins[NUM_DEFAULT_SKINS][64];
   char ntl_cg_map[NUM_COLOR_GROUPS];
   vec4s cg_uvs[NUM_COLOR_GROUPS];

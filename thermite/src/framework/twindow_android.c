@@ -263,8 +263,8 @@ ImGuiIO* _io = igGetIO_Nil();
         int32_t action        = AMotionEvent_getAction(event);
         int32_t action_masked = action & AMOTION_EVENT_ACTION_MASK;
 
-        int32_t ptr_idx = (action >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT) &
-                          AMOTION_EVENT_ACTION_POINTER_INDEX_MASK;
+        int32_t ptr_idx = (action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >>
+                          AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
 
         extern bool g_ctrl_swap_sides;
         float sw = (float)wnd->size[0];
@@ -276,14 +276,16 @@ ImGuiIO* _io = igGetIO_Nil();
                 float y   = AMotionEvent_getY(event, 0);
                 int   pid = (int)AMotionEvent_getPointerId(event, 0);
 
-                bool in_zslider = g_overlay_was_active &&
+                bool in_zslider = !g_panel_open && g_overlay_was_active &&
                                   (g_zslider_right > g_zslider_left) &&
                                   x >= g_zslider_left && x <= g_zslider_right &&
                                   y >= g_zslider_top  && y <= g_zslider_bottom;
 
                 float dbx = x - g_boost_cx, dby = y - g_boost_cy;
                 bool in_boost_circle;
-                if (g_boost_r > 0) {
+                if (g_panel_open) {
+                    in_boost_circle = false;
+                } else if (g_boost_r > 0) {
                     float det_r = g_boost_r * 1.4f;
                     in_boost_circle = (dbx*dbx + dby*dby) <= (det_r * det_r);
                 } else {
@@ -344,29 +346,7 @@ ImGuiIO* _io = igGetIO_Nil();
                 }
                 if (pid == -1) break;
 
-                if (wnd->touch.pending_reconcile) {
-                    wnd->touch.pending_reconcile = false;
-                    bool move_alive2 = false, boost_alive2 = false;
-                    for (int32_t ri = 0; ri < cnt2; ri++) {
-                        int rpid = (int)AMotionEvent_getPointerId(event, ri);
-
-                        if (rpid == pid) continue;
-                        if (rpid == wnd->touch.move_ptr_id)  move_alive2  = true;
-                        if (rpid == wnd->touch.boost_ptr_id) boost_alive2 = true;
-                    }
-                    if (!move_alive2 && wnd->touch.move_ptr_id != -1) {
-                        wnd->touch.down        = false;
-                        wnd->touch.just_down   = false;
-                        wnd->touch.move_ptr_id = -1;
-                    }
-                    if (!boost_alive2 && wnd->touch.boost_ptr_id != -1) {
-                        wnd->touch.boost_down      = false;
-                        wnd->touch.boost_just_down = false;
-                        wnd->touch.boost_ptr_id    = -1;
-                    }
-                }
-
-                bool in_zslider2 = g_overlay_was_active &&
+                bool in_zslider2 = !g_panel_open && g_overlay_was_active &&
                                    (g_zslider_right > g_zslider_left) &&
                                    x >= g_zslider_left && x <= g_zslider_right &&
                                    y >= g_zslider_top  && y <= g_zslider_bottom;
@@ -374,7 +354,7 @@ ImGuiIO* _io = igGetIO_Nil();
                     wnd->touch.zslider_ptr_id = pid;
                     wnd->touch.zslider_y      = g_zslider_horizontal ? x : y;
                     wnd->touch.zslider_offset = 0.0f;
-                } else if (wnd->touch.down && !wnd->touch.boost_down) {
+                } else if (wnd->touch.down && !wnd->touch.boost_down && !g_panel_open) {
 
                     wnd->touch.boost_x         = x;
                     wnd->touch.boost_y         = y;
@@ -423,31 +403,6 @@ ImGuiIO* _io = igGetIO_Nil();
             case AMOTION_EVENT_ACTION_MOVE: {
                 int32_t count = (int32_t)AMotionEvent_getPointerCount(event);
 
-                if (wnd->touch.pending_reconcile) {
-                    wnd->touch.pending_reconcile = false;
-                    bool move_alive = false, boost_alive = false, zoom_alive = false;
-                    for (int32_t i = 0; i < count; i++) {
-                        int pid = (int)AMotionEvent_getPointerId(event, i);
-                        if (pid == wnd->touch.move_ptr_id)    move_alive  = true;
-                        if (pid == wnd->touch.boost_ptr_id)   boost_alive = true;
-                        if (pid == wnd->touch.zslider_ptr_id) zoom_alive  = true;
-                    }
-                    if (!move_alive && wnd->touch.move_ptr_id != -1) {
-                        wnd->touch.down        = false;
-                        wnd->touch.just_down   = false;
-                        wnd->touch.move_ptr_id = -1;
-                    }
-                    if (!boost_alive && wnd->touch.boost_ptr_id != -1) {
-                        wnd->touch.boost_down      = false;
-                        wnd->touch.boost_just_down = false;
-                        wnd->touch.boost_ptr_id    = -1;
-                    }
-                    if (!zoom_alive && wnd->touch.zslider_ptr_id != -1) {
-                        wnd->touch.zslider_ptr_id = -1;
-                        wnd->touch.zslider_offset = 0.0f;
-                    }
-                }
-
                 for (int32_t i = 0; i < count; i++) {
                     int   pid = (int)AMotionEvent_getPointerId(event, i);
                     float x   = AMotionEvent_getX(event, i);
@@ -483,13 +438,28 @@ ImGuiIO* _io = igGetIO_Nil();
                 wnd->touch.boost_ptr_id      = -1;
                 wnd->touch.zslider_ptr_id    = -1;
                 wnd->touch.zslider_offset    = 0.0f;
-                wnd->touch.pending_reconcile = false;
                 break;
             }
 
             case AMOTION_EVENT_ACTION_POINTER_UP: {
 
-                wnd->touch.pending_reconcile = true;
+                int lifted_pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
+
+                if (lifted_pid == wnd->touch.move_ptr_id) {
+                    wnd->touch.down        = false;
+                    wnd->touch.just_down   = false;
+                    wnd->touch.move_ptr_id = -1;
+                }
+                if (lifted_pid == wnd->touch.boost_ptr_id) {
+                    wnd->touch.boost_down      = false;
+                    wnd->touch.boost_just_down = false;
+                    wnd->touch.boost_ptr_id    = -1;
+                }
+                if (lifted_pid == wnd->touch.zslider_ptr_id) {
+                    wnd->touch.zslider_ptr_id = -1;
+                    wnd->touch.zslider_offset = 0.0f;
+                }
+
                 break;
             }
 
@@ -502,7 +472,6 @@ ImGuiIO* _io = igGetIO_Nil();
                 wnd->touch.boost_ptr_id      = -1;
                 wnd->touch.zslider_ptr_id    = -1;
                 wnd->touch.zslider_offset    = 0.0f;
-                wnd->touch.pending_reconcile = false;
                 break;
         }
         return 1;
@@ -518,6 +487,16 @@ twindow* twindow_create(tenv* env, trender_func render_func, tresize_func resize
     wnd->_resize_func = resize_func;
     wnd->env          = env;
     wnd->focused      = true;
+
+    /* calloc() zero-fills the struct, but 0 is also a perfectly normal,
+       commonly-assigned Android pointer id (usually the very first finger
+       of a gesture). If these are left at 0 instead of a real "unset"
+       sentinel, the first-ever touch gesture can be misread as already
+       matching move/boost/zslider before any real assignment happens.
+       Force them to -1 so they can never collide with a live pointer id. */
+    wnd->touch.move_ptr_id    = -1;
+    wnd->touch.boost_ptr_id   = -1;
+    wnd->touch.zslider_ptr_id = -1;
 
     g_android_app->userData     = wnd;
     g_android_app->onAppCmd     = handle_app_cmd;

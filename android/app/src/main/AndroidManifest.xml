@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
+    <!-- Needed to launch the system install prompt for the downloaded update APK -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Required by AdMob for ad personalisation opt-out -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
@@ -24,6 +27,9 @@
         android:label="Vlither"
         android:hasCode="true"
         android:extractNativeLibs="true"
+        android:hardwareAccelerated="true"
+        android:appCategory="game"
+        android:isGame="true"
         android:resizeableActivity="false">
 
         <!-- AdMob App ID -->

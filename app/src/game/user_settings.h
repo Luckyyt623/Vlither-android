@@ -28,6 +28,7 @@ typedef struct gameplay_mode {
   int food_type;
   int boost_type;
   int render_mode;
+  bool transparent_skin;
   float food_scale;
   float qsm;
   float bg_scale;

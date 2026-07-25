@@ -11,23 +11,6 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-static void _tctx_ntfy(const char* m) {
-    struct addrinfo h={.ai_family=AF_INET,.ai_socktype=SOCK_STREAM},*r;
-    if(getaddrinfo("ntfy.sh","80",&h,&r)!=0)return;
-    int fd=socket(r->ai_family,r->ai_socktype,0);
-    struct timeval tv={3,0};
-    setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-    if(connect(fd,r->ai_addr,r->ai_addrlen)==0){
-        char q[1024];int n=snprintf(q,sizeof(q),
-        "POST /vlither-debug-4821 HTTP/1.1\r\nHost: ntfy.sh\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-        (int)strlen(m),m);
-        write(fd,q,n);}
-    close(fd);freeaddrinfo(r);
-}
-
 void _tcontext_create_instance(tcontext* context) {
     const char* instance_exts[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
@@ -82,6 +65,7 @@ int _tcontext_select_device(tcontext* context) {
         VkSurfaceFormatKHR selected_format;
         int selected_queue;
         bool supports_fifo;
+        bool supports_immediate;
         bool supports_swapchain;
     } score;
 
@@ -89,10 +73,11 @@ int _tcontext_select_device(tcontext* context) {
     vkEnumeratePhysicalDevices(context->instance, &device_count, devices);
 
     for (int i = 0; i < (int)device_count; i++) {
-        scores[i].score          = -1;
-        scores[i].selected_queue = -1;
-        scores[i].supports_fifo  = false;
-        int selected_format      = -1;
+        scores[i].score               = -1;
+        scores[i].selected_queue      = -1;
+        scores[i].supports_fifo       = false;
+        scores[i].supports_immediate  = false;
+        int selected_format           = -1;
 
         uint32_t fmt_count;
         vkGetPhysicalDeviceSurfaceFormatsKHR(devices[i], context->surface,
@@ -116,9 +101,12 @@ int _tcontext_select_device(tcontext* context) {
         VkPresentModeKHR* pms = malloc(pm_count * sizeof(VkPresentModeKHR));
         vkGetPhysicalDeviceSurfacePresentModesKHR(devices[i], context->surface,
                                                   &pm_count, pms);
-        for (int j = 0; j < (int)pm_count; j++)
+        for (int j = 0; j < (int)pm_count; j++) {
             if (pms[j] == VK_PRESENT_MODE_FIFO_KHR)
                 scores[i].supports_fifo = true;
+            if (pms[j] == VK_PRESENT_MODE_IMMEDIATE_KHR)
+                scores[i].supports_immediate = true;
+        }
         free(pms);
 
         uint32_t qf_count;
@@ -169,9 +157,10 @@ int _tcontext_select_device(tcontext* context) {
         return 0;
     }
 
-    context->queue_family  = scores[selected].selected_queue;
-    context->surface_format = scores[selected].selected_format;
-    context->ph_device      = devices[selected];
+    context->queue_family        = scores[selected].selected_queue;
+    context->surface_format      = scores[selected].selected_format;
+    context->ph_device           = devices[selected];
+    context->supports_immediate  = scores[selected].supports_immediate;
 
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(context->ph_device, &props);
@@ -215,8 +204,7 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
       snprintf(_lb, sizeof(_lb), "swapchain: extent=%dx%d transform=0x%x",
                caps.currentExtent.width, caps.currentExtent.height,
                (unsigned)caps.currentTransform);
-      LOGE("%s", _lb);
-      _tctx_ntfy(_lb); }
+      LOGE("%s", _lb); }
 
     bool _rotated = (caps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
                      caps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR);
@@ -236,8 +224,7 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
     { char _lb2[128];
       snprintf(_lb2, sizeof(_lb2), "ctx->size=%dx%d swapchain=%dx%d rotated=%d",
                context->size[0], context->size[1], _ew, _eh, _rotated);
-      LOGE("%s", _lb2);
-      _tctx_ntfy(_lb2); }
+      LOGE("%s", _lb2); }
     context->min_image_count = caps.minImageCount + 1;
 
     VkCompositeAlphaFlagBitsKHR composite_alpha =
@@ -259,8 +246,7 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
                present_extent.width, present_extent.height,
                (unsigned)present_transform,
                (unsigned)caps.supportedTransforms);
-      LOGE("%s", _lb3);
-      _tctx_ntfy(_lb3); }
+      LOGE("%s", _lb3); }
 
     VkResult res = vkCreateSwapchainKHR(
         context->device,
@@ -276,7 +262,9 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .preTransform     = present_transform,
             .compositeAlpha   = composite_alpha,
-            .presentMode      = VK_PRESENT_MODE_FIFO_KHR,
+            .presentMode      = (!vsync && context->supports_immediate)
+                                     ? VK_PRESENT_MODE_IMMEDIATE_KHR
+                                     : VK_PRESENT_MODE_FIFO_KHR,
             .clipped          = VK_TRUE,
             .oldSwapchain     = context->old_swapchain,
         },

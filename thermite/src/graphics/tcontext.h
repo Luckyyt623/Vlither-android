@@ -57,6 +57,7 @@ typedef struct tcontext {
   VkSurfaceFormatKHR surface_format;
   ivec2             size;
   ivec2             swapchain_size;
+  bool              supports_immediate;
 } tcontext;
 
 VkShaderModule tcontext_create_shader(tcontext* context, const char* filename);

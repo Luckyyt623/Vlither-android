@@ -249,8 +249,17 @@ void ui_overlay(tenv* env) {
   extern bool g_ctrl_swap_sides;
   g_ctrl_swap_sides = usrs->ctrl_swap_sides;
 
-  if (gdata->data.follow_view) {
-    ImDrawList* dl  = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
+  if (gdata->data.follow_view || gdata->curr_screen == CONTROLS) {
+    /* Normally these draw on the foreground layer (always on top, as
+       real gameplay controls should be). While a hidden background
+       preview snake is running behind the Settings/Controls screen,
+       that would paint over the actual adjustment sliders — so draw
+       to the background layer instead, underneath the real UI, purely
+       as an ambient look-behind preview. */
+    bool panel_preview = (gdata->curr_screen == CONTROLS);
+    ImDrawList* dl  = (gdata->preview_active || panel_preview)
+                          ? igGetBackgroundDrawList(igGetMainViewport())
+                          : igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
     float sw        = (float)ctx->size[0];
     float sh        = (float)ctx->size[1];
     float margin    = sw * 0.025f;
@@ -546,7 +555,7 @@ void ui_overlay(tenv* env) {
     }
   }
 
-  if (gdata->data.follow_view) {
+  if (gdata->data.follow_view || gdata->curr_screen == CONTROLS) {
 
     extern float g_zslider_left, g_zslider_top, g_zslider_right, g_zslider_bottom;
     extern float g_zslider_half_h;
@@ -562,12 +571,15 @@ void ui_overlay(tenv* env) {
 
     g_zslider_horizontal = usrs->zslider_horizontal;
 
-    if (usrs->zslider_hidden) {
+    bool preview_controls = (gdata->curr_screen == CONTROLS);
+    if (usrs->zslider_hidden && !preview_controls) {
 
       g_zslider_left = g_zslider_right = g_zslider_top = g_zslider_bottom = 0;
       g_zslider_half_h = 1;
     } else {
-      ImDrawList* zdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
+      ImDrawList* zdl = (gdata->preview_active || preview_controls)
+                              ? igGetBackgroundDrawList(igGetMainViewport())
+                              : igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
       float zopa = usrs->zslider_opacity;
       ImU32 track_col = IM_COL32(255, 255, 255, (int)(50  * zopa));
       ImU32 track_brd = IM_COL32(255, 255, 255, (int)(90  * zopa));

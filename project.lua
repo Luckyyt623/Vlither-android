@@ -112,7 +112,7 @@ workspace "vlither"
     files { "app/src/**.c", "app/src/**.cpp" }
     defines {
       "APP_VERSION=\"2.5\"",
-      "SETTINGS_VERSION=\"1.5\""
+      "SETTINGS_VERSION=\"1.7\""
     }
 
     filter { "platforms:linux" }

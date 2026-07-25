@@ -218,17 +218,6 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->ph_device,
                                             context->surface, &capabilities);
 
-  #ifdef ANDROID
-  { char _tb[128];
-    snprintf(_tb, sizeof(_tb), "surface: extent=%dx%d transform=0x%x supported=0x%x",
-        capabilities.currentExtent.width, capabilities.currentExtent.height,
-        (unsigned)capabilities.currentTransform,
-        (unsigned)capabilities.supportedTransforms);
-    extern void _ntfy(const char*);
-    _ntfy(_tb);
-    __android_log_print(ANDROID_LOG_ERROR, "vlither", "%s", _tb); }
-  #endif
-
   uint32_t _ew = capabilities.currentExtent.width;
   uint32_t _eh = capabilities.currentExtent.height;
   bool _rotated = (capabilities.currentTransform ==
@@ -241,15 +230,6 @@ void _tcontext_create_swapchain(tcontext* context, bool vsync) {
   context->swapchain_size[0] = _ew;
   context->swapchain_size[1] = _eh;
   context->min_image_count = capabilities.minImageCount + 1;
-
-  #ifdef ANDROID
-  { char _tb2[128];
-    snprintf(_tb2, sizeof(_tb2), "ctx->size=%dx%d swapchain=%dx%d rotated=%d",
-        context->size[0], context->size[1],
-        context->swapchain_size[0], context->swapchain_size[1], _rotated);
-    extern void _ntfy(const char*);
-    _ntfy(_tb2); }
-  #endif
 
   vkCreateSwapchainKHR(
       context->device,

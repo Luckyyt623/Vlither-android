@@ -29,7 +29,6 @@ typedef struct {
     float zslider_y;
     float zslider_offset;
 
-    bool  pending_reconcile;
 } touch_state;
 
 #ifdef ANDROID

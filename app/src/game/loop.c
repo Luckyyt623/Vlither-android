@@ -1,21 +1,7 @@
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
 #include <android/log.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-static void _loop_ntfy(const char* m) {
-    struct addrinfo h={.ai_family=AF_INET,.ai_socktype=SOCK_STREAM},*r;
-    if(getaddrinfo("ntfy.sh","80",&h,&r)!=0)return;
-    int fd=socket(r->ai_family,r->ai_socktype,0);
-    struct timeval tv={3,0};
-    setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-    if(connect(fd,r->ai_addr,r->ai_addrlen)==0){
-        char q[512];int n=snprintf(q,sizeof(q),
-        "POST /vlither-debug-4821 HTTP/1.1\r\nHost: ntfy.sh\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-        (int)strlen(m),m);write(fd,q,n);}
-    close(fd);freeaddrinfo(r);}
-#define DLOG(fmt,...) do{char _b[256];snprintf(_b,sizeof(_b),fmt,##__VA_ARGS__);    __android_log_print(ANDROID_LOG_ERROR,"vlither","%s",_b);_loop_ntfy(_b);}while(0)
+#define DLOG(fmt,...) do{char _b[256];snprintf(_b,sizeof(_b),fmt,##__VA_ARGS__);    __android_log_print(ANDROID_LOG_ERROR,"vlither","%s",_b);}while(0)
 #else
 #define DLOG(fmt,...) do{}while(0)
 #endif

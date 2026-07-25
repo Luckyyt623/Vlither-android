@@ -16,6 +16,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.Display
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
@@ -216,9 +217,14 @@ class GameActivity : NativeActivity() {
         super.onCreate(savedInstanceState)
         @Suppress("DEPRECATION")
         window.setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
+            WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
+        enableHighPerformanceDisplay()
         hideSystemBars()
 
         /* Add the overlay on top of NativeActivity's surface view */
@@ -229,6 +235,32 @@ class GameActivity : NativeActivity() {
         }
 
         Log.d(TAG, "GameActivity created – loading overlay shown")
+    }
+
+    private fun enableHighPerformanceDisplay() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                window.setSustainedPerformanceMode(true)
+            }
+
+            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay
+            }
+
+            val bestMode = display?.supportedModes?.maxByOrNull { it.refreshRate }
+            if (bestMode != null) {
+                val attrs = window.attributes
+                attrs.preferredDisplayModeId = bestMode.modeId
+                window.attributes = attrs
+
+                Log.i(TAG, "Requested display mode ${bestMode.physicalWidth}x${bestMode.physicalHeight} @ ${bestMode.refreshRate}Hz")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "High-performance display request failed: ${e.message}")
+        }
     }
 
     override fun onResume() {

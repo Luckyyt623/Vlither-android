@@ -1,23 +1,7 @@
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
 #include <android/log.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-static void _cb_ntfy(const char* m) {
-    struct addrinfo h={.ai_family=AF_INET,.ai_socktype=SOCK_STREAM},*r;
-    if(getaddrinfo("ntfy.sh","80",&h,&r)!=0)return;
-    int fd=socket(r->ai_family,r->ai_socktype,0);
-    struct timeval tv={3,0};
-    setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-    if(connect(fd,r->ai_addr,r->ai_addrlen)==0){
-        char q[1024];int n=snprintf(q,sizeof(q),
-        "POST /vlither-debug-4821 HTTP/1.1\r\nHost: ntfy.sh\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-        (int)strlen(m),m);
-        write(fd,q,n);}
-    close(fd);freeaddrinfo(r);
-}
-#define DLOG(fmt,...) do{char _b[256];snprintf(_b,sizeof(_b),fmt,##__VA_ARGS__);    __android_log_print(ANDROID_LOG_ERROR,"vlither","%s",_b);_cb_ntfy(_b);}while(0)
+#define DLOG(fmt,...) do{char _b[256];snprintf(_b,sizeof(_b),fmt,##__VA_ARGS__);    __android_log_print(ANDROID_LOG_ERROR,"vlither","%s",_b);}while(0)
 #else
 #define DLOG(fmt,...) do{}while(0)
 #endif
@@ -1282,11 +1266,16 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     gdata->data.follow_view = false;
     gdata->data.lview_xx = gdata->data.view_xx;
     gdata->data.lview_yy = gdata->data.view_yy;
-    usrs->kills = gdata->data.kills;
-    usrs->score = gdata->data.score;
-    usrs->play_time = gdata->data.play_etm;
 
-    save_user_settings(usrs);
+    /* Don't let a hidden background-preview snake (Settings / Controls
+       screen) bump the player's real lifetime stats. */
+    if (!gdata->preview_active) {
+      usrs->kills = gdata->data.kills;
+      usrs->score = gdata->data.score;
+      usrs->play_time = gdata->data.play_etm;
+
+      save_user_settings(usrs);
+    }
 
     if (usrs->instant_restart) {
       gdata->restart_req = true;
@@ -1300,6 +1289,18 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
   game_data* gdata = &usr->gdata;
+
+  /* Guards against a rare handover race: the background-preview system
+     (see game/bg_preview.c) can be in the middle of closing its own
+     hidden connection at the exact moment the player hits "Play" and a
+     brand new real connection takes over gdata->connection. Events from
+     any connection that isn't the one currently tracked are stale —
+     let mongoose finish closing them without touching shared game
+     state that now belongs to the real session. */
+  if (gdata->connection != NULL && c != gdata->connection) {
+    if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) c->is_closing = true;
+    return;
+  }
 
   if (ev == MG_EV_OPEN) {
     DLOG("conn: TCP connected");

@@ -224,42 +224,19 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 5 +
                   frame_height * 4);
+  if (igButton("\ue991 Controls", (ImVec2){logo_size})) {
+    usr->gdata.curr_screen = CONTROLS;
+  }
+
+  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
+                  frame_height * 5);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);
   }
 
 #ifdef ANDROID
-
-  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
-                  frame_height * 5);
-
-  if (!usrs->ctrl_mode_trackpad) {
-    igPushStyleColor_Vec4(ImGuiCol_Button,        (ImVec4){0.168f, 0.468f, 0.768f, 1.0f});
-    igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0.268f, 0.568f, 0.868f, 1.0f});
-    igPushStyleColor_Vec4(ImGuiCol_ButtonActive,  (ImVec4){0.068f, 0.368f, 0.668f, 1.0f});
-  }
-  if (igButton("Joystick",
-               (ImVec2){logo_size / 2 - style->ItemSpacing.x / 2})) {
-    usrs->ctrl_mode_trackpad = false;
-    save_user_settings(usrs);
-  }
-  if (!usrs->ctrl_mode_trackpad) igPopStyleColor(3);
-
-  igSameLine(0, -1);
-
-  if (usrs->ctrl_mode_trackpad) {
-    igPushStyleColor_Vec4(ImGuiCol_Button,        (ImVec4){0.068f, 0.568f, 0.368f, 1.0f});
-    igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0.168f, 0.668f, 0.468f, 1.0f});
-    igPushStyleColor_Vec4(ImGuiCol_ButtonActive,  (ImVec4){0.0f,   0.468f, 0.268f, 1.0f});
-  }
-  if (igButton("Arrow",
-               (ImVec2){logo_size / 2 - style->ItemSpacing.x / 2})) {
-    usrs->ctrl_mode_trackpad = true;
-    save_user_settings(usrs);
-  }
-  if (usrs->ctrl_mode_trackpad) igPopStyleColor(3);
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +

@@ -750,6 +750,7 @@ void redraw(tenv* env) {
               }
           }
         } else if (mode->render_mode == 1) {
+          float skinless_a = mode->transparent_skin ? 0.8f : 1.0f;
           if (mode->show_shadows) {
 
             int start = bp >= 4 ? bp - 4 : 0;
@@ -819,7 +820,7 @@ void redraw(tenv* env) {
                          fiy - (gdata->data.gsc * lsz),
                          gdata->data.gsc * 2 * lsz, gdata->data.pba[(int)j]},
                         gdata->cg_uvs[BLANK_UV],
-                        {cg_col->r, cg_col->g, cg_col->b, a}});
+                        {cg_col->r, cg_col->g, cg_col->b, a * skinless_a}});
               }
           } else {
             for (j = bp - 1; j >= 0; j--)
@@ -868,10 +869,11 @@ void redraw(tenv* env) {
                          fiy - (gdata->data.gsc * lsz),
                          gdata->data.gsc * 2 * lsz, gdata->data.pba[(int)j]},
                         gdata->cg_uvs[BLANK_UV],
-                        {cg_col->r, cg_col->g, cg_col->b, a}});
+                        {cg_col->r, cg_col->g, cg_col->b, a * skinless_a}});
               }
           }
         } else if (mode->render_mode == 2) {
+          float skinless_a = mode->transparent_skin ? 0.8f : 1.0f;
           if (mode->show_shadows) {
 
             int start = bp >= 4 ? bp - 4 : 0;
@@ -941,7 +943,7 @@ void redraw(tenv* env) {
                          fiy - (gdata->data.gsc * lsz),
                          gdata->data.gsc * 2 * lsz, gdata->data.pba[(int)j]},
                         gdata->cg_uvs[BLANK_UV],
-                        {cg_col->r, cg_col->g, cg_col->b, a * a}});
+                        {cg_col->r, cg_col->g, cg_col->b, a * a * skinless_a}});
               }
           } else {
             for (j = bp - 1; j >= 0; j--)
@@ -988,7 +990,7 @@ void redraw(tenv* env) {
                          fiy - (gdata->data.gsc * lsz),
                          gdata->data.gsc * 2 * lsz, gdata->data.pba[(int)j]},
                         gdata->cg_uvs[BLANK_UV],
-                        {cg_col->r, cg_col->g, cg_col->b, a}});
+                        {cg_col->r, cg_col->g, cg_col->b, a * skinless_a}});
               }
           }
         }
