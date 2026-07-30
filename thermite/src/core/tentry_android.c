@@ -205,8 +205,27 @@ void android_main(struct android_app* app) {
 
         if (!env.config.running) break;
 
+        struct timespec frame_start;
+        clock_gettime(CLOCK_MONOTONIC, &frame_start);
+
         tinput(&env);
         trender(&env);
+
+        int fps_limit = env.usr ? env.usr->usrs.fps_limit : 0;
+        if (fps_limit > 0) {
+            struct timespec frame_end;
+            clock_gettime(CLOCK_MONOTONIC, &frame_end);
+            double elapsed = (double)(frame_end.tv_sec - frame_start.tv_sec) +
+                (double)(frame_end.tv_nsec - frame_start.tv_nsec) * 1e-9;
+            double remaining = 1.0 / (double)fps_limit - elapsed;
+            if (remaining > 0.0005) {
+                struct timespec sleep_for = {
+                    .tv_sec = (time_t)remaining,
+                    .tv_nsec = (long)((remaining - (time_t)remaining) * 1e9)
+                };
+                nanosleep(&sleep_for, NULL);
+            }
+        }
 
         if (!g_first_frame_done) {
             g_first_frame_done = true;

@@ -3,11 +3,16 @@
 #include "twindow.h"
 #include "../core/tenv.h"
 
+#define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
+#include "cimgui/cimgui.h"
+#include "android_jni.h"
+
 #include <android/log.h>
 #include <android_native_app_glue.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 
 #define LOG_TAG "vlither"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -29,52 +34,46 @@ float g_joy_cx   = -9999, g_joy_cy   = -9999, g_joy_r   = 0;
 bool  g_is_trackpad_mode = true;
 bool  g_panel_open       = false;
 
+typedef struct { float l, t, r, b; } android_ui_rect;
+#define ANDROID_UI_CAPTURE_MAX 64
+static android_ui_rect g_ui_capture_rects[ANDROID_UI_CAPTURE_MAX];
+static int g_ui_capture_count = 0;
+static uint32_t g_ui_owned_pointer_mask = 0;
+
+void android_ui_capture_begin_frame(void) { g_ui_capture_count = 0; }
+
+void android_ui_capture_rect(float left, float top, float right, float bottom) {
+    if (g_ui_capture_count >= ANDROID_UI_CAPTURE_MAX) return;
+    if (right < left) { float v = left; left = right; right = v; }
+    if (bottom < top) { float v = top; top = bottom; bottom = v; }
+    g_ui_capture_rects[g_ui_capture_count++] =
+        (android_ui_rect){left, top, right, bottom};
+}
+
+bool android_ui_capture_contains(float x, float y) {
+    for (int i = g_ui_capture_count - 1; i >= 0; --i) {
+        android_ui_rect r = g_ui_capture_rects[i];
+        if (x >= r.l && x <= r.r && y >= r.t && y <= r.b) return true;
+    }
+    return false;
+}
+
+static void set_ui_pointer_owned(int pid, bool owned) {
+    if (pid < 0 || pid >= 32) return;
+    uint32_t bit = (uint32_t)1u << (uint32_t)pid;
+    if (owned) g_ui_owned_pointer_mask |= bit;
+    else g_ui_owned_pointer_mask &= ~bit;
+}
+
+static bool is_ui_pointer_owned(int pid) {
+    if (pid < 0 || pid >= 32) return false;
+    return (g_ui_owned_pointer_mask & ((uint32_t)1u << (uint32_t)pid)) != 0;
+}
+
 extern struct android_app* g_android_app;
 
-typedef struct ImGuiIO ImGuiIO;
-extern ImGuiIO* igGetIO_Nil(void);
-extern void ImGuiIO_AddInputCharacter(ImGuiIO* self, unsigned int c);
-extern void ImGuiIO_AddKeyEvent(ImGuiIO* self, int key, bool down);
-
 static void _android_set_keyboard(bool show) {
-    JNIEnv* env = NULL;
-    JavaVM* vm = g_android_app->activity->vm;
-    (*vm)->AttachCurrentThread(vm, &env, NULL);
-
-    jobject activity = g_android_app->activity->clazz;
-    jclass cls = (*env)->GetObjectClass(env, activity);
-
-    jmethodID getSystemService = (*env)->GetMethodID(env, cls,
-        "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
-    jstring ime_str = (*env)->NewStringUTF(env, "input_method");
-    jobject imm = (*env)->CallObjectMethod(env, activity, getSystemService, ime_str);
-    (*env)->DeleteLocalRef(env, ime_str);
-
-    jclass imm_cls = (*env)->GetObjectClass(env, imm);
-
-    jmethodID getWindow = (*env)->GetMethodID(env, cls,
-        "getWindow", "()Landroid/view/Window;");
-    jobject window = (*env)->CallObjectMethod(env, activity, getWindow);
-    jclass window_cls = (*env)->GetObjectClass(env, window);
-    jmethodID getDecorView = (*env)->GetMethodID(env, window_cls,
-        "getDecorView", "()Landroid/view/View;");
-    jobject decor_view = (*env)->CallObjectMethod(env, window, getDecorView);
-
-    if (show) {
-        jmethodID showSoftInput = (*env)->GetMethodID(env, imm_cls,
-            "showSoftInput", "(Landroid/view/View;I)Z");
-        (*env)->CallBooleanMethod(env, imm, showSoftInput, decor_view, 0);
-    } else {
-        jclass view_cls = (*env)->GetObjectClass(env, decor_view);
-        jmethodID getWindowToken = (*env)->GetMethodID(env, view_cls,
-            "getWindowToken", "()Landroid/os/IBinder;");
-        jobject token = (*env)->CallObjectMethod(env, decor_view, getWindowToken);
-        jmethodID hideSoftInput = (*env)->GetMethodID(env, imm_cls,
-            "hideSoftInputFromWindow", "(Landroid/os/IBinder;I)Z");
-        (*env)->CallBooleanMethod(env, imm, hideSoftInput, token, 0);
-    }
-
-    (*vm)->DetachCurrentThread(vm);
+    android_jni_set_text_input_active(show);
 }
 
 static bool g_keyboard_shown = false;
@@ -219,42 +218,149 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
     }
 }
 
+static void begin_ui_touch(twindow* wnd, float x, float y, int pid) {
+    if (wnd->ui_touch.down) return;
+    wnd->ui_touch.x = x;
+    wnd->ui_touch.y = y;
+    wnd->ui_touch.down = true;
+    wnd->ui_touch.just_down = true;
+    wnd->ui_touch.move_ptr_id = pid;
+}
+
+static void end_ui_touch(twindow* wnd, int pid) {
+    if (pid != wnd->ui_touch.move_ptr_id) return;
+    wnd->ui_touch.down = false;
+    wnd->ui_touch.just_down = false;
+    wnd->ui_touch.move_ptr_id = -1;
+}
+
+static ImGuiKey android_key_to_imgui(int32_t keycode) {
+    switch (keycode) {
+        case AKEYCODE_TAB:        return ImGuiKey_Tab;
+        case AKEYCODE_DPAD_LEFT:  return ImGuiKey_LeftArrow;
+        case AKEYCODE_DPAD_RIGHT: return ImGuiKey_RightArrow;
+        case AKEYCODE_DPAD_UP:    return ImGuiKey_UpArrow;
+        case AKEYCODE_DPAD_DOWN:  return ImGuiKey_DownArrow;
+        case AKEYCODE_MOVE_HOME:  return ImGuiKey_Home;
+        case AKEYCODE_MOVE_END:   return ImGuiKey_End;
+        case AKEYCODE_FORWARD_DEL:return ImGuiKey_Delete;
+        case AKEYCODE_DEL:        return ImGuiKey_Backspace;
+        case AKEYCODE_SPACE:      return ImGuiKey_Space;
+        case AKEYCODE_ENTER:      return ImGuiKey_Enter;
+        case AKEYCODE_ESCAPE:     return ImGuiKey_Escape;
+        case AKEYCODE_CTRL_LEFT:  return ImGuiKey_LeftCtrl;
+        case AKEYCODE_CTRL_RIGHT: return ImGuiKey_RightCtrl;
+        case AKEYCODE_SHIFT_LEFT: return ImGuiKey_LeftShift;
+        case AKEYCODE_SHIFT_RIGHT:return ImGuiKey_RightShift;
+        case AKEYCODE_ALT_LEFT:   return ImGuiKey_LeftAlt;
+        case AKEYCODE_ALT_RIGHT:  return ImGuiKey_RightAlt;
+        case AKEYCODE_A:          return ImGuiKey_A;
+        case AKEYCODE_C:          return ImGuiKey_C;
+        case AKEYCODE_V:          return ImGuiKey_V;
+        case AKEYCODE_X:          return ImGuiKey_X;
+        case AKEYCODE_Y:          return ImGuiKey_Y;
+        case AKEYCODE_Z:          return ImGuiKey_Z;
+        default:                  return ImGuiKey_None;
+    }
+}
+
+#ifndef AKEYCODE_CUT
+#define AKEYCODE_CUT 277
+#endif
+#ifndef AKEYCODE_COPY
+#define AKEYCODE_COPY 278
+#endif
+#ifndef AKEYCODE_PASTE
+#define AKEYCODE_PASTE 279
+#endif
+
 static int32_t handle_input(struct android_app* app, AInputEvent* event) {
     twindow* wnd = (twindow*)app->userData;
     if (!wnd) return 0;
 
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
-        int32_t action   = AKeyEvent_getAction(event);
-        int32_t keycode  = AKeyEvent_getKeyCode(event);
-        int32_t meta     = AKeyEvent_getMetaState(event);
+        int32_t action  = AKeyEvent_getAction(event);
+        int32_t keycode = AKeyEvent_getKeyCode(event);
+        int32_t meta    = AKeyEvent_getMetaState(event);
+        ImGuiIO* io     = igGetIO_Nil();
+        if (!io) return 1;
 
-        if (action == AKEY_EVENT_ACTION_DOWN || action == AKEY_EVENT_ACTION_MULTIPLE) {
+        bool is_down = action == AKEY_EVENT_ACTION_DOWN ||
+                       action == AKEY_EVENT_ACTION_MULTIPLE;
+        bool is_up   = action == AKEY_EVENT_ACTION_UP;
+        bool ctrl    = (meta & AMETA_CTRL_ON) != 0 ||
+                       ((keycode == AKEYCODE_CTRL_LEFT ||
+                         keycode == AKEYCODE_CTRL_RIGHT) && is_down);
+        bool shift   = (meta & AMETA_SHIFT_ON) != 0 ||
+                       ((keycode == AKEYCODE_SHIFT_LEFT ||
+                         keycode == AKEYCODE_SHIFT_RIGHT) && is_down);
+        bool alt     = (meta & AMETA_ALT_ON) != 0 ||
+                       ((keycode == AKEYCODE_ALT_LEFT ||
+                         keycode == AKEYCODE_ALT_RIGHT) && is_down);
 
+        ImGuiIO_AddKeyEvent(io, ImGuiMod_Ctrl,  ctrl);
+        ImGuiIO_AddKeyEvent(io, ImGuiMod_Shift, shift);
+        ImGuiIO_AddKeyEvent(io, ImGuiMod_Alt,   alt);
+
+        if (keycode == AKEYCODE_PASTE && is_down) {
+            const char* clipboard = android_jni_get_clipboard_text();
+            if (clipboard && clipboard[0] != '\0')
+                ImGuiIO_AddInputCharactersUTF8(io, clipboard);
+            return 1;
+        }
+
+        /* Android exposes dedicated copy/cut keys on some hardware keyboards.
+           Translate them to the shortcuts Dear ImGui already understands. */
+        if ((keycode == AKEYCODE_COPY || keycode == AKEYCODE_CUT) && is_down) {
+            ImGuiIO_AddKeyEvent(io, ImGuiMod_Ctrl, true);
+            ImGuiKey command = keycode == AKEYCODE_COPY ? ImGuiKey_C : ImGuiKey_X;
+            ImGuiIO_AddKeyEvent(io, command, true);
+            ImGuiIO_AddKeyEvent(io, command, false);
+            ImGuiIO_AddKeyEvent(io, ImGuiMod_Ctrl, false);
+            return 1;
+        }
+
+        ImGuiKey imgui_key = android_key_to_imgui(keycode);
+        if (imgui_key != ImGuiKey_None) {
+            if (action == AKEY_EVENT_ACTION_MULTIPLE) {
+                ImGuiIO_AddKeyEvent(io, imgui_key, true);
+                ImGuiIO_AddKeyEvent(io, imgui_key, false);
+            } else {
+                ImGuiIO_AddKeyEvent(io, imgui_key, is_down && !is_up);
+            }
+        }
+
+        if (is_down && !ctrl && keycode != AKEYCODE_DEL) {
             JNIEnv* jenv = NULL;
-            (*g_android_app->activity->vm)->AttachCurrentThread(
-                g_android_app->activity->vm, &jenv, NULL);
-            jclass kc = (*jenv)->FindClass(jenv, "android/view/KeyEvent");
-            jmethodID ctor = (*jenv)->GetMethodID(jenv, kc, "<init>", "(II)V");
-            jobject ke = (*jenv)->NewObject(jenv, kc, ctor, action, keycode);
-            jmethodID getUnicodeChar = (*jenv)->GetMethodID(jenv, kc,
-                "getUnicodeChar", "(I)I");
-            int unicode = (*jenv)->CallIntMethod(jenv, ke, getUnicodeChar, meta);
-            (*jenv)->DeleteLocalRef(jenv, ke);
-            (*g_android_app->activity->vm)->DetachCurrentThread(
-                g_android_app->activity->vm);
-
-            if (unicode > 0) {
-ImGuiIO* _io = igGetIO_Nil();
-                if (_io) ImGuiIO_AddInputCharacter(_io, (unsigned int)unicode);
+            JavaVM* vm = g_android_app->activity->vm;
+            bool did_attach = false;
+            int status = (*vm)->GetEnv(vm, (void**)&jenv, JNI_VERSION_1_6);
+            if (status == JNI_EDETACHED) {
+                if ((*vm)->AttachCurrentThread(vm, &jenv, NULL) == JNI_OK)
+                    did_attach = true;
             }
 
-            if (keycode == AKEYCODE_DEL) {
-ImGuiIO* _io = igGetIO_Nil();
-                if (_io) {
-                    ImGuiIO_AddKeyEvent(_io, 523 , true);
-                    ImGuiIO_AddKeyEvent(_io, 523, false);
+            if (jenv) {
+                jclass kc = (*jenv)->FindClass(jenv, "android/view/KeyEvent");
+                if (kc) {
+                    jmethodID ctor = (*jenv)->GetMethodID(jenv, kc, "<init>", "(II)V");
+                    jmethodID get_unicode = (*jenv)->GetMethodID(
+                        jenv, kc, "getUnicodeChar", "(I)I");
+                    if (ctor && get_unicode) {
+                        jobject ke = (*jenv)->NewObject(jenv, kc, ctor, action, keycode);
+                        if (ke) {
+                            int unicode = (*jenv)->CallIntMethod(
+                                jenv, ke, get_unicode, meta);
+                            if (unicode > 0)
+                                ImGuiIO_AddInputCharacter(io, (unsigned int)unicode);
+                            (*jenv)->DeleteLocalRef(jenv, ke);
+                        }
+                    }
+                    (*jenv)->DeleteLocalRef(jenv, kc);
                 }
+                if ((*jenv)->ExceptionCheck(jenv)) (*jenv)->ExceptionClear(jenv);
             }
+            if (did_attach) (*vm)->DetachCurrentThread(vm);
         }
         return 1;
     }
@@ -266,9 +372,6 @@ ImGuiIO* _io = igGetIO_Nil();
         int32_t ptr_idx = (action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >>
                           AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
 
-        extern bool g_ctrl_swap_sides;
-        float sw = (float)wnd->size[0];
-
         switch (action_masked) {
 
             case AMOTION_EVENT_ACTION_DOWN: {
@@ -276,24 +379,20 @@ ImGuiIO* _io = igGetIO_Nil();
                 float y   = AMotionEvent_getY(event, 0);
                 int   pid = (int)AMotionEvent_getPointerId(event, 0);
 
+                if (g_panel_open || android_ui_capture_contains(x, y)) {
+                    set_ui_pointer_owned(pid, true);
+                    begin_ui_touch(wnd, x, y, pid);
+                    break;
+                }
+
                 bool in_zslider = !g_panel_open && g_overlay_was_active &&
                                   (g_zslider_right > g_zslider_left) &&
                                   x >= g_zslider_left && x <= g_zslider_right &&
                                   y >= g_zslider_top  && y <= g_zslider_bottom;
 
                 float dbx = x - g_boost_cx, dby = y - g_boost_cy;
-                bool in_boost_circle;
-                if (g_panel_open) {
-                    in_boost_circle = false;
-                } else if (g_boost_r > 0) {
-                    float det_r = g_boost_r * 1.4f;
-                    in_boost_circle = (dbx*dbx + dby*dby) <= (det_r * det_r);
-                } else {
-
-                    in_boost_circle = g_ctrl_swap_sides
-                                      ? (x < sw * 0.22f)
-                                      : (x > sw * 0.78f);
-                }
+                bool in_boost_circle = g_boost_r > 0 &&
+                    (dbx*dbx + dby*dby) <= (g_boost_r * g_boost_r);
 
                 float djx = x - g_joy_cx, djy = y - g_joy_cy;
                 bool in_joy_ring = g_joy_r > 0 &&
@@ -317,34 +416,23 @@ ImGuiIO* _io = igGetIO_Nil();
                     wnd->touch.down        = true;
                     wnd->touch.just_down   = true;
                     wnd->touch.move_ptr_id = pid;
-                } else if (!wnd->touch.down) {
-
-                    wnd->touch.x         = x;
-                    wnd->touch.y         = y;
-                    wnd->touch.down      = true;
-                    wnd->touch.just_down = true;
-                    wnd->touch.move_ptr_id = pid;
                 }
                 break;
             }
 
             case AMOTION_EVENT_ACTION_POINTER_DOWN: {
 
-                int32_t cnt2  = (int32_t)AMotionEvent_getPointerCount(event);
-                int     pid   = -1;
-                float   x = 0, y = 0;
-                for (int32_t si = 0; si < cnt2; si++) {
-                    int cpid = (int)AMotionEvent_getPointerId(event, si);
-                    if (cpid != wnd->touch.move_ptr_id  &&
-                        cpid != wnd->touch.boost_ptr_id &&
-                        cpid != wnd->touch.zslider_ptr_id) {
-                        pid = cpid;
-                        x   = AMotionEvent_getX(event, si);
-                        y   = AMotionEvent_getY(event, si);
-                        break;
-                    }
+                int32_t cnt2 = (int32_t)AMotionEvent_getPointerCount(event);
+                if (ptr_idx < 0 || ptr_idx >= cnt2) break;
+                int pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
+                float x = AMotionEvent_getX(event, ptr_idx);
+                float y = AMotionEvent_getY(event, ptr_idx);
+
+                if (g_panel_open || android_ui_capture_contains(x, y)) {
+                    set_ui_pointer_owned(pid, true);
+                    begin_ui_touch(wnd, x, y, pid);
+                    break;
                 }
-                if (pid == -1) break;
 
                 bool in_zslider2 = !g_panel_open && g_overlay_was_active &&
                                    (g_zslider_right > g_zslider_left) &&
@@ -354,37 +442,18 @@ ImGuiIO* _io = igGetIO_Nil();
                     wnd->touch.zslider_ptr_id = pid;
                     wnd->touch.zslider_y      = g_zslider_horizontal ? x : y;
                     wnd->touch.zslider_offset = 0.0f;
-                } else if (wnd->touch.down && !wnd->touch.boost_down && !g_panel_open) {
-
-                    wnd->touch.boost_x         = x;
-                    wnd->touch.boost_y         = y;
-                    wnd->touch.boost_down      = true;
-                    wnd->touch.boost_just_down = true;
-                    wnd->touch.boost_ptr_id    = pid;
-                } else if (!wnd->touch.down && wnd->touch.boost_down && !g_panel_open) {
-
-                    float djx2 = x - g_joy_cx, djy2 = y - g_joy_cy;
-                    bool joy_ok = g_is_trackpad_mode ||
-                                  (g_joy_r > 0 && (djx2*djx2+djy2*djy2) <= g_joy_r*g_joy_r);
-                    if (joy_ok) {
-                        wnd->touch.x           = x;
-                        wnd->touch.y           = y;
-                        wnd->touch.down        = true;
-                        wnd->touch.just_down   = true;
-                        wnd->touch.move_ptr_id = pid;
-                    }
-                } else if (!wnd->touch.down && !wnd->touch.boost_down && !g_panel_open) {
-
+                } else {
                     float dbx2 = x - g_boost_cx, dby2 = y - g_boost_cy;
                     bool boost_hit = g_boost_r > 0 &&
-                                     (dbx2*dbx2 + dby2*dby2) <= (g_boost_r * g_boost_r);
-                    if (boost_hit) {
+                                     (dbx2*dbx2 + dby2*dby2) <=
+                                         (g_boost_r * g_boost_r);
+                    if (boost_hit && !wnd->touch.boost_down) {
                         wnd->touch.boost_x         = x;
                         wnd->touch.boost_y         = y;
                         wnd->touch.boost_down      = true;
                         wnd->touch.boost_just_down = true;
                         wnd->touch.boost_ptr_id    = pid;
-                    } else {
+                    } else if (!wnd->touch.down) {
                         float djx2 = x - g_joy_cx, djy2 = y - g_joy_cy;
                         bool joy_ok = g_is_trackpad_mode ||
                                       (g_joy_r > 0 && (djx2*djx2+djy2*djy2) <= g_joy_r*g_joy_r);
@@ -407,6 +476,11 @@ ImGuiIO* _io = igGetIO_Nil();
                     int   pid = (int)AMotionEvent_getPointerId(event, i);
                     float x   = AMotionEvent_getX(event, i);
                     float y   = AMotionEvent_getY(event, i);
+                    if (pid == wnd->ui_touch.move_ptr_id) {
+                        wnd->ui_touch.x = x;
+                        wnd->ui_touch.y = y;
+                    }
+                    if (is_ui_pointer_owned(pid)) continue;
                     if (wnd->touch.down && pid == wnd->touch.move_ptr_id) {
                         wnd->touch.x = x;
                         wnd->touch.y = y;
@@ -430,6 +504,9 @@ ImGuiIO* _io = igGetIO_Nil();
 
             case AMOTION_EVENT_ACTION_UP: {
 
+                int lifted_pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
+                end_ui_touch(wnd, lifted_pid);
+                set_ui_pointer_owned(lifted_pid, false);
                 wnd->touch.down              = false;
                 wnd->touch.just_down         = false;
                 wnd->touch.boost_down        = false;
@@ -444,6 +521,8 @@ ImGuiIO* _io = igGetIO_Nil();
             case AMOTION_EVENT_ACTION_POINTER_UP: {
 
                 int lifted_pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
+                end_ui_touch(wnd, lifted_pid);
+                set_ui_pointer_owned(lifted_pid, false);
 
                 if (lifted_pid == wnd->touch.move_ptr_id) {
                     wnd->touch.down        = false;
@@ -464,6 +543,10 @@ ImGuiIO* _io = igGetIO_Nil();
             }
 
             case AMOTION_EVENT_ACTION_CANCEL:
+                g_ui_owned_pointer_mask      = 0;
+                wnd->ui_touch.down           = false;
+                wnd->ui_touch.just_down      = false;
+                wnd->ui_touch.move_ptr_id    = -1;
                 wnd->touch.down              = false;
                 wnd->touch.just_down         = false;
                 wnd->touch.boost_down        = false;
@@ -497,6 +580,9 @@ twindow* twindow_create(tenv* env, trender_func render_func, tresize_func resize
     wnd->touch.move_ptr_id    = -1;
     wnd->touch.boost_ptr_id   = -1;
     wnd->touch.zslider_ptr_id = -1;
+    wnd->ui_touch.move_ptr_id    = -1;
+    wnd->ui_touch.boost_ptr_id   = -1;
+    wnd->ui_touch.zslider_ptr_id = -1;
 
     g_android_app->userData     = wnd;
     g_android_app->onAppCmd     = handle_app_cmd;
@@ -519,6 +605,7 @@ twindow* twindow_create(tenv* env, trender_func render_func, tresize_func resize
 void twindow_poll_input(twindow* window) {
     window->touch.just_down       = false;
     window->touch.boost_just_down = false;
+    window->ui_touch.just_down    = false;
 
     int events;
     struct android_poll_source* source;
@@ -540,6 +627,7 @@ void twindow_poll_input(twindow* window) {
 void twindow_wait_input(twindow* window) {
     window->touch.just_down       = false;
     window->touch.boost_just_down = false;
+    window->ui_touch.just_down    = false;
 
     int events;
     struct android_poll_source* source;

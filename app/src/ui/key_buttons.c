@@ -2,6 +2,9 @@
 #include "key_buttons.h"
 #include "../user.h"
 #include "../game/game_data.h"
+#ifdef ANDROID
+#include "../android_glfw_shim.h"
+#endif
 
 #ifndef IM_COL32
 #define IM_COL32(R,G,B,A)     (((ImU32)(A)<<24)|((ImU32)(B)<<16)|((ImU32)(G)<<8)|((ImU32)(R)<<0))
@@ -68,6 +71,18 @@ static const key_entry KEY_TABLE[] = {
 };
 static const int KEY_TABLE_COUNT = sizeof(KEY_TABLE) / sizeof(KEY_TABLE[0]);
 
+
+static void consume_gameplay_touch(tenv* env) {
+#ifdef ANDROID
+    /* twindow_android assigns UI and gameplay pointer ownership before this
+       draw pass. Do not cancel an unrelated trackpad finger when a second
+       finger presses a custom button. */
+    (void)env;
+#else
+    (void)env;
+#endif
+}
+
 static int find_free_slot(user_settings* usrs) {
     for (int i = 0; i < MAX_KEY_BTNS; i++)
         if (!usrs->key_btns[i].active) return i;
@@ -129,6 +144,10 @@ void ui_key_buttons(tenv* env) {
                       : IM_COL32(255,255,255, 25);
         ImU32 brd = IM_COL32(255,255,255, s_kb.edit_mode ? 180 : 55);
 
+#ifdef ANDROID
+        android_ui_capture_rect(bx - br * 1.15f, by - br * 1.15f,
+                                bx + br * 1.15f, by + br * 1.15f);
+#endif
         ImDrawList_AddCircleFilled(fdl, (ImVec2){bx,by}, br, bg, 24);
         ImDrawList_AddCircle(fdl, (ImVec2){bx,by}, br, brd, 24, 1.5f);
 
@@ -141,6 +160,7 @@ void ui_key_buttons(tenv* env) {
         if (mouse_clicked) {
             float dx = mx - bx, dy = my - by;
             if (sqrtf(dx*dx+dy*dy) <= br) {
+                consume_gameplay_touch(env);
                 s_kb.edit_mode = !s_kb.edit_mode;
                 if (!s_kb.edit_mode) {
 
@@ -162,6 +182,10 @@ void ui_key_buttons(tenv* env) {
         float by_  = b->rel_y * sh;
 
         ImDrawList* fdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
+#ifdef ANDROID
+        android_ui_capture_rect(bx - bsz * 1.15f, by_ - bsz * 1.15f,
+                                bx + bsz * 1.15f, by_ + bsz * 1.15f);
+#endif
 
         ImU32 bg_col, brd_col, txt_col;
         if (s_kb.edit_mode) {
@@ -211,12 +235,14 @@ void ui_key_buttons(tenv* env) {
 
                 float dxd = mx-del_x, dyd = my-del_y;
                 if (sqrtf(dxd*dxd+dyd*dyd) <= del_r) {
+                    consume_gameplay_touch(env);
                     b->active = false;
                     continue;
                 }
 
                 float dxr = mx-res_x, dyr = my-res_y;
                 if (sqrtf(dxr*dxr+dyr*dyr) <= res_r) {
+                    consume_gameplay_touch(env);
                     s_kb.resize_idx         = i;
                     s_kb.resize_start_y     = my;
                     s_kb.resize_start_size  = b->rel_size;
@@ -225,6 +251,7 @@ void ui_key_buttons(tenv* env) {
                 float dxb = mx-bx, dyb = my-by_;
                 if (sqrtf(dxb*dxb+dyb*dyb) <= bsz &&
                     s_kb.resize_idx != i) {
+                    consume_gameplay_touch(env);
                     s_kb.drag_idx   = i;
                     s_kb.drag_off_x = mx - bx;
                     s_kb.drag_off_y = my - by_;
@@ -236,6 +263,7 @@ void ui_key_buttons(tenv* env) {
             bool over = sqrtf(dxb*dxb + dyb*dyb) <= bsz;
 
             if (mouse_clicked && over && !s_kb.pressed[i]) {
+                consume_gameplay_touch(env);
                 s_kb.pressed[i] = true;
 
                 int key = b->glfw_key;
@@ -261,6 +289,7 @@ void ui_key_buttons(tenv* env) {
     }
 
     if (s_kb.drag_idx >= 0 && mouse_down) {
+        consume_gameplay_touch(env);
         custom_key_btn* b = &usrs->key_btns[s_kb.drag_idx];
         b->rel_x = (mx - s_kb.drag_off_x) / sw;
         b->rel_y = (my - s_kb.drag_off_y) / sh;
@@ -276,6 +305,7 @@ void ui_key_buttons(tenv* env) {
     }
 
     if (s_kb.resize_idx >= 0 && mouse_down) {
+        consume_gameplay_touch(env);
         custom_key_btn* b = &usrs->key_btns[s_kb.resize_idx];
         float delta = (s_kb.resize_start_y - my) / sh;
         b->rel_size = s_kb.resize_start_size + delta;
@@ -292,6 +322,10 @@ void ui_key_buttons(tenv* env) {
         float add_by = sh * 0.04f;
         float add_r  = sh * 0.032f;
         ImDrawList* fdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
+#ifdef ANDROID
+        android_ui_capture_rect(add_bx - add_r * 1.2f, add_by - add_r * 1.2f,
+                                add_bx + add_r * 1.2f, add_by + add_r * 1.2f);
+#endif
         ImU32 add_bg  = s_kb.picker_open
                           ? IM_COL32(30, 160, 80, 220)
                           : IM_COL32(30, 120, 60, 180);
@@ -306,8 +340,10 @@ void ui_key_buttons(tenv* env) {
 
         if (mouse_clicked) {
             float dx2 = mx-add_bx, dy2 = my-add_by;
-            if (sqrtf(dx2*dx2+dy2*dy2) <= add_r)
+            if (sqrtf(dx2*dx2+dy2*dy2) <= add_r) {
+                consume_gameplay_touch(env);
                 s_kb.picker_open = !s_kb.picker_open;
+            }
         }
     }
 
@@ -318,6 +354,12 @@ void ui_key_buttons(tenv* env) {
         float ph = sh * 0.40f;
         float px = (sw - pw) * 0.5f;
         float py = sh * 0.08f;
+
+#ifdef ANDROID
+        android_ui_capture_rect(px, py, px + pw, py + ph);
+#endif
+        if (mouse_down && mx >= px && mx <= px + pw && my >= py && my <= py + ph)
+            consume_gameplay_touch(env);
 
         igSetNextWindowPos((ImVec2){px, py}, ImGuiCond_Always, (ImVec2){});
         igSetNextWindowSize((ImVec2){pw, ph}, ImGuiCond_Always);

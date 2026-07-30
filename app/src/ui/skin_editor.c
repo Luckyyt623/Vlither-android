@@ -1,6 +1,8 @@
 #include "skin_editor.h"
 
 #include <string.h>
+#include <math.h>
+#include <stdio.h>
 
 #include "../user.h"
 
@@ -27,15 +29,29 @@ void ui_skin_editor(tenv* env) {
   usr->r->global.minimap_opacity = 0;
 
   float frame_height = igGetFrameHeight();
-  float scale = 48;
+  float resolution_scale = fminf(ctx->size[0] / 1280.0f, ctx->size[1] / 720.0f);
+  if (resolution_scale < 0.70f) resolution_scale = 0.70f;
+  if (resolution_scale > 1.25f) resolution_scale = 1.25f;
+  float scale = 48.0f * resolution_scale;
+
+  /* The 256-segment preview is very wide. Shrink it only when necessary so
+     the editor remains fully visible on lower-resolution devices. */
+  float preview_units = 1.0f + (MAX_SKIN_CODE_LEN / 2.0f - 1.0f) * (8.0f / 48.0f);
+  float max_scale_for_width = (ctx->size[0] * 0.94f) / preview_units;
+  if (scale > max_scale_for_width) scale = max_scale_for_width;
 
   vec2 tot_size = {style->ItemSpacing.x * 6 + 7 * scale,
                    style->ItemSpacing.y * 5 + 6 * scale};
+  float min_grid_y = style->WindowPadding.y +
+                     (style->ItemSpacing.y + frame_height) * 3.0f +
+                     (scale + style->ItemSpacing.y) * 2.0f;
+  float grid_y = ctx->size[1] * 0.5f - tot_size[1] * 0.5f;
+  if (grid_y < min_grid_y) grid_y = min_grid_y;
 
   float sk_w = scale + (8 * (scale / 48)) * ((MAX_SKIN_CODE_LEN / 2.0f) - 1);
 
   igSetCursorPosX(ctx->size[0] * 0.5 - sk_w * 0.5f);
-  igSetCursorPosY((ctx->size[1] * 0.5 - tot_size[1] * 0.5f) -
+  igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 3 + scale +
                    style->ItemSpacing.y));
 
@@ -81,7 +97,7 @@ void ui_skin_editor(tenv* env) {
   }
 
   igSetCursorPosX(ctx->size[0] * 0.5 - sk_w * 0.5f);
-  igSetCursorPosY((ctx->size[1] * 0.5 - tot_size[1] * 0.5f) -
+  igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 3 +
                    2 * (scale + style->ItemSpacing.y)));
 
@@ -192,7 +208,7 @@ void ui_skin_editor(tenv* env) {
   }
 
   igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
-  igSetCursorPosY((ctx->size[1] * 0.5 - tot_size[1] * 0.5f) -
+  igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 3));
   if (usrs->custom_skin) {
     igSetNextItemWidth(tot_size[0] - 2 * (frame_height + style->ItemSpacing.x));
@@ -224,14 +240,14 @@ void ui_skin_editor(tenv* env) {
       usrs->default_skin = (usrs->default_skin + 1) % NUM_DEFAULT_SKINS;
   }
   igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
-  igSetCursorPosY((ctx->size[1] * 0.5 - tot_size[1] * 0.5f) -
+  igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 2));
   if (igButton(usrs->custom_skin ? "\uea40 Default" : "\ue905 Custom",
                (ImVec2){tot_size[0]}))
     usrs->custom_skin = !usrs->custom_skin;
 
   igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
-  igSetCursorPosY((ctx->size[1] * 0.5 - tot_size[1] * 0.5f) -
+  igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 1));
   if (igButton("OK", (ImVec2){tot_size[0]})) {
     if (usrs->skin_code[0] == 0) usrs->custom_skin = false;
@@ -240,128 +256,143 @@ void ui_skin_editor(tenv* env) {
   }
 
   if (usrs->custom_skin) {
-    igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
-    igSetCursorPosY(ctx->size[1] * 0.5 - tot_size[1] * 0.5f);
-    float cx = igGetCursorPosX();
-    float cy = igGetCursorPosY();
+    float panel_w = tot_size[0] + style->ScrollbarSize + style->WindowPadding.x * 2.0f;
+    if (panel_w > ctx->size[0] - style->WindowPadding.x * 2.0f)
+      panel_w = ctx->size[0] - style->WindowPadding.x * 2.0f;
+    float panel_x = ctx->size[0] * 0.5f - panel_w * 0.5f;
+    float panel_h = ctx->size[1] - grid_y - style->WindowPadding.y;
+    if (panel_h < scale * 2.25f) panel_h = scale * 2.25f;
 
-    int skin_code_len = strlen(usrs->skin_code);
+    igSetCursorPosX(panel_x);
+    igSetCursorPosY(grid_y);
+    bool child_visible = igBeginChild_Str(
+        "custom_skin_scroll_panel", (ImVec2){panel_w, panel_h},
+        ImGuiChildFlags_Borders,
+        ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_NoMove);
 
-    for (int i = 0; i < 6; i++) {
-      for (int j = 0; j < 7; j++) {
-        igSetCursorPosY(cy + style->ItemSpacing.y * i + scale * i);
-        igSetCursorPosX(cx + style->ItemSpacing.x * j + scale * j);
-        float ncx = igGetCursorPosX();
-        float ncy = igGetCursorPosY();
+    if (child_visible) {
+      float clip_x1 = panel_x;
+      float clip_y1 = grid_y;
+      float clip_x2 = panel_x + panel_w - style->ScrollbarSize;
+      float clip_y2 = grid_y + panel_h;
+      int skin_code_len = strlen(usrs->skin_code);
 
-        bp_renderer_push(usr->r->bpr,
-                         &(bp_instance){{ncx - scale * 0.25f,
-                                         ncy - scale * 0.25f, scale * 1.5f},
-                                        gdata->SHADOW_UV,
-                                        {0, 0, 0, 0.2f}});
-      }
-    }
+      igTextDisabled("Snake colours");
+      float colors_y = igGetCursorPosY() + style->ItemSpacing.y;
 
-    igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
-    igSetCursorPosY(ctx->size[1] * 0.5 - tot_size[1] * 0.5f);
-    cx = igGetCursorPosX();
-    cy = igGetCursorPosY();
+      int cg_id = 0;
+      for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 7; j++) {
+          bool is_disabled =
+              (cg_id == 36 || cg_id == 38 || cg_id == 40 || cg_id == 41 ||
+               !(skin_code_len < MAX_SKIN_CODE_LEN));
 
-    int cg_id = 0;
-    for (int i = 0; i < 6; i++) {
-      for (int j = 0; j < 7; j++) {
-        bool is_disabled =
-            (cg_id == 36 || cg_id == 38 || cg_id == 40 || cg_id == 41 ||
-             !(skin_code_len < MAX_SKIN_CODE_LEN));
+          igSetCursorPosY(colors_y + (style->ItemSpacing.y + scale) * i);
+          igSetCursorPosX((style->ItemSpacing.x + scale) * j);
+          ImVec2 item_pos;
+          igGetCursorScreenPos(&item_pos);
+          bool ct = gdata->cg_colors_ct[cg_id];
 
-        igSetCursorPosY(cy + style->ItemSpacing.y * i + scale * i);
-        igSetCursorPosX(cx + style->ItemSpacing.x * j + scale * j);
-        float ncx = igGetCursorPosX();
-        float ncy = igGetCursorPosY();
-        bool ct = gdata->cg_colors_ct[cg_id];
-
-        float a = 0.8f * (1.0f - 0.5f * is_disabled);
-        igBeginDisabled(is_disabled);
-        char label[2] = {gdata->ntl_cg_map[cg_id], 0};
-        igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, scale / 2);
-        igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){ct, ct, ct, 1});
-        igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0, 0, 0, 0});
-        igPushStyleColor_Vec4(ImGuiCol_Border, (ImVec4){0, 0, 0, 0});
-        igPushStyleColor_Vec4(ImGuiCol_BorderShadow, (ImVec4){0, 0, 0, 0});
-        igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0, 0, 0, 0});
-        igPushStyleColor_Vec4(ImGuiCol_ButtonActive, (ImVec4){0, 0, 0, 0});
-        igPushID_Int(cg_id);
-        bool pressed = igButton(label, (ImVec2){scale, scale});
-        igPopID();
-        igPopStyleVar(1);
-        igPopStyleColor(6);
-        igEndDisabled();
-        if (pressed) {
-          if (strlen(usrs->skin_code) < MAX_SKIN_CODE_LEN) {
-            usrs->skin_code[strlen(usrs->skin_code)] = gdata->ntl_cg_map[cg_id];
-          }
-        }
-        bool active = igIsItemActive();
-        bool hovered = igIsItemHovered(ImGuiHoveredFlags_None);
-
-        if (hovered) a = 1;
-        if (active) a = 0.6f;
-
-        bp_renderer_push(usr->r->bpr, &(bp_instance){{ncx, ncy, scale},
-                                                     gdata->cg_uvs[cg_id],
-                                                     {1, 1, 1, a}});
-        cg_id++;
-      }
-    }
-    igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
-    igSetCursorPosY((ctx->size[1] * 0.5 - tot_size[1] * 0.5f) + (scale + style->ItemSpacing.y) * 6);
-    cx = igGetCursorPosX();
-    cy = igGetCursorPosY();
-    int aid = 0;
-    for (int i = 0; i < 5; i++) {
-      for (int j = 0; j < 7; j++) {
-        if (aid > NUM_ACCESSORIES) break;
-        bool is_no_accessory = aid == NUM_ACCESSORIES;
-
-        igSetCursorPosY(cy + style->ItemSpacing.y * i + scale * i);
-        igSetCursorPosX(cx + style->ItemSpacing.x * j + scale * j);
-        float ncx = igGetCursorPosX();
-        float ncy = igGetCursorPosY();
-        float a = 0.8f;
-
-        char label[4] = {0};
-        sprintf(label, "a%d", aid);
-        igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){1, 0.5f, 0.5f, 1});
-        if (!is_no_accessory) {
+          float a = 0.8f * (1.0f - 0.5f * is_disabled);
+          igBeginDisabled(is_disabled);
+          char label[2] = {gdata->ntl_cg_map[cg_id], 0};
           igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, scale / 2);
+          igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){ct, ct, ct, 1});
           igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0, 0, 0, 0});
           igPushStyleColor_Vec4(ImGuiCol_Border, (ImVec4){0, 0, 0, 0});
           igPushStyleColor_Vec4(ImGuiCol_BorderShadow, (ImVec4){0, 0, 0, 0});
           igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0, 0, 0, 0});
           igPushStyleColor_Vec4(ImGuiCol_ButtonActive, (ImVec4){0, 0, 0, 0});
-        }
-        igPushID_Str(label);
-        bool pressed = igButton(is_no_accessory ? "\uea0f" : "", (ImVec2){scale, scale});
-        igPopID();
-        if (!is_no_accessory) igPopStyleVar(1);
-        igPopStyleColor(is_no_accessory ? 1 : 6);
-        if (pressed) {
-          usrs->accessory = is_no_accessory ? NO_ACCESSORY : aid;
-        }
-        bool active = igIsItemActive();
-        bool hovered = igIsItemHovered(ImGuiHoveredFlags_None);
+          igPushID_Int(cg_id);
+          bool pressed = igButton(label, (ImVec2){scale, scale});
+          igPopID();
+          igPopStyleVar(1);
+          igPopStyleColor(6);
+          igEndDisabled();
+          if (pressed && strlen(usrs->skin_code) < MAX_SKIN_CODE_LEN)
+            usrs->skin_code[strlen(usrs->skin_code)] = gdata->ntl_cg_map[cg_id];
 
-        if (hovered) a = 1;
-        if (active) a = 0;
+          bool active = igIsItemActive();
+          bool hovered = igIsItemHovered(ImGuiHoveredFlags_None);
+          if (hovered) a = 1.0f;
+          if (active) a = 0.6f;
 
-        if (!is_no_accessory)
-          bp_renderer_push(
-              usr->r->bpr,
-              &(bp_instance){
-                  {ncx, ncy, scale}, gdata->accessories[aid].uv, {1, 1, 1, a}});
-        aid++;
+          bool sprite_visible = item_pos.x + scale >= clip_x1 && item_pos.x <= clip_x2 &&
+                                item_pos.y + scale >= clip_y1 && item_pos.y <= clip_y2;
+          if (sprite_visible) {
+            bp_renderer_push(usr->r->bpr,
+                             &(bp_instance){{item_pos.x - scale * 0.25f,
+                                             item_pos.y - scale * 0.25f,
+                                             scale * 1.5f},
+                                            gdata->SHADOW_UV,
+                                            {0, 0, 0, 0.2f}});
+            bp_renderer_push(usr->r->bpr,
+                             &(bp_instance){{item_pos.x, item_pos.y, scale},
+                                            gdata->cg_uvs[cg_id],
+                                            {1, 1, 1, a}});
+          }
+          cg_id++;
+        }
       }
+
+      float accessories_label_y = colors_y +
+          (style->ItemSpacing.y + scale) * 6.0f + style->ItemSpacing.y * 2.0f;
+      igSetCursorPosX(0);
+      igSetCursorPosY(accessories_label_y);
+      igTextDisabled("Accessories");
+      float accessories_y = igGetCursorPosY() + style->ItemSpacing.y;
+
+      int aid = 0;
+      for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 7; j++) {
+          if (aid > NUM_ACCESSORIES) break;
+          bool is_no_accessory = aid == NUM_ACCESSORIES;
+          igSetCursorPosY(accessories_y + (style->ItemSpacing.y + scale) * i);
+          igSetCursorPosX((style->ItemSpacing.x + scale) * j);
+          ImVec2 item_pos;
+          igGetCursorScreenPos(&item_pos);
+          float a = 0.8f;
+
+          char label[12] = {0};
+          sprintf(label, "a%d", aid);
+          igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){1, 0.5f, 0.5f, 1});
+          if (!is_no_accessory) {
+            igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, scale / 2);
+            igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0, 0, 0, 0});
+            igPushStyleColor_Vec4(ImGuiCol_Border, (ImVec4){0, 0, 0, 0});
+            igPushStyleColor_Vec4(ImGuiCol_BorderShadow, (ImVec4){0, 0, 0, 0});
+            igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0, 0, 0, 0});
+            igPushStyleColor_Vec4(ImGuiCol_ButtonActive, (ImVec4){0, 0, 0, 0});
+          }
+          igPushID_Str(label);
+          bool pressed = igButton(is_no_accessory ? "\uea0f" : "",
+                                  (ImVec2){scale, scale});
+          igPopID();
+          if (!is_no_accessory) igPopStyleVar(1);
+          igPopStyleColor(is_no_accessory ? 1 : 6);
+          if (pressed) usrs->accessory = is_no_accessory ? NO_ACCESSORY : aid;
+
+          bool active = igIsItemActive();
+          bool hovered = igIsItemHovered(ImGuiHoveredFlags_None);
+          if (hovered) a = 1.0f;
+          if (active) a = 0.0f;
+
+          bool sprite_visible = item_pos.x + scale >= clip_x1 && item_pos.x <= clip_x2 &&
+                                item_pos.y + scale >= clip_y1 && item_pos.y <= clip_y2;
+          if (!is_no_accessory && sprite_visible)
+            bp_renderer_push(usr->r->bpr,
+                             &(bp_instance){{item_pos.x, item_pos.y, scale},
+                                            gdata->accessories[aid].uv,
+                                            {1, 1, 1, a}});
+          aid++;
+        }
+      }
+
+      igSetCursorPosX(0);
+      igSetCursorPosY(accessories_y + (style->ItemSpacing.y + scale) * 5.0f);
+      igDummy((ImVec2){tot_size[0], style->ItemSpacing.y});
     }
+    igEndChild();
   }
 
   igPopFont();

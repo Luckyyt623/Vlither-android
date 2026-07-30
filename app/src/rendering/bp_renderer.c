@@ -49,7 +49,7 @@ bp_renderer* bp_renderer_create(tcontext* ctx, int max_instances,
                            .stride = sizeof(bp_instance),
                            .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE},
                       },
-                  .vertexAttributeDescriptionCount = 4,
+                  .vertexAttributeDescriptionCount = 5,
                   .pVertexAttributeDescriptions =
                       (VkVertexInputAttributeDescription[]){
                           {.location = 0,
@@ -67,7 +67,11 @@ bp_renderer* bp_renderer_create(tcontext* ctx, int max_instances,
                           {.location = 3,
                            .binding = 1,
                            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-                           .offset = offsetof(bp_instance, color)}}},
+                           .offset = offsetof(bp_instance, color)},
+                          {.location = 4,
+                           .binding = 1,
+                           .format = VK_FORMAT_R32G32_SFLOAT,
+                           .offset = offsetof(bp_instance, shape)}}},
           .pInputAssemblyState =
               &(VkPipelineInputAssemblyStateCreateInfo){
                   .sType =

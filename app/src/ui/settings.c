@@ -40,6 +40,10 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("VSync");
       igAlignTextToFramePadding();
+      igText("FPS limit");
+      igAlignTextToFramePadding();
+      igText("Performance mode");
+      igAlignTextToFramePadding();
       igText("Cursor size");
       igAlignTextToFramePadding();
       igText("UI font size");
@@ -60,6 +64,16 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Minimap size");
       igAlignTextToFramePadding();
+      igText("Custom minimap position");
+      igAlignTextToFramePadding();
+      igText("Drag/resize minimap");
+      igAlignTextToFramePadding();
+      igText("Minimap X");
+      igAlignTextToFramePadding();
+      igText("Minimap Y");
+      igAlignTextToFramePadding();
+      igText("Reset minimap position");
+      igAlignTextToFramePadding();
       igText("Instant restart");
       igAlignTextToFramePadding();
       igText("Restart with right click");
@@ -79,6 +93,16 @@ void ui_settings(tenv* env) {
         env->config.vsync = usrs->vsync;
         twindow_request_refresh(env->wnd);
       }
+      int fps_index = 0;
+      const int fps_values[] = {0, 60, 90, 120, 144};
+      for (int fi = 0; fi < 5; ++fi)
+        if (usrs->fps_limit == fps_values[fi]) fps_index = fi;
+      igSetNextItemWidth(-1);
+      if (igCombo_Str_arr("##fps limit", &fps_index,
+                          (const char*[]){"Device/VSync", "60 FPS", "90 FPS",
+                                          "120 FPS", "144 FPS"}, 5, -1))
+        usrs->fps_limit = fps_values[fps_index];
+      igCheckbox("##performance mode", &usrs->performance_mode);
       igSetNextItemWidth(-1);
       igSliderInt("##cursor size", &usrs->cursor_size, 16, 64, "%d px",
                   ImGuiSliderFlags_AlwaysClamp);
@@ -103,8 +127,23 @@ void ui_settings(tenv* env) {
       igSetNextItemWidth(-1);
       igColorEdit3("##border color", usrs->bd_color, ImGuiColorEditFlags_None);
       igSetNextItemWidth(-1);
-      igSliderInt("##minimap size", &usrs->minimap_size, 128, 512, "%d px",
+      igSliderInt("##minimap size", &usrs->minimap_size, 96, 512, "%d px",
                   ImGuiSliderFlags_AlwaysClamp);
+      igCheckbox("##minimap custom", &usrs->minimap_pos_custom);
+      igCheckbox("##minimap drag", &usrs->minimap_drag_enabled);
+      igBeginDisabled(!usrs->minimap_pos_custom);
+      igSetNextItemWidth(-1);
+      igSliderFloat("##minimap x", &usrs->minimap_rel_x, 0.0f, 1.0f, "%.2f",
+                    ImGuiSliderFlags_AlwaysClamp);
+      igSetNextItemWidth(-1);
+      igSliderFloat("##minimap y", &usrs->minimap_rel_y, 0.0f, 1.0f, "%.2f",
+                    ImGuiSliderFlags_AlwaysClamp);
+      igEndDisabled();
+      if (igButton("Reset##minimap", (ImVec2){-1, 0})) {
+        usrs->minimap_pos_custom = false;
+        usrs->minimap_rel_x = 0.84f;
+        usrs->minimap_rel_y = 0.78f;
+      }
       igCheckbox("##instant restart", &usrs->instant_restart);
       igCheckbox("##restart rc", &usrs->restart_rc);
       igCheckbox("##quit mc", &usrs->quit_mc);
@@ -123,6 +162,9 @@ void ui_settings(tenv* env) {
       igIndent(-style->WindowPadding.x);
       igEndTable();
     }
+    igSpacing();
+    igTextWrapped("FPS limit is a maximum, not a forced refresh rate. Actual FPS cannot exceed your phone's active display refresh rate. Android Auto mode may keep the screen at 60 Hz; select 90/120/144 Hz in the phone's Display settings to use a matching Vlither limit.");
+    igTextDisabled("VSync can also cap rendering to the current display mode.");
     igEndChild();
 
     igTableSetColumnIndex(1);
@@ -159,6 +201,10 @@ void ui_settings(tenv* env) {
         igAlignTextToFramePadding();
         igText("Transparent skin");
         igAlignTextToFramePadding();
+        igText("Skin opacity");
+        igAlignTextToFramePadding();
+        igText("Center line (your snake)");
+        igAlignTextToFramePadding();
         igText("Boost effect");
         igAlignTextToFramePadding();
         igText("Boost effect strength");
@@ -190,9 +236,16 @@ void ui_settings(tenv* env) {
         igCombo_Str_arr("##render mode", &mode->render_mode,
                         (const char*[]){"Texture", "Solid", "Flat"}, 3, -1);
 
-        igBeginDisabled(mode->render_mode == 0);
         igCheckbox("##transparent skin", &mode->transparent_skin);
+        igBeginDisabled(!mode->transparent_skin);
+        int opacity_percent =
+            (int)(usrs->transparent_skin_opacity[i] * 100.0f + 0.5f);
+        igSetNextItemWidth(-1);
+        if (igSliderInt("##skin opacity", &opacity_percent, 15, 85, "%d%%",
+                        ImGuiSliderFlags_AlwaysClamp))
+          usrs->transparent_skin_opacity[i] = opacity_percent / 100.0f;
         igEndDisabled();
+        igCheckbox("##center line", &mode->center_line);
 
         igCheckbox("##boost", &mode->show_boost);
         igSameLine(0, -1);

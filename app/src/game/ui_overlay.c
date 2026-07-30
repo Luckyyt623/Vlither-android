@@ -12,6 +12,10 @@
 #include "../user.h"
 #include "user_settings.h"
 #include "sbot.h"
+#include "ntl_team.h"
+#ifdef ANDROID
+#include "../android_glfw_shim.h"
+#endif
 
 void ui_overlay(tenv* env) {
   tuser_data* usr = env->usr;
@@ -217,24 +221,132 @@ void ui_overlay(tenv* env) {
       }
     }
 
-    usr->r->global.minimap_circ[2] = usrs->minimap_size;
-    usr->r->global.minimap_circ[0] =
-        ctx->size[0] - usr->r->global.minimap_circ[2] - style->WindowPadding.x;
-    usr->r->global.minimap_circ[1] = ctx->size[1] -
-                                     usr->r->global.minimap_circ[2] -
-                                     style->WindowPadding.y - line_height;
+    /* Keep the minimap usable on every device resolution. The configured
+       pixel size is treated as a preference and capped against the current
+       shorter screen edge so it cannot cover most of a small display. */
+    float mm_max = fminf((float)ctx->size[0], (float)ctx->size[1]) * 0.46f;
+    float mm_min = fminf(72.0f, mm_max);
+    float mm_size = fminf((float)usrs->minimap_size, mm_max);
+    if (mm_size < mm_min) mm_size = mm_min;
+
+    float mm_x;
+    float mm_y;
+    if (usrs->minimap_pos_custom) {
+      mm_x = usrs->minimap_rel_x * ctx->size[0] - mm_size * 0.5f;
+      mm_y = usrs->minimap_rel_y * ctx->size[1] - mm_size * 0.5f;
+      float max_x = ctx->size[0] - mm_size - style->WindowPadding.x;
+      float max_y = ctx->size[1] - mm_size - style->WindowPadding.y;
+      mm_x = fmaxf(style->WindowPadding.x, fminf(mm_x, max_x));
+      mm_y = fmaxf(style->WindowPadding.y, fminf(mm_y, max_y));
+    } else {
+      mm_x = ctx->size[0] - mm_size - style->WindowPadding.x;
+      mm_y = ctx->size[1] - mm_size - style->WindowPadding.y - line_height;
+    }
+
+
+#ifdef ANDROID
+    /* Direct minimap editing. The hit rectangle is registered for the next
+       input poll, so the touch never starts the trackpad/boost path. */
+    static int s_minimap_edit_action = 0; /* 1=move, 2=resize */
+    static float s_minimap_drag_dx = 0.0f, s_minimap_drag_dy = 0.0f;
+    static float s_minimap_fixed_x = 0.0f, s_minimap_fixed_y = 0.0f;
+    static bool s_minimap_was_editing = false;
+
+    if (usrs->minimap_drag_enabled) {
+      float hit_pad = fmaxf(10.0f, mm_size * 0.05f);
+      android_ui_capture_rect(mm_x - hit_pad, mm_y - hit_pad,
+                              mm_x + mm_size + hit_pad,
+                              mm_y + mm_size + hit_pad);
+
+      touch_state* ui = &env->wnd->ui_touch;
+      float handle = fmaxf(22.0f, mm_size * 0.12f);
+      if (ui->just_down && ui->x >= mm_x - hit_pad &&
+          ui->x <= mm_x + mm_size + hit_pad &&
+          ui->y >= mm_y - hit_pad && ui->y <= mm_y + mm_size + hit_pad) {
+        bool resize_hit = ui->x >= mm_x + mm_size - handle &&
+                          ui->y >= mm_y + mm_size - handle;
+        s_minimap_edit_action = resize_hit ? 2 : 1;
+        s_minimap_was_editing = true;
+        s_minimap_drag_dx = ui->x - mm_x;
+        s_minimap_drag_dy = ui->y - mm_y;
+        s_minimap_fixed_x = mm_x;
+        s_minimap_fixed_y = mm_y;
+
+        /* The minimap pointer is UI-owned. Keep any different gameplay
+           pointer active so trackpad movement can continue while editing. */
+      }
+
+      if (s_minimap_edit_action != 0 && ui->down) {
+        if (s_minimap_edit_action == 1) {
+          float nx = ui->x - s_minimap_drag_dx;
+          float ny = ui->y - s_minimap_drag_dy;
+          nx = fmaxf(style->WindowPadding.x,
+                     fminf(nx, ctx->size[0] - mm_size - style->WindowPadding.x));
+          ny = fmaxf(style->WindowPadding.y,
+                     fminf(ny, ctx->size[1] - mm_size - style->WindowPadding.y));
+          usrs->minimap_pos_custom = true;
+          usrs->minimap_rel_x = (nx + mm_size * 0.5f) / ctx->size[0];
+          usrs->minimap_rel_y = (ny + mm_size * 0.5f) / ctx->size[1];
+          mm_x = nx; mm_y = ny;
+        } else {
+          float desired = fmaxf(ui->x - s_minimap_fixed_x,
+                                ui->y - s_minimap_fixed_y);
+          float cap_x = ctx->size[0] - s_minimap_fixed_x - style->WindowPadding.x;
+          float cap_y = ctx->size[1] - s_minimap_fixed_y - style->WindowPadding.y;
+          float cap = fminf(cap_x, cap_y);
+          cap = fminf(cap,
+                      fminf((float)ctx->size[0], (float)ctx->size[1]) * 0.46f);
+          desired = fmaxf(72.0f, fminf(desired, cap));
+          usrs->minimap_size = (int)roundf(desired);
+          mm_size = desired;
+          usrs->minimap_pos_custom = true;
+          usrs->minimap_rel_x = (s_minimap_fixed_x + mm_size * 0.5f) / ctx->size[0];
+          usrs->minimap_rel_y = (s_minimap_fixed_y + mm_size * 0.5f) / ctx->size[1];
+          mm_x = s_minimap_fixed_x; mm_y = s_minimap_fixed_y;
+        }
+      } else if (s_minimap_edit_action != 0 && !ui->down) {
+        s_minimap_edit_action = 0;
+        if (s_minimap_was_editing) save_user_settings(usrs);
+        s_minimap_was_editing = false;
+      }
+
+      ImDrawList* edit_dl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
+      ImU32 edit_col = IM_COL32(255, 255, 255, 130);
+      ImDrawList_AddRect(edit_dl, (ImVec2){mm_x, mm_y},
+                         (ImVec2){mm_x + mm_size, mm_y + mm_size},
+                         edit_col, 4.0f, 0, 1.5f);
+      ImDrawList_AddRectFilled(edit_dl,
+          (ImVec2){mm_x + mm_size - handle * 0.65f,
+                   mm_y + mm_size - handle * 0.65f},
+          (ImVec2){mm_x + mm_size, mm_y + mm_size},
+          IM_COL32(255,255,255,70), 3.0f, 0);
+    } else if (s_minimap_edit_action != 0) {
+      s_minimap_edit_action = 0;
+      s_minimap_was_editing = false;
+    }
+#endif
+
+    usr->r->global.minimap_circ[0] = mm_x;
+    usr->r->global.minimap_circ[1] = mm_y;
+    usr->r->global.minimap_circ[2] = mm_size;
     usr->r->global.minimap_opacity = 1;
+
+    ntl_team_draw_minimap(env, mm_x, mm_y, mm_size);
 
     igPushFont(usr->imgui_data.mono_font[usrs->stats_font_size],
                usr->imgui_data.mono_font[usrs->stats_font_size]->LegacySize);
     ImVec2 lctxtsz;
     igCalcTextSize(&lctxtsz, "--360° 100%", NULL, false, -1);
 
-    igSetCursorPosX(
-        ctx->size[0] -
-        (usr->r->global.minimap_circ[2] * 0.5 + style->WindowPadding.x) -
-        lctxtsz.x * 0.5f);
-    igSetCursorPosY(ctx->size[1] - style->WindowPadding.y - line_height);
+    float label_x = mm_x + mm_size * 0.5f - lctxtsz.x * 0.5f;
+    float label_y = mm_y + mm_size + 2.0f;
+    if (label_y + line_height > ctx->size[1] - style->WindowPadding.y)
+      label_y = mm_y - line_height;
+    label_x = fmaxf(style->WindowPadding.x,
+                    fminf(label_x, ctx->size[0] - lctxtsz.x - style->WindowPadding.x));
+    label_y = fmaxf(style->WindowPadding.y, label_y);
+    igSetCursorPosX(label_x);
+    igSetCursorPosY(label_y);
 
     igTextColored((ImVec4){1, 1, 1, 0.3f}, "\ue947");
     igSameLine(0, -1);
@@ -467,48 +579,30 @@ void ui_overlay(tenv* env) {
     }
 
     {
-
-      float bbr = 0.863f, bbg = 0.314f, bbb = 0.216f;
-      {
-        int sl3 = tdarray_length(gdata->data.snakes);
-        if (sl3 > 0) {
-          snake* mbptr = gdata->data.snakes + (sl3 - 1);
-          if (gdata->data.snake_id == mbptr->id) {
-            int cv2 = mbptr->cv;
-            if (cv2 < 0) cv2 = 0;
-            if (cv2 >= NUM_COLOR_GROUPS) cv2 = NUM_COLOR_GROUPS - 1;
-            vec3s* sc2 = gdata->cg_colors + cv2;
-            bbr = 0.25f + 0.75f * sc2->r; if (bbr > 1.0f) bbr = 1.0f;
-            bbg = 0.25f + 0.75f * sc2->g; if (bbg > 1.0f) bbg = 1.0f;
-            bbb = 0.25f + 0.75f * sc2->b; if (bbb > 1.0f) bbb = 1.0f;
-          }
-        }
-      }
-
-      static float s_boost_a = 0.3f;
+      static float s_boost_a = 0.78f;
       float vfr3 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
-      if (boost_on) { s_boost_a += vfr3*0.05f; if (s_boost_a>0.6f) s_boost_a=0.6f; }
-      else          { s_boost_a -= vfr3*0.05f; if (s_boost_a<0.3f) s_boost_a=0.3f; }
+      if (boost_on) { s_boost_a += vfr3 * 0.035f; if (s_boost_a > 1.00f) s_boost_a = 1.00f; }
+      else          { s_boost_a -= vfr3 * 0.035f; if (s_boost_a < 0.78f) s_boost_a = 0.78f; }
 
       float eff_a = s_boost_a * usrs->boost_opacity;
-      float hr = bbr*1.3f>1.0f?1.0f:bbr*1.3f;
-      float hg = bbg*1.3f>1.0f?1.0f:bbg*1.3f;
-      float hb = bbb*1.3f>1.0f?1.0f:bbb*1.3f;
-      ImU32 fill_c = IM_COL32((int)(bbr*255),(int)(bbg*255),(int)(bbb*255),(int)(eff_a*255));
-      float ring_a = eff_a*1.1f>1.0f?1.0f:eff_a*1.1f;
-      ImU32 ring_c = IM_COL32((int)(hr*255),(int)(hg*255),(int)(hb*255),(int)(ring_a*255));
+      float img_half = br * (boost_on ? 1.02f : 1.00f);
+      ImVec2 p0 = { bcx - img_half, bcy - img_half };
+      ImVec2 p1 = { bcx + img_half, bcy + img_half };
 
-      ImDrawList_AddCircleFilled(dl, (ImVec2){bcx,bcy}, br, fill_c, 48);
-      ImDrawList_AddCircle      (dl, (ImVec2){bcx,bcy}, br, ring_c, 48, 3.0f);
+      if (usr->r && usr->r->boost_button_ds) {
+        ImTextureRef tex = (ImTextureRef){ NULL, (ImTextureID)usr->r->boost_button_ds };
+        ImDrawList_AddImage(dl, tex, p0, p1, (ImVec2){0,0}, (ImVec2){1,1},
+          IM_COL32(255, 255, 255, (int)(eff_a * 255.0f)));
+      } else {
+        ImU32 fill_c = IM_COL32(170, 170, 170, (int)(eff_a * 180.0f));
+        ImU32 icon_c = IM_COL32(255, 255, 255, (int)(eff_a * 255.0f));
+        ImDrawList_AddCircleFilled(dl, (ImVec2){bcx,bcy}, br, fill_c, 48);
+        ImVec2 a = { bcx,        bcy - br * 0.34f };
+        ImVec2 b = { bcx - br*0.44f, bcy + br * 0.18f };
+        ImVec2 c = { bcx + br*0.44f, bcy + br * 0.18f };
+        ImDrawList_AddTriangleFilled(dl, a, b, c, icon_c);
+      }
     }
-
-    float bfont = br * 0.40f;
-    ImVec2 bt_sz; igCalcTextSize(&bt_sz, "BOOST", NULL, false, -1.0f);
-    float bt_scale = bfont / igGetFontSize();
-    ImDrawList_AddText_FontPtr(dl, igGetFont(), bfont,
-      (ImVec2){bcx - bt_sz.x * bt_scale * 0.5f, bcy - bfont * 0.5f},
-      IM_COL32(255, 255, 255, boost_on ? 255 : 200),
-      "BOOST", NULL, 0.0f, NULL);
 
   }
 

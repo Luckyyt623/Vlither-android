@@ -7,6 +7,9 @@ typedef struct bp_instance {
   vec4s circle;
   vec4s uv_rect;
   vec4s color;
+  // Optional shape parameters. x = capsule thickness in pixels,
+  // y = 1 for a rounded line capsule; zero keeps the normal circle sprite.
+  vec2s shape;
 } bp_instance;
 
 typedef struct bp_renderer {

@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.1"
+        private const val CURRENT_VERSION   = "4.2"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,20 +209,29 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 4.1
+Update 4.2
 
-  • Improved arrow controls.
-  • Controls can now be customized from a separate panel.
-  • Various improvements and bug fixes.
-
-   
-  
+  • Added separate Transparent Skin opacity and Center Line options.
+  • Added responsive UI scaling for different phone resolutions.
+  • Added a scrollable Custom Skin panel.
+  • Added Android clipboard paste support for nickname, IP, NTL and chat fields.
+  • Added draggable and resizable minimap controls.
+  • Added custom minimap marker shapes, sizes and colours.
+  • Added teammate positions and names on the minimap.
+  • Added saved NTL team profiles for Team ID and Auth Key.
+  • Added minimizable in-game NTL chat and a separate player list.
+  • Added 60/90/120/144 FPS caps and Performance Mode.
+  • Improved mobile multitouch so UI buttons work while using the Arrow.
+  • Fixed boost so it activates only from the Boost button.
+  • Now NTL Chat also available enter your NTL keys to join.
+  • Replaced the on-screen Boost button with the new custom image button.
+  • Various stability and interface fixes.
 
 Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.1")
+            .setTitle("What's New in v4.2")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

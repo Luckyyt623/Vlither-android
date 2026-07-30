@@ -4,11 +4,100 @@
 #define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
 #include "cimgui/cimgui.h"
 #include "imgui_setup.h"
+#include "android_jni.h"
 #include "user.h"
 
 #include <android/asset_manager.h>
+#include <android/keycodes.h>
+#include <android/input.h>
 #include <android_native_app_glue.h>
 extern struct android_app* g_android_app;
+
+static float g_android_imgui_scale = 1.0f;
+
+static const char* android_imgui_get_clipboard(ImGuiContext* ctx) {
+    (void)ctx;
+    return android_jni_get_clipboard_text();
+}
+
+static void android_imgui_set_clipboard(ImGuiContext* ctx, const char* text) {
+    (void)ctx;
+    android_jni_set_clipboard_text(text ? text : "");
+}
+
+static double monotonic_seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+
+static ImGuiKey android_ime_key_to_imgui(int keycode) {
+    switch (keycode) {
+        case AKEYCODE_TAB:         return ImGuiKey_Tab;
+        case AKEYCODE_DPAD_LEFT:   return ImGuiKey_LeftArrow;
+        case AKEYCODE_DPAD_RIGHT:  return ImGuiKey_RightArrow;
+        case AKEYCODE_DPAD_UP:     return ImGuiKey_UpArrow;
+        case AKEYCODE_DPAD_DOWN:   return ImGuiKey_DownArrow;
+        case AKEYCODE_MOVE_HOME:   return ImGuiKey_Home;
+        case AKEYCODE_MOVE_END:    return ImGuiKey_End;
+        case AKEYCODE_FORWARD_DEL: return ImGuiKey_Delete;
+        case AKEYCODE_DEL:         return ImGuiKey_Backspace;
+        case AKEYCODE_ENTER:       return ImGuiKey_Enter;
+        case AKEYCODE_ESCAPE:      return ImGuiKey_Escape;
+        case AKEYCODE_CTRL_LEFT:   return ImGuiKey_LeftCtrl;
+        case AKEYCODE_CTRL_RIGHT:  return ImGuiKey_RightCtrl;
+        case AKEYCODE_SHIFT_LEFT:  return ImGuiKey_LeftShift;
+        case AKEYCODE_SHIFT_RIGHT: return ImGuiKey_RightShift;
+        case AKEYCODE_ALT_LEFT:    return ImGuiKey_LeftAlt;
+        case AKEYCODE_ALT_RIGHT:   return ImGuiKey_RightAlt;
+        case AKEYCODE_A:           return ImGuiKey_A;
+        case AKEYCODE_C:           return ImGuiKey_C;
+        case AKEYCODE_V:           return ImGuiKey_V;
+        case AKEYCODE_X:           return ImGuiKey_X;
+        case AKEYCODE_Y:           return ImGuiKey_Y;
+        case AKEYCODE_Z:           return ImGuiKey_Z;
+        default:                   return ImGuiKey_None;
+    }
+}
+
+static void android_drain_ime_events(ImGuiIO* io) {
+    android_ime_event event;
+    while (android_jni_poll_ime_event(&event)) {
+        if (event.type == ANDROID_IME_EVENT_TEXT) {
+            if (event.text && event.text[0] != '\0')
+                ImGuiIO_AddInputCharactersUTF8(io, event.text);
+        } else if (event.type == ANDROID_IME_EVENT_COMPOSITION) {
+            for (int i = 0; i < event.replace_codepoints; ++i) {
+                ImGuiIO_AddKeyEvent(io, ImGuiKey_Backspace, true);
+                ImGuiIO_AddKeyEvent(io, ImGuiKey_Backspace, false);
+            }
+            if (event.text && event.text[0] != '\0')
+                ImGuiIO_AddInputCharactersUTF8(io, event.text);
+        } else if (event.type == ANDROID_IME_EVENT_KEY) {
+            const bool down = event.action == AKEY_EVENT_ACTION_DOWN ||
+                              event.action == AKEY_EVENT_ACTION_MULTIPLE;
+            const bool ctrl = (event.meta_state & AMETA_CTRL_ON) != 0 ||
+                ((event.keycode == AKEYCODE_CTRL_LEFT ||
+                  event.keycode == AKEYCODE_CTRL_RIGHT) && down);
+            const bool shift = (event.meta_state & AMETA_SHIFT_ON) != 0 ||
+                ((event.keycode == AKEYCODE_SHIFT_LEFT ||
+                  event.keycode == AKEYCODE_SHIFT_RIGHT) && down);
+            const bool alt = (event.meta_state & AMETA_ALT_ON) != 0 ||
+                ((event.keycode == AKEYCODE_ALT_LEFT ||
+                  event.keycode == AKEYCODE_ALT_RIGHT) && down);
+
+            ImGuiIO_AddKeyEvent(io, ImGuiMod_Ctrl, ctrl);
+            ImGuiIO_AddKeyEvent(io, ImGuiMod_Shift, shift);
+            ImGuiIO_AddKeyEvent(io, ImGuiMod_Alt, alt);
+
+            ImGuiKey key = android_ime_key_to_imgui(event.keycode);
+            if (key != ImGuiKey_None)
+                ImGuiIO_AddKeyEvent(io, key, down);
+        }
+        android_jni_release_ime_event(&event);
+    }
+}
 
 void imgui_init(tenv* env) {
     tuser_data*   usr  = env->usr;
@@ -39,10 +128,20 @@ void imgui_init(tenv* env) {
 
     AAssetManager* am = g_android_app->activity->assetManager;
 
+    /* Resolution-aware UI density. Use the shorter edge so ultrawide phones
+       do not receive oversized controls, while low-resolution devices still
+       get a compact layout that fits without clipping. */
+    float short_edge = (float)(env->ctx->size[0] < env->ctx->size[1]
+                                   ? env->ctx->size[0] : env->ctx->size[1]);
+    float ui_scale = short_edge / 720.0f;
+    if (ui_scale < 0.75f) ui_scale = 0.75f;
+    if (ui_scale > 1.30f) ui_scale = 1.30f;
+    g_android_imgui_scale = ui_scale;
+
     static const ImWchar icon_ranges[] = {0xe900, 0xeaea, 0};
 
     for (int i = 0; i < NUM_FONT_SIZES; i++) {
-        float size = 20.0f + i * 4.0f;
+        float size = (20.0f + i * 4.0f) * ui_scale;
 
         ImFontConfig icons_cfg = {
             .FontDataOwnedByAtlas = true,
@@ -53,8 +152,8 @@ void imgui_init(tenv* env) {
             .RasterizerMultiply   = 1,
             .EllipsisChar         = 0,
             .MergeMode            = true,
-            .GlyphOffset          = (ImVec2){0, 2.0f + i},
-            .GlyphMinAdvanceX     = 26.0f + i * 6.0f,
+            .GlyphOffset          = (ImVec2){0, (2.0f + i) * ui_scale},
+            .GlyphMinAdvanceX     = (26.0f + i * 6.0f) * ui_scale,
         };
 
 #define LOAD_FONT(path, sz, cfg, ranges) do { \
@@ -103,10 +202,11 @@ void imgui_init(tenv* env) {
     io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io->IniFilename  = NULL;
 
-    float scale = (float)env->ctx->size[0] / 1080.0f;
-    if (scale < 1.0f) scale = 1.0f;
-    if (scale > 1.2f) scale = 1.2f;
-    ImGuiStyle_ScaleAllSizes(igGetStyle(), scale);
+    /* Use Android's real system clipboard instead of Dear ImGui's private
+       fallback clipboard. This enables copy/paste in every InputText widget. */
+    ImGuiPlatformIO* platform_io = igGetPlatformIO_Nil();
+    platform_io->Platform_GetClipboardTextFn = android_imgui_get_clipboard;
+    platform_io->Platform_SetClipboardTextFn = android_imgui_set_clipboard;
 
     ImGuiStyle* style = igGetStyle();
     style->DockingNodeHasCloseButton        = false;
@@ -115,19 +215,19 @@ void imgui_init(tenv* env) {
     style->WindowBorderSize = style->FrameBorderSize =
     style->ChildBorderSize  = style->PopupBorderSize =
     style->TabBorderSize    = 1;
-    style->FramePadding     = (ImVec2){8, 8};
-    style->ItemSpacing      = (ImVec2){4, 4};
-    style->ItemInnerSpacing = (ImVec2){4, 4};
-    style->WindowPadding    = (ImVec2){4, 4};
-    style->GrabMinSize      = 18;
+    style->FramePadding     = (ImVec2){8.0f * ui_scale, 8.0f * ui_scale};
+    style->ItemSpacing      = (ImVec2){4.0f * ui_scale, 4.0f * ui_scale};
+    style->ItemInnerSpacing = (ImVec2){4.0f * ui_scale, 4.0f * ui_scale};
+    style->WindowPadding    = (ImVec2){4.0f * ui_scale, 4.0f * ui_scale};
+    style->GrabMinSize      = 18.0f * ui_scale;
     style->FrameRounding = style->TabRounding = style->ChildRounding =
     style->GrabRounding  = style->PopupRounding =
     style->ScrollbarRounding = style->WindowRounding =
-    style->TreeLinesRounding = 3;
-    style->ScrollbarSize    = 18;
+    style->TreeLinesRounding = 3.0f * ui_scale;
+    style->ScrollbarSize    = 18.0f * ui_scale;
     style->DockingSeparatorSize = 1;
-    style->ScrollbarPadding = 1;
-    style->CellPadding.x    = 2;
+    style->ScrollbarPadding = 1.0f * ui_scale;
+    style->CellPadding.x    = 2.0f * ui_scale;
 
     igStyleColorsDark(style);
     style->Colors[ImGuiCol_Text]       = (ImVec4){0.89f, 0.89f, 0.89f, 1.00f};
@@ -154,6 +254,7 @@ void imgui_prerender(void) {
     igImplVulkan_NewFrame();
 
     ImGuiIO* io = igGetIO_Nil();
+    android_drain_ime_events(io);
 
     static struct timespec _last_time = {0, 0};
     struct timespec _now;
@@ -169,8 +270,8 @@ void imgui_prerender(void) {
 
     if (g_android_app->userData) {
         twindow* wnd = (twindow*)g_android_app->userData;
-        io->MousePos     = (ImVec2){wnd->touch.x, wnd->touch.y};
-        io->MouseDown[0] = wnd->touch.down;
+        io->MousePos     = (ImVec2){wnd->ui_touch.x, wnd->ui_touch.y};
+        io->MouseDown[0] = wnd->ui_touch.down;
         if (wnd->size[0] > 0 && wnd->size[1] > 0)
             io->DisplaySize = (ImVec2){(float)wnd->size[0], (float)wnd->size[1]};
 
@@ -191,7 +292,37 @@ void imgui_prerender(void) {
             s_scroll_was_down = false;
         }
 
-  g_imgui_wants_keyboard = io->WantTextInput;
+        /* Text, keyboard clipboard suggestions, composition and edit keys
+           arrive through the native Android InputConnection. A stationary
+           long press remains available as a direct paste fallback. */
+        static bool s_paste_tracking = false;
+        static bool s_paste_fired = false;
+        static ImVec2 s_paste_start = {0.0f, 0.0f};
+        static double s_paste_start_time = 0.0;
+
+        if (!io->MouseDown[0] || !io->WantTextInput) {
+            s_paste_tracking = false;
+            s_paste_fired = false;
+        } else if (!s_paste_tracking) {
+            s_paste_tracking = true;
+            s_paste_fired = false;
+            s_paste_start = io->MousePos;
+            s_paste_start_time = monotonic_seconds();
+        } else {
+            float dx = io->MousePos.x - s_paste_start.x;
+            float dy = io->MousePos.y - s_paste_start.y;
+            float cancel_distance = 18.0f * g_android_imgui_scale;
+            if (dx * dx + dy * dy > cancel_distance * cancel_distance) {
+                s_paste_tracking = false;
+                s_paste_fired = false;
+            } else if (!s_paste_fired &&
+                       monotonic_seconds() - s_paste_start_time >= 0.55) {
+                android_jni_enqueue_clipboard_paste();
+                s_paste_fired = true;
+            }
+        }
+
+        g_imgui_wants_keyboard = io->WantTextInput;
     }
 
     igNewFrame();

@@ -70,7 +70,8 @@ typedef enum screen {
   SKIN_EDITOR = 1,
   PLAYING = 2,
   SETTINGS = 3,
-  CONTROLS = 4
+  CONTROLS = 4,
+  NTL_PANEL = 5
 } screen;
 
 typedef enum font_size {

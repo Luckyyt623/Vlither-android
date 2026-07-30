@@ -11,6 +11,7 @@
 #endif
 
 #include "../user.h"
+#include "../cimgui/cimgui_impl.h"
 
 void _create_image_data(renderer* r, tcontext* ctx, ivec2 size) {
   glm_ivec2_copy(size, r->size);
@@ -145,14 +146,24 @@ renderer* renderer_create(tenv* env) {
   r->tex_atlas = create_mipmap_texture(ctx, "app/res/textures/tex_atlas_8k.png");
   DLOG("renderer: tex_atlas=%p", (void*)r->tex_atlas);
 
-  if (!r->bg_tex || !r->tex_atlas) {
-    DLOG("FATAL: texture load failed bg=%p atlas=%p — likely OOM (8K tex needs ~256MB staging)",
-         (void*)r->bg_tex, (void*)r->tex_atlas);
+  DLOG("renderer: loading boost button texture");
+  r->boost_button_tex = create_mipmap_texture(ctx, "app/res/textures/boost_button.png");
+  r->boost_button_ds = VK_NULL_HANDLE;
+  DLOG("renderer: boost_button_tex=%p", (void*)r->boost_button_tex);
+
+  if (!r->bg_tex || !r->tex_atlas || !r->boost_button_tex) {
+    DLOG("FATAL: texture load failed bg=%p atlas=%p boost=%p — likely OOM or missing asset",
+         (void*)r->bg_tex, (void*)r->tex_atlas, (void*)r->boost_button_tex);
     if (r->bg_tex) { destroy_texture(ctx, r->bg_tex); }
     if (r->tex_atlas) { destroy_texture(ctx, r->tex_atlas); }
+    if (r->boost_button_tex) { destroy_texture(ctx, r->boost_button_tex); }
     free(r);
     return NULL;
   }
+
+  r->boost_button_ds = igImplVulkan_AddTexture(
+      r->linear_sampler, r->boost_button_tex->view,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
   vkCreateRenderPass(
       ctx->device,
@@ -446,6 +457,8 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
   _destroy_image_data(r, ctx);
   vkDestroyRenderPass(ctx->device, r->render_pass, NULL);
   free(r->images);
+  if (r->boost_button_ds) igImplVulkan_RemoveTexture(r->boost_button_ds);
+  destroy_texture(ctx, r->boost_button_tex);
   destroy_texture(ctx, r->tex_atlas);
   destroy_texture(ctx, r->bg_tex);
   vkDestroySampler(ctx->device, r->nearest_sampler, NULL);

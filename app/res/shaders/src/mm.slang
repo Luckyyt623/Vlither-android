@@ -56,8 +56,10 @@ float4 fs_main(vs_output input) {
   float pp = length(float2(ddx(dd), ddy(dd)));
   float pp2 = length(float2(ddx(dd2), ddy(dd2)));
 
-  float a = smoothstep(0.0, EDGE_SOFTNESS, (0.045 - dd) / pp);
-  float ap = max(0, smoothstep(0.0, EDGE_SOFTNESS, (0.035 - dd) / pp));
+  /* The local-player marker is drawn by the HUD so its color, shape and size
+     can be changed without rebuilding this shader. */
+  float a = 0.0;
+  float ap = 0.0;
   float la = smoothstep(0.0, EDGE_SOFTNESS, (0.02 - dd2) / pp2);
   float lar = (smoothstep(0.0, EDGE_SOFTNESS, (0.062 - dd2) / pp2) - smoothstep(0.0, EDGE_SOFTNESS, (0.055 - dd2) / pp2));
 

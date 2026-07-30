@@ -7,6 +7,9 @@
 
 #include "../constants.h"
 
+#define MAX_NTL_TEAM_PROFILES 12
+#define MAX_NTL_TEAM_NAME 47
+
 typedef struct hotkey {
   int key;
   bool active;
@@ -29,12 +32,19 @@ typedef struct gameplay_mode {
   int boost_type;
   int render_mode;
   bool transparent_skin;
+  bool center_line;
   float food_scale;
   float qsm;
   float bg_scale;
   float boost_strength;
   vec3 food_color;
 } gameplay_mode;
+
+typedef struct ntl_team_profile {
+  char name[MAX_NTL_TEAM_NAME + 1];
+  char team_id[96];
+  char auth_key[96];
+} ntl_team_profile;
 
 typedef struct custom_key_btn {
   bool  active;
@@ -67,6 +77,9 @@ typedef struct user_settings {
   int laser_thickness;
   int cursor_size;
   int minimap_size;
+  bool minimap_pos_custom;
+  float minimap_rel_x;
+  float minimap_rel_y;
   bool restart_rc;
   bool quit_mc;
   bool vsync;
@@ -107,6 +120,10 @@ typedef struct user_settings {
   bool  zslider_horizontal;
   bool  zslider_hidden;
 
+  bool  ntl_enabled;
+  char  ntl_team_id[96];
+  char  ntl_auth_key[96];
+
   bool  hk_show_btn[NUM_HOTKEYS];
 
   gameplay_mode modes[2];
@@ -114,6 +131,43 @@ typedef struct user_settings {
   hotkey hotkeys[NUM_HOTKEYS];
 
   custom_key_btn key_btns[MAX_KEY_BTNS];
+
+  /* v2.4 extension fields. These stay at the end so v2.3 binary settings can
+     be loaded as a compatible prefix without resetting player preferences. */
+  float transparent_skin_opacity[2];
+  bool minimap_drag_enabled;
+  int fps_limit;
+  bool performance_mode;
+
+  float ntl_chat_rel_x;
+  float ntl_chat_rel_y;
+  float ntl_chat_rel_w;
+  float ntl_chat_rel_h;
+  float ntl_players_rel_x;
+  float ntl_players_rel_y;
+  float ntl_players_rel_w;
+  float ntl_players_rel_h;
+
+  /* v2.5 extension fields. */
+  bool ntl_chat_minimized;
+  bool ntl_show_teammates;
+  bool ntl_marker_labels;
+  int ntl_marker_shape;
+  float ntl_marker_size;
+  vec4 ntl_marker_color;
+  int own_marker_shape;
+  float own_marker_size;
+  vec4 own_marker_color;
+
+  int ntl_team_profile_count;
+  int ntl_active_team_profile;
+  ntl_team_profile ntl_team_profiles[MAX_NTL_TEAM_PROFILES];
+
+  /* v2.5.4 extension field. NTL identifies one client by the first eight
+     hexadecimal characters of its transmitted nickname. Keep that prefix
+     stable so nickname changes update the existing player instead of creating
+     a nameless/new entry. */
+  char ntl_client_id[9];
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

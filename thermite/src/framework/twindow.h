@@ -45,6 +45,7 @@ typedef struct twindow {
     bool            _refresh;
     bool            focused;
     touch_state     touch;
+    touch_state     ui_touch;
 } twindow;
 
 extern struct android_app* g_android_app;

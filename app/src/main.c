@@ -1,5 +1,6 @@
 #include "game/loop.h"
 #include "game/bg_preview.h"
+#include "game/ntl_team.h"
 #include "ui/skin_editor.h"
 #include "ui/title_screen.h"
 #include "ui/settings.h"
@@ -9,6 +10,7 @@
 #include "user.h"
 #ifdef ANDROID
 #include "android_jni.h"
+#include "android_glfw_shim.h"
 #endif
 #include <math.h>
 
@@ -91,12 +93,14 @@ void tinit(tenv* env) {
   DLOG("tinit: game_data_init");
   game_data_init(env);
   ui_key_buttons_init(env);
+  ntl_team_init(env);
   DLOG("tinit: game_data_init done");
   DLOG("tinit: complete");
 }
 
 void tdestroy(tenv* env) {
   ui_key_buttons_destroy(env);
+  ntl_team_destroy(env);
   game_data_destroy(env);
   ui_controls_destroy(env);
   ui_settings_destroy(env);
@@ -163,7 +167,25 @@ void trender(tenv* env) {
      press before ImGui ever sees it, and the slider never receives the
      click. */
   { extern bool g_panel_open;
-    g_panel_open = (gdata->curr_screen == SETTINGS || gdata->curr_screen == CONTROLS); }
+    /* Full-screen menu states must own every touch from ACTION_DOWN.
+       v2.5 accidentally omitted TITLE_SCREEN, so homepage taps were routed
+       into the gameplay trackpad path and ImGui never received them. Keep
+       PLAYING excluded: its individual HUD rectangles still opt in to UI
+       ownership without blocking the independent movement pointer. */
+    g_panel_open = (gdata->curr_screen == TITLE_SCREEN ||
+                    gdata->curr_screen == SETTINGS ||
+                    gdata->curr_screen == CONTROLS ||
+                    gdata->curr_screen == SKIN_EDITOR ||
+                    gdata->curr_screen == NTL_PANEL ||
+                    igGetIO_Nil()->WantTextInput);
+    if (g_panel_open) {
+      touch_state* t = &env->wnd->touch;
+      t->down = t->just_down = false;
+      t->boost_down = t->boost_just_down = false;
+      t->move_ptr_id = t->boost_ptr_id = t->zslider_ptr_id = -1;
+      t->zslider_offset = 0.0f;
+    }
+  }
 #endif
 
   if (usr->r) {
@@ -175,15 +197,16 @@ void trender(tenv* env) {
     tcontext_clear(ctx, (vec4){0, 0, 0, 1.0f});
 
     imgui_prerender();
+#ifdef ANDROID
+    android_ui_capture_begin_frame();
+#endif
     ImGuiStyle* style = igGetStyle();
     ui_viewport(env);
 
     if (bg_preview_visible(env) && usr->gdata.curr_screen == SETTINGS) {
-      /* Controls intentionally skips the multi-tap blur. The translucent
-         Controls card provides readability by itself, while leaving the
-         live snake/buttons sharp and avoiding an extra full-screen GPU
-         composition pass every frame. */
-      draw_bg_preview_blur(env, 1.0f);
+      /* Keep the visual depth users expect from Settings. Performance mode
+         uses fewer/lighter taps rather than removing the blur entirely. */
+      draw_bg_preview_blur(env, usr->usrs.performance_mode ? 0.55f : 1.0f);
     }
 
     igSetNextWindowPos(igGetMainViewport()->Pos, ImGuiCond_None, (ImVec2){});
@@ -206,6 +229,16 @@ void trender(tenv* env) {
        player's name label) — rare on a quiet test server, routine on a
        populated official one. */
     bg_preview_update(env);
+    ntl_team_update(env);
+
+    /* Process on-screen key buttons before gameplay input. Android keeps a
+       separate UI pointer stream, so a button gesture can be consumed here
+       without interrupting the button hold itself or reaching the trackpad. */
+    if (usr->gdata.curr_screen == PLAYING ||
+        usr->gdata.curr_screen == TITLE_SCREEN)
+      ui_key_buttons(env);
+    if (usr->gdata.curr_screen == PLAYING)
+      ntl_team_consume_ui_touch(env);
 
     switch (usr->gdata.curr_screen) {
       case TITLE_SCREEN:
@@ -216,9 +249,13 @@ void trender(tenv* env) {
         break;
       case PLAYING:
         game_loop(env);
+        ntl_team_draw(env);
         break;
       case SETTINGS:
         ui_settings(env);
+        break;
+      case NTL_PANEL:
+        ntl_team_panel(env);
         break;
       case CONTROLS:
         /* Use the same owned background-preview path as Settings. Calling
@@ -237,10 +274,6 @@ void trender(tenv* env) {
     igEnd();
 
     renderer_render_cursor(usr->r, ctx);
-
-    if (usr->gdata.curr_screen == PLAYING ||
-        usr->gdata.curr_screen == TITLE_SCREEN)
-      ui_key_buttons(env);
 
     igRender();
     imgui_render(ctx->frames[ctx->current_frame].cmd);

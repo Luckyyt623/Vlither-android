@@ -42,6 +42,8 @@ typedef struct renderer {
 
   texture* tex_atlas;
   texture* bg_tex;
+  texture* boost_button_tex;
+  VkDescriptorSet boost_button_ds;
 
   VkSampler linear_sampler;
   VkSampler nearest_sampler;

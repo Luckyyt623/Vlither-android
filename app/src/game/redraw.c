@@ -55,7 +55,9 @@ void redraw(tenv* env) {
   float mwwp50 = ctx->size[0] + 50;
   float mhhp50 = ctx->size[1] + 50;
 
-  gameplay_mode* mode = usrs->modes + usrs->hotkeys[HOTKEY_ASSIST].active;
+  int mode_index = usrs->hotkeys[HOTKEY_ASSIST].active ? 1 : 0;
+  gameplay_mode* mode = usrs->modes + mode_index;
+  bool render_shadows = mode->show_shadows && !usrs->performance_mode;
 
   if (!gdata->data.dead) {
     if (gdata->data.fvtg > 0) {
@@ -633,11 +635,16 @@ void redraw(tenv* env) {
 
         float om = 0;
         float mr = 0;
+        // NTL-style transparent snake body. This applies to textured, solid,
+        // and flat render modes instead of only the skinless modes.
+        float skin_alpha = mode->transparent_skin
+                               ? usrs->transparent_skin_opacity[mode_index]
+                               : 1.0f;
 
         if (mode->render_mode == 0) {
           float shadow_strength = 0.25f;
 
-          if (mode->show_shadows) {
+          if (render_shadows) {
 
             int start = bp >= 4 ? bp - 4 : 0;
             for (j = start; j < bp; j++) {
@@ -666,7 +673,7 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && mode->show_shadows) {
+                if (j >= 4 && render_shadows) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -700,7 +707,7 @@ void redraw(tenv* env) {
                                                  gdata->data.gsc * 2 * lsz,
                                                  gdata->data.pba[(int)j]},
                                                 gdata->cg_uvs[cg_id],
-                                                {1, 1, 1, a}});
+                                                {1, 1, 1, a * skin_alpha}});
               }
           } else {
             for (j = bp - 1; j >= 0; j--)
@@ -708,7 +715,7 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && mode->show_shadows) {
+                if (j >= 4 && render_shadows) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -746,12 +753,12 @@ void redraw(tenv* env) {
                                                  gdata->data.gsc * 2 * lsz,
                                                  gdata->data.pba[(int)j]},
                                                 gdata->cg_uvs[cg_id],
-                                                {se, se, se, a}});
+                                                {se, se, se, a * skin_alpha}});
               }
           }
         } else if (mode->render_mode == 1) {
-          float skinless_a = mode->transparent_skin ? 0.8f : 1.0f;
-          if (mode->show_shadows) {
+          float skinless_a = skin_alpha;
+          if (render_shadows) {
 
             int start = bp >= 4 ? bp - 4 : 0;
             for (j = start; j < bp; j++) {
@@ -782,7 +789,7 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && mode->show_shadows) {
+                if (j >= 4 && render_shadows) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -828,7 +835,7 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && mode->show_shadows) {
+                if (j >= 4 && render_shadows) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -873,8 +880,8 @@ void redraw(tenv* env) {
               }
           }
         } else if (mode->render_mode == 2) {
-          float skinless_a = mode->transparent_skin ? 0.8f : 1.0f;
-          if (mode->show_shadows) {
+          float skinless_a = skin_alpha;
+          if (render_shadows) {
 
             int start = bp >= 4 ? bp - 4 : 0;
             for (j = start; j < bp; j++) {
@@ -905,7 +912,7 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && mode->show_shadows) {
+                if (j >= 4 && render_shadows) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -951,7 +958,7 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && mode->show_shadows) {
+                if (j >= 4 && render_shadows) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -992,6 +999,56 @@ void redraw(tenv* env) {
                         gdata->cg_uvs[BLANK_UV],
                         {cg_col->r, cg_col->g, cg_col->b, a * skinless_a}});
               }
+          }
+        }
+
+        if (mode->center_line && o->id == gdata->data.snake_id && bp >= 2) {
+          // Stroke only the local player's sampled centre path. Other snakes
+          // keep their original skins without a centre line. Rounded capsules
+          // keep the local line continuous and independent from transparency.
+          const float line_thickness = 2.0f;
+          for (j = 1; j < bp; j++) {
+            float x1 = ((gdata->data.pbx[(int)j - 1] - gdata->data.view_xx) *
+                        gdata->data.gsc) +
+                       mww2;
+            float y1 = ((gdata->data.pby[(int)j - 1] - gdata->data.view_yy) *
+                        gdata->data.gsc) +
+                       mhh2;
+            float x2 = ((gdata->data.pbx[(int)j] - gdata->data.view_xx) *
+                        gdata->data.gsc) +
+                       mww2;
+            float y2 = ((gdata->data.pby[(int)j] - gdata->data.view_yy) *
+                        gdata->data.gsc) +
+                       mhh2;
+
+            const float line_margin = 8.0f;
+            bool p1_visible = x1 >= -line_margin && y1 >= -line_margin &&
+                              x1 <= ctx->size[0] + line_margin &&
+                              y1 <= ctx->size[1] + line_margin;
+            bool p2_visible = x2 >= -line_margin && y2 >= -line_margin &&
+                              x2 <= ctx->size[0] + line_margin &&
+                              y2 <= ctx->size[1] + line_margin;
+            if (!p1_visible && !p2_visible) continue;
+
+            float dx_line = x2 - x1;
+            float dy_line = y2 - y1;
+            float segment_length = sqrtf(dx_line * dx_line + dy_line * dy_line);
+            if (segment_length <= 0.01f) continue;
+
+            float capsule_length = segment_length + line_thickness;
+            float center_x = (x1 + x2) * 0.5f;
+            float center_y = (y1 + y2) * 0.5f;
+            float line_angle = atan2f(dy_line, dx_line);
+
+            bp_renderer_push(
+                usr->r->bpr,
+                &(bp_instance){
+                    {center_x - capsule_length * 0.5f,
+                     center_y - line_thickness * 0.5f, capsule_length,
+                     line_angle},
+                    gdata->cg_uvs[BLANK_UV],
+                    {1, 1, 1, 0.85f * a},
+                    {line_thickness, 1}});
           }
         }
 

@@ -224,8 +224,14 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 5 +
                   frame_height * 4);
-  if (igButton("\ue991 Controls", (ImVec2){logo_size})) {
+  if (igButton("\ue991 Controls",
+               (ImVec2){logo_size / 2 - style->ItemSpacing.x / 2})) {
     usr->gdata.curr_screen = CONTROLS;
+  }
+  igSameLine(0, -1);
+  if (igButton("NTL Chat",
+               (ImVec2){logo_size / 2 - style->ItemSpacing.x / 2})) {
+    usr->gdata.curr_screen = NTL_PANEL;
   }
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
