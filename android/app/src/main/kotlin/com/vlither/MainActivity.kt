@@ -210,41 +210,42 @@ class MainActivity : Activity() {
 
 private fun showChangelog() {
     val message = """
-Update 4.3
+        Update 4.3
 
-What's New:
+        What's New:
 
-• Vlither Tags have been added. Check them out, and message Lucky on Discord to upload your own tags.
+        • Vlither Tags have been added. Check them out, and message Lucky on Discord to upload your own tags.
 
-• NTL Tags are now supported. You can view and apply NTL tags directly in Vlither.
+        • NTL Tags are now supported. You can view and apply NTL tags directly in Vlither.
 
-• Fixed inaccurate player positions on the minimap.
+        • Fixed inaccurate player positions on the minimap.
 
-• Removed the old on-screen buttons.
+        • Removed the old on-screen buttons.
 
-• Added a complete keyboard-button editor. Go to:
-  Controls > Adjust Keyboard Buttons
-  You can add, move, resize, edit, or delete buttons.
+        • Added a complete keyboard-button editor. Go to:
+          Controls > Adjust Keyboard Buttons
+          You can add, move, resize, edit, or delete buttons.
 
-• Added tag visibility settings. Go to:
-  Settings > General
-  You can show or hide all tags, NTL tags, or Vlither tags.
+        • Added tag visibility settings. Go to:
+          Settings > General
+          You can show or hide all tags, NTL tags, or Vlither tags.
 
-• Added global tag-size customization.
+        • Added global tag-size customization.
 
-• Added a new background. You can switch backgrounds from:
-  Settings > General
+        • Added a new background. You can switch backgrounds from:
+          Settings > General
 
-Changes made by Lucky
+        Changes made by Lucky
     """.trimIndent()
-}
 
-        android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.3")
-            .setMessage(message)
-            .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
-            .show()
-    }
+    android.app.AlertDialog.Builder(this)
+        .setTitle("What's New in v4.3")
+        .setMessage(message)
+        .setPositiveButton("Got it") { dialog, _ ->
+            dialog.dismiss()
+        }
+        .show()
+}
 
     private fun onDownloadClicked() {
         val url = apkDownloadUrl
