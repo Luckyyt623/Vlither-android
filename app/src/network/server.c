@@ -61,7 +61,7 @@ void server_destroy(tenv* env) {
 
 static const char* CUSTOM_SERVER_IPS[CUSTOM_SERVER_COUNT] = {
   "206.206.76.190:444",
-  "139.84.166.84:444",
+  "139.84.170.60:444",
   "51.91.19.175:444",
   "206.221.176.241:444",
 };
@@ -262,6 +262,26 @@ typedef struct {
   int      result;
 } ping_probe;
 
+/* Battledome servers expose the game port but do not consistently expose the
+   official port-80 /ptc echo endpoint. Measure their TCP handshake directly
+   against the configured game port so their latency is still available. */
+static void sl_ping_tcp_cb(struct mg_connection* c, int ev, void* ev_data) {
+  (void)ev_data;
+  ping_probe* p = (ping_probe*)c->fn_data;
+  if (!p || p->done) return;
+
+  if (ev == MG_EV_CONNECT) {
+    p->result = (int)(mg_millis() - p->start_ms);
+    p->done = true;
+    c->is_closing = 1;
+  } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+    if (!p->done) {
+      p->result = 9999;
+      p->done = true;
+    }
+  }
+}
+
 static void sl_ping_ws_cb(struct mg_connection* c, int ev, void* ev_data) {
   ping_probe* p = (ping_probe*)c->fn_data;
   if (p->done) return;
@@ -331,14 +351,21 @@ static void* sl_ping_thread(void* arg) {
         continue;
       }
 
-      char url[64];
-      snprintf(url, sizeof(url), "ws://%s:80/ptc", ip_buf);
-
-      struct mg_connection* c = mg_ws_connect(
-        &ping_mgr, url, sl_ping_ws_cb, &probes[j],
-        "%s:%s\r\n%s:%s\r\n",
-        "Origin", "https://slither.com",
-        "Host", "slither.com");
+      struct mg_connection* c = NULL;
+      probes[j].start_ms = mg_millis();
+      if (idx < gdata->server_list.custom_count) {
+        char url[64];
+        snprintf(url, sizeof(url), "tcp://%s:%d", ip_buf, port);
+        c = mg_connect(&ping_mgr, url, sl_ping_tcp_cb, &probes[j]);
+      } else {
+        char url[64];
+        snprintf(url, sizeof(url), "ws://%s:80/ptc", ip_buf);
+        c = mg_ws_connect(
+          &ping_mgr, url, sl_ping_ws_cb, &probes[j],
+          "%s:%s\r\n%s:%s\r\n",
+          "Origin", "https://slither.com",
+          "Host", "slither.com");
+      }
 
       if (!c) {
         probes[j].done   = true;

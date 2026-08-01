@@ -42,6 +42,9 @@ typedef struct renderer {
 
   texture* tex_atlas;
   texture* bg_tex;
+  texture* bg_tex_alt;
+  texture* active_bg_tex;
+  int bg_variant;
   texture* boost_button_tex;
   VkDescriptorSet boost_button_ds;
 
@@ -69,6 +72,7 @@ typedef struct renderer {
 } renderer;
 
 renderer* renderer_create(tenv* env);
+void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant);
 void renderer_render(renderer* r, tcontext* ctx, vec4 clear_color);
 void renderer_render_cursor(renderer* r, tcontext* ctx);
 void renderer_destroy(renderer* r, tcontext* ctx);

@@ -54,6 +54,12 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_X        88
 #define GLFW_KEY_Y        89
 
+#define GLFW_KEY_APOSTROPHE 39
+#define GLFW_KEY_COMMA      44
+#define GLFW_KEY_MINUS      45
+#define GLFW_KEY_PERIOD     46
+#define GLFW_KEY_SLASH      47
+
 #define GLFW_KEY_0        48
 #define GLFW_KEY_1        49
 #define GLFW_KEY_2        50
@@ -64,6 +70,12 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_7        55
 #define GLFW_KEY_8        56
 #define GLFW_KEY_9        57
+#define GLFW_KEY_SEMICOLON     59
+#define GLFW_KEY_EQUAL         61
+#define GLFW_KEY_LEFT_BRACKET  91
+#define GLFW_KEY_BACKSLASH     92
+#define GLFW_KEY_RIGHT_BRACKET 93
+#define GLFW_KEY_GRAVE_ACCENT  96
 
 #define GLFW_KEY_F1       290
 #define GLFW_KEY_F2       291
@@ -85,6 +97,9 @@ void       tkeyboard_destroy(tkeyboard* keyboard);
 #define GLFW_KEY_LEFT_SHIFT     340
 #define GLFW_KEY_LEFT_CONTROL   341
 #define GLFW_KEY_LEFT_ALT       342
+#define GLFW_KEY_RIGHT_SHIFT    344
+#define GLFW_KEY_RIGHT_CONTROL  345
+#define GLFW_KEY_RIGHT_ALT      346
 #define GLFW_MOUSE_BUTTON_LEFT   0
 #define GLFW_MOUSE_BUTTON_RIGHT  1
 #define GLFW_MOUSE_BUTTON_MIDDLE 2

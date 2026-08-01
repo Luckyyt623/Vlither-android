@@ -122,11 +122,6 @@ void ui_overlay(tenv* env) {
                   seconds);
     igText("");
 
-    if (usrs->hotkeys[HOTKEY_MENU].active) {
-      display_hotkeys(usr, (icon_sz.x - char_sz.x) * 0.5f,
-                      usrs->stats_font_size);
-
-    }
 
     float px = (((gdata->data.view_xx - gdata->data.grd) * 2) /
                 ((gdata->data.flux_grd) * 2));
@@ -606,48 +601,6 @@ void ui_overlay(tenv* env) {
 
   }
 
-  if (gdata->data.follow_view) {
-    float sh = (float)ctx->size[1];
-    float sw = (float)ctx->size[0];
-    static const char* hk_short[NUM_HOTKEYS] = {
-      "HUD","Names","BigF","Asst","Bot","Menu","Restart","Quit"
-    };
-    ImDrawList* hkdl = igGetForegroundDrawList_ViewportPtr(igGetMainViewport());
-    float btn_h  = sh * 0.065f;
-    float btn_w  = sw * 0.130f;
-    float margin2 = sw * 0.012f;
-    float start_y = sh * 0.012f;
-    int   hk_col  = 0;
-
-    for (int hi = 0; hi < NUM_HOTKEYS; hi++) {
-      if (!usrs->hk_show_btn[hi]) continue;
-      float bx = margin2 + (float)hk_col * (btn_w + margin2);
-      float by = start_y;
-      hk_col++;
-      bool is_on = usrs->hotkeys[hi].active;
-      ImU32 hk_bg  = is_on ? IM_COL32(55,175,75,200)  : IM_COL32(30,30,50,170);
-      ImU32 hk_brd = is_on ? IM_COL32(100,220,120,230): IM_COL32(140,140,160,180);
-      ImU32 hk_txt = IM_COL32(255,255,255, is_on ? 240 : 180);
-      float rnd    = btn_h * 0.22f;
-      ImDrawList_AddRectFilled(hkdl,
-        (ImVec2){bx, by}, (ImVec2){bx+btn_w, by+btn_h}, hk_bg,  rnd, 0);
-      ImDrawList_AddRect(hkdl,
-        (ImVec2){bx, by}, (ImVec2){bx+btn_w, by+btn_h}, hk_brd, rnd, 0, 1.5f);
-      float fsz = btn_h * 0.40f;
-      float tsc = fsz / igGetFontSize();
-      ImVec2 tsz; igCalcTextSize(&tsz, hk_short[hi], NULL, false, -1.0f);
-      ImDrawList_AddText_FontPtr(hkdl, igGetFont(), fsz,
-        (ImVec2){bx + btn_w*0.5f - tsz.x*tsc*0.5f, by + btn_h*0.5f - fsz*0.5f},
-        hk_txt, hk_short[hi], NULL, 0, NULL);
-
-      ImGuiIO* hkio = igGetIO_Nil();
-      if (hkio && igIsMouseClicked_Bool(0, false)) {
-        float mx = hkio->MousePos.x, my = hkio->MousePos.y;
-        if (mx >= bx && mx <= bx+btn_w && my >= by && my <= by+btn_h)
-          usrs->hotkeys[hi].active = !usrs->hotkeys[hi].active;
-      }
-    }
-  }
 
   if (gdata->data.follow_view || gdata->curr_screen == CONTROLS) {
 

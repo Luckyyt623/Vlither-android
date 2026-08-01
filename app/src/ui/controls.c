@@ -1,6 +1,7 @@
 #include "controls.h"
 
 #include "../user.h"
+#include "key_buttons.h"
 
 void ui_controls_init(tenv* env) {}
 
@@ -333,7 +334,7 @@ void ui_controls(tenv* env) {
 
         igEndChild();
 
-        // ---- Column 3: On-Screen Buttons ----
+        // ---- Column 3: Keyboard Buttons ----
 #ifdef ANDROID
         igTableSetColumnIndex(1);
 #else
@@ -341,28 +342,12 @@ void ui_controls(tenv* env) {
 #endif
         igBeginChild_Str("controls_col3_child", (ImVec2){-1, child_window_height},
                          ImGuiChildFlags_None, ImGuiWindowFlags_None);
-        igSeparatorText("On-Screen Buttons");
-        igTextColored((ImVec4){0.55f, 0.55f, 0.55f, 1.0f},
-                      "Toggle to show a tap button in-game.");
+        igSeparatorText("Keyboard Buttons");
+        igTextWrapped("Create and arrange only the keyboard buttons you need.");
         igSpacing();
-
-        static const char* hk_labels[NUM_HOTKEYS] = {
-          "HUD", "Show Names", "Big Food",
-          "Assist", "Bot", "Menu", "Restart", "Quit"
-        };
-        for (int hi = 0; hi < NUM_HOTKEYS; hi++) {
-          char lbl[80];
-          bool shown = usrs->hk_show_btn[hi];
-          snprintf(lbl, sizeof(lbl), "[%s] %s##hk%d",
-                   shown ? "ON " : "OFF", hk_labels[hi], hi);
-          if (shown) {
-            igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0.20f, 0.55f, 0.30f, 0.70f});
-            igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, (ImVec4){0.30f, 0.65f, 0.40f, 0.80f});
-          }
-          if (igButton(lbl, (ImVec2){-1, 0.0f})) {
-            usrs->hk_show_btn[hi] = !usrs->hk_show_btn[hi];
-          }
-          if (shown) igPopStyleColor(2);
+        if (igButton("Adjust keyboard buttons", (ImVec2){-1, frame_height * 1.7f})) {
+          save_user_settings(usrs);
+          ui_key_buttons_open_editor(env);
         }
         igEndChild();
 

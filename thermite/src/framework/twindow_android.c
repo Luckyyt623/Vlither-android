@@ -34,6 +34,13 @@ float g_joy_cx   = -9999, g_joy_cy   = -9999, g_joy_r   = 0;
 bool  g_is_trackpad_mode = true;
 bool  g_panel_open       = false;
 
+/* Implemented by app/src/ui/key_buttons.c. Custom gameplay buttons get a
+   direct native touch path so top-edge taps cannot be stolen by another HUD
+   rectangle or lost between render frames. */
+extern bool ui_key_buttons_native_press(float x, float y, int pointer_id);
+extern bool ui_key_buttons_native_release(int pointer_id);
+extern void ui_key_buttons_native_cancel_all(void);
+
 typedef struct { float l, t, r, b; } android_ui_rect;
 #define ANDROID_UI_CAPTURE_MAX 64
 static android_ui_rect g_ui_capture_rects[ANDROID_UI_CAPTURE_MAX];
@@ -224,13 +231,17 @@ static void begin_ui_touch(twindow* wnd, float x, float y, int pid) {
     wnd->ui_touch.y = y;
     wnd->ui_touch.down = true;
     wnd->ui_touch.just_down = true;
+    wnd->ui_touch.just_up = false;
     wnd->ui_touch.move_ptr_id = pid;
 }
 
 static void end_ui_touch(twindow* wnd, int pid) {
     if (pid != wnd->ui_touch.move_ptr_id) return;
+    /* Keep just_down latched until the render pass. A quick Android tap can
+       deliver ACTION_DOWN and ACTION_UP in one input poll; clearing just_down
+       here made small/top on-screen buttons miss the gesture completely. */
     wnd->ui_touch.down = false;
-    wnd->ui_touch.just_down = false;
+    wnd->ui_touch.just_up = true;
     wnd->ui_touch.move_ptr_id = -1;
 }
 
@@ -379,6 +390,11 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                 float y   = AMotionEvent_getY(event, 0);
                 int   pid = (int)AMotionEvent_getPointerId(event, 0);
 
+                if (ui_key_buttons_native_press(x, y, pid)) {
+                    set_ui_pointer_owned(pid, true);
+                    break;
+                }
+
                 if (g_panel_open || android_ui_capture_contains(x, y)) {
                     set_ui_pointer_owned(pid, true);
                     begin_ui_touch(wnd, x, y, pid);
@@ -427,6 +443,11 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                 int pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
                 float x = AMotionEvent_getX(event, ptr_idx);
                 float y = AMotionEvent_getY(event, ptr_idx);
+
+                if (ui_key_buttons_native_press(x, y, pid)) {
+                    set_ui_pointer_owned(pid, true);
+                    break;
+                }
 
                 if (g_panel_open || android_ui_capture_contains(x, y)) {
                     set_ui_pointer_owned(pid, true);
@@ -505,6 +526,7 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
             case AMOTION_EVENT_ACTION_UP: {
 
                 int lifted_pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
+                ui_key_buttons_native_release(lifted_pid);
                 end_ui_touch(wnd, lifted_pid);
                 set_ui_pointer_owned(lifted_pid, false);
                 wnd->touch.down              = false;
@@ -521,6 +543,7 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
             case AMOTION_EVENT_ACTION_POINTER_UP: {
 
                 int lifted_pid = (int)AMotionEvent_getPointerId(event, ptr_idx);
+                ui_key_buttons_native_release(lifted_pid);
                 end_ui_touch(wnd, lifted_pid);
                 set_ui_pointer_owned(lifted_pid, false);
 
@@ -543,9 +566,11 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
             }
 
             case AMOTION_EVENT_ACTION_CANCEL:
+                ui_key_buttons_native_cancel_all();
                 g_ui_owned_pointer_mask      = 0;
+                wnd->ui_touch.just_up        = wnd->ui_touch.down ||
+                                                  wnd->ui_touch.just_down;
                 wnd->ui_touch.down           = false;
-                wnd->ui_touch.just_down      = false;
                 wnd->ui_touch.move_ptr_id    = -1;
                 wnd->touch.down              = false;
                 wnd->touch.just_down         = false;
@@ -606,6 +631,7 @@ void twindow_poll_input(twindow* window) {
     window->touch.just_down       = false;
     window->touch.boost_just_down = false;
     window->ui_touch.just_down    = false;
+    window->ui_touch.just_up      = false;
 
     int events;
     struct android_poll_source* source;
@@ -628,6 +654,7 @@ void twindow_wait_input(twindow* window) {
     window->touch.just_down       = false;
     window->touch.boost_just_down = false;
     window->ui_touch.just_down    = false;
+    window->ui_touch.just_up      = false;
 
     int events;
     struct android_poll_source* source;

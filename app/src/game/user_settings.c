@@ -190,6 +190,18 @@ void user_settings_default(user_settings* usr_settings) {
   memset(usr_settings->ntl_team_profiles, 0,
          sizeof usr_settings->ntl_team_profiles);
   usr_settings->ntl_client_id[0] = '\0';
+  usr_settings->ntl_tag_id = -1;
+  usr_settings->ntl_tag_password_md5[0] = '\0';
+  usr_settings->vlither_tag_backend_url[0] = '\0';
+  usr_settings->vlither_tag_id = -1;
+  usr_settings->vlither_tag_name[0] = '\0';
+  usr_settings->show_tags = true;
+  usr_settings->show_ntl_tags = true;
+  usr_settings->show_vlither_tags = true;
+  usr_settings->background_style = 0;
+  for (int i = 0; i < MAX_KEY_BTNS; ++i) usr_settings->key_btn_shape[i] = 0;
+  usr_settings->tag_size_scale = 1.0f;
+  usr_settings->tag_size_with_zoom = true;
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -250,9 +262,33 @@ void read_user_settings(user_settings* usr_settings) {
   size_t v23_prefix = offsetof(user_settings, transparent_skin_opacity);
   size_t v24_prefix = offsetof(user_settings, ntl_chat_minimized);
   size_t v25_prefix = offsetof(user_settings, ntl_client_id);
+  size_t v254_prefix = offsetof(user_settings, ntl_tag_id);
+  size_t v255_prefix = offsetof(user_settings, vlither_tag_backend_url);
+  size_t v256_prefix = offsetof(user_settings, show_tags);
+  size_t v26_prefix = offsetof(user_settings, background_style);
+  size_t v27_prefix = offsetof(user_settings, tag_size_scale);
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v27_prefix)
+    /* Preserve the complete v2.6 background and keyboard-button settings. */
+    bytes_to_read = v27_prefix;
+  else if ((size_t)file_size >= v26_prefix)
+    /* Builds immediately before the background-style / button-shape fields
+       contain the full visibility controls followed only by tail padding. */
+    bytes_to_read = v26_prefix;
+  else if ((size_t)file_size >= v256_prefix)
+    /* Builds immediately before the visibility controls contain the complete
+       Vlither tag settings followed only by compiler tail padding. */
+    bytes_to_read = v256_prefix;
+  else if ((size_t)file_size >= v255_prefix)
+    /* The prior NTL-tag build ended immediately before the Vlither backend
+       fields. Ignore its compiler tail padding. */
+    bytes_to_read = v255_prefix;
+  else if ((size_t)file_size >= v254_prefix)
+    /* v2.5.4 ended before the appended NTL tag settings. Ignore any old tail
+       padding so it cannot overwrite the new defaults. */
+    bytes_to_read = v254_prefix;
   else if ((size_t)file_size >= v25_prefix)
     /* v2.5 ended at v25_prefix, followed only by compiler tail padding. Do not
        copy that padding into the new persistent NTL client ID. */
@@ -348,6 +384,44 @@ void read_user_settings(user_settings* usr_settings) {
         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
   }
   if (!valid_ntl_client_id) loaded.ntl_client_id[0] = 0;
+
+  loaded.ntl_tag_password_md5[32] = 0;
+  bool valid_tag_hash = !loaded.ntl_tag_password_md5[0] ||
+                        strlen(loaded.ntl_tag_password_md5) == 32;
+  for (int i = 0; valid_tag_hash && loaded.ntl_tag_password_md5[0] && i < 32; ++i) {
+    char c = loaded.ntl_tag_password_md5[i];
+    valid_tag_hash = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+  }
+  if (!valid_tag_hash) loaded.ntl_tag_password_md5[0] = 0;
+  if (loaded.ntl_tag_id < -1 || loaded.ntl_tag_id > 666) {
+    loaded.ntl_tag_id = -1;
+    loaded.ntl_tag_password_md5[0] = 0;
+  }
+
+  loaded.vlither_tag_backend_url[sizeof loaded.vlither_tag_backend_url - 1] = 0;
+  loaded.vlither_tag_name[sizeof loaded.vlither_tag_name - 1] = 0;
+  if (loaded.vlither_tag_id < -1) loaded.vlither_tag_id = -1;
+  if (loaded.vlither_tag_backend_url[0] &&
+      strncmp(loaded.vlither_tag_backend_url, "https://", 8) != 0 &&
+      strncmp(loaded.vlither_tag_backend_url, "http://", 7) != 0) {
+    loaded.vlither_tag_backend_url[0] = 0;
+    loaded.vlither_tag_id = -1;
+    loaded.vlither_tag_name[0] = 0;
+  }
+
+  loaded.show_tags = !!loaded.show_tags;
+  loaded.show_ntl_tags = !!loaded.show_ntl_tags;
+  loaded.show_vlither_tags = !!loaded.show_vlither_tags;
+
+  if (loaded.background_style < 0 || loaded.background_style > 1)
+    loaded.background_style = 0;
+  for (int i = 0; i < MAX_KEY_BTNS; ++i) {
+    if (loaded.key_btn_shape[i] > 1) loaded.key_btn_shape[i] = 0;
+  }
+  if (!isfinite(loaded.tag_size_scale) || loaded.tag_size_scale < 0.50f ||
+      loaded.tag_size_scale > 2.00f)
+    loaded.tag_size_scale = 1.0f;
+  loaded.tag_size_with_zoom = !!loaded.tag_size_with_zoom;
 
   *usr_settings = loaded;
 }

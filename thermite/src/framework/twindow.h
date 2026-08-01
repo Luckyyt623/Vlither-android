@@ -17,6 +17,7 @@ typedef struct {
     float x, y;
     bool  down;
     bool  just_down;
+    bool  just_up;
 
     float boost_x, boost_y;
     bool  boost_down;

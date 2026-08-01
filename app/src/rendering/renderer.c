@@ -141,6 +141,9 @@ renderer* renderer_create(tenv* env) {
   DLOG("renderer: loading bg texture (4K)");
   r->bg_tex = create_mipmap_texture(ctx, "app/res/textures/background_4k.png");
   DLOG("renderer: bg_tex=%p", (void*)r->bg_tex);
+  DLOG("renderer: loading alt background texture");
+  r->bg_tex_alt = create_mipmap_texture(ctx, "app/res/textures/background_tiles_alt.png");
+  DLOG("renderer: bg_tex_alt=%p", (void*)r->bg_tex_alt);
 
   DLOG("renderer: loading atlas texture (8K) - needs ~256MB staging RAM");
   r->tex_atlas = create_mipmap_texture(ctx, "app/res/textures/tex_atlas_8k.png");
@@ -155,11 +158,14 @@ renderer* renderer_create(tenv* env) {
     DLOG("FATAL: texture load failed bg=%p atlas=%p boost=%p — likely OOM or missing asset",
          (void*)r->bg_tex, (void*)r->tex_atlas, (void*)r->boost_button_tex);
     if (r->bg_tex) { destroy_texture(ctx, r->bg_tex); }
+    if (r->bg_tex_alt) { destroy_texture(ctx, r->bg_tex_alt); }
     if (r->tex_atlas) { destroy_texture(ctx, r->tex_atlas); }
     if (r->boost_button_tex) { destroy_texture(ctx, r->boost_button_tex); }
     free(r);
     return NULL;
   }
+  r->active_bg_tex = r->bg_tex;
+  r->bg_variant = 0;
 
   r->boost_button_ds = igImplVulkan_AddTexture(
       r->linear_sampler, r->boost_button_tex->view,
@@ -267,8 +273,8 @@ renderer* renderer_create(tenv* env) {
 
   r->global.viewport[0] = r->size[0];
   r->global.viewport[1] = r->size[1];
-  r->global.bg_size[0] = r->bg_tex->size[0];
-  r->global.bg_size[1] = r->bg_tex->size[1];
+  r->global.bg_size[0] = r->active_bg_tex->size[0];
+  r->global.bg_size[1] = r->active_bg_tex->size[1];
   r->global.bg_color[0] = 1;
   r->global.bg_color[1] = 1;
   r->global.bg_scale = 1;
@@ -334,7 +340,7 @@ renderer* renderer_create(tenv* env) {
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .pImageInfo =
                     &(VkDescriptorImageInfo){
-                        r->linear_sampler, r->bg_tex->view,
+                        r->linear_sampler, r->active_bg_tex->view,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             },
             {
@@ -362,6 +368,34 @@ renderer* renderer_create(tenv* env) {
   r->cr = spr_renderer_create(ctx, 1, r->pipeline_layout, ctx->renderpass);
 
   return r;
+}
+
+void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
+  if (!r || !ctx) return;
+  if (variant != 1 || !r->bg_tex_alt) variant = 0;
+  texture* desired = variant == 1 ? r->bg_tex_alt : r->bg_tex;
+  if (!desired) desired = r->bg_tex;
+  if (r->active_bg_tex == desired && r->bg_variant == variant) return;
+  r->active_bg_tex = desired;
+  r->bg_variant = variant;
+  r->global.bg_size[0] = desired->size[0];
+  r->global.bg_size[1] = desired->size[1];
+  for (int i = 0; i < ctx->fif; i++) {
+    VkDescriptorImageInfo image_info = {
+        r->linear_sampler, desired->view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = r->global_set[i],
+        .dstBinding = 2,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &image_info,
+    };
+    vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+  }
 }
 
 void renderer_render(renderer* r, tcontext* ctx, vec4 clear_color) {
@@ -460,6 +494,7 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
   if (r->boost_button_ds) igImplVulkan_RemoveTexture(r->boost_button_ds);
   destroy_texture(ctx, r->boost_button_tex);
   destroy_texture(ctx, r->tex_atlas);
+  if (r->bg_tex_alt) destroy_texture(ctx, r->bg_tex_alt);
   destroy_texture(ctx, r->bg_tex);
   vkDestroySampler(ctx->device, r->nearest_sampler, NULL);
   vkDestroySampler(ctx->device, r->linear_sampler, NULL);

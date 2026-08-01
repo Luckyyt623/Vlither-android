@@ -2,6 +2,8 @@
 #include <external/stb/stb_image.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
+#include <stddef.h>
 
 #ifdef ANDROID
 #include <android/asset_manager.h>
@@ -38,63 +40,63 @@ static stbi_uc* _load_from_asset(const char* filename, int* w, int* h, int* c) {
 }
 #endif
 
-texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
+static texture* create_mipmap_texture_rgba(tcontext* ctx,
+                                             const stbi_uc* data,
+                                             int w, int h) {
+  if (!ctx || !data || w <= 0 || h <= 0) return NULL;
   texture* r = malloc(sizeof(texture));
+  if (!r) return NULL;
 
   VkBuffer staging_buffer;
   VmaAllocation staging_memory;
   VmaAllocationInfo staging_info;
+  int mip_levels = (uint32_t)(floorf(log2f(GLM_MAX(w, h))) + 1);
 
-  int w, h, c;
-#ifdef ANDROID
-  stbi_uc* data = _load_from_asset(filename, &w, &h, &c);
-#else
-  stbi_uc* data = stbi_load(filename, &w, &h, &c, 4);
-#endif
-  if (!data) {
+  if (vmaCreateBuffer(
+          ctx->allocator,
+          &(VkBufferCreateInfo){.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                .pNext = NULL,
+                                .flags = 0,
+                                .size = (VkDeviceSize)w * (VkDeviceSize)h * 4,
+                                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                .sharingMode = VK_SHARING_MODE_EXCLUSIVE},
+          &(VmaAllocationCreateInfo){
+              .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                       VMA_ALLOCATION_CREATE_MAPPED_BIT,
+              .usage = VMA_MEMORY_USAGE_AUTO},
+          &staging_buffer, &staging_memory, &staging_info) != VK_SUCCESS) {
     free(r);
     return NULL;
   }
-  int mip_levels = (uint32_t)(floorf(log2f(GLM_MAX(w, h))) + 1);
 
-  vmaCreateBuffer(
-      ctx->allocator,
-      &(VkBufferCreateInfo){.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                            .pNext = NULL,
-                            .flags = 0,
-                            .size = w * h * 4,
-                            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                            .sharingMode = VK_SHARING_MODE_EXCLUSIVE},
-      &(VmaAllocationCreateInfo){
-          .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                   VMA_ALLOCATION_CREATE_MAPPED_BIT,
-          .usage = VMA_MEMORY_USAGE_AUTO},
-      &staging_buffer, &staging_memory, &staging_info);
+  memcpy(staging_info.pMappedData, data, (size_t)w * (size_t)h * 4);
 
-  memcpy(staging_info.pMappedData, data, w * h * 4);
-  stbi_image_free(data);
-
-  vmaCreateImage(
-      ctx->allocator,
-      &(VkImageCreateInfo){.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                           .pNext = NULL,
-                           .flags = 0,
-                           .imageType = VK_IMAGE_TYPE_2D,
-                           .format = VK_FORMAT_R8G8B8A8_UNORM,
-                           .extent = {w, h, 1},
-                           .mipLevels = mip_levels,
-                           .arrayLayers = 1,
-                           .samples = VK_SAMPLE_COUNT_1_BIT,
-                           .tiling = VK_IMAGE_TILING_OPTIMAL,
-                           .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                           .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-                           .queueFamilyIndexCount = 0,
-                           .pQueueFamilyIndices = NULL,
-                           .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED},
-      &(VmaAllocationCreateInfo){
-          .flags = 0, .usage = VMA_MEMORY_USAGE_AUTO, .priority = 1.0f},
-      &r->image, &r->memory, NULL);
+  if (vmaCreateImage(
+          ctx->allocator,
+          &(VkImageCreateInfo){.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                               .pNext = NULL,
+                               .flags = 0,
+                               .imageType = VK_IMAGE_TYPE_2D,
+                               .format = VK_FORMAT_R8G8B8A8_UNORM,
+                               .extent = {(uint32_t)w, (uint32_t)h, 1},
+                               .mipLevels = (uint32_t)mip_levels,
+                               .arrayLayers = 1,
+                               .samples = VK_SAMPLE_COUNT_1_BIT,
+                               .tiling = VK_IMAGE_TILING_OPTIMAL,
+                               .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                               .queueFamilyIndexCount = 0,
+                               .pQueueFamilyIndices = NULL,
+                               .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED},
+          &(VmaAllocationCreateInfo){
+              .flags = 0, .usage = VMA_MEMORY_USAGE_AUTO, .priority = 1.0f},
+          &r->image, &r->memory, NULL) != VK_SUCCESS) {
+    vmaDestroyBuffer(ctx->allocator, staging_buffer, staging_memory);
+    free(r);
+    return NULL;
+  }
 
   vkResetCommandBuffer(ctx->transfer_cmd, 0);
   vkBeginCommandBuffer(ctx->transfer_cmd,
@@ -132,7 +134,7 @@ texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
                              .baseArrayLayer = 0,
                              .layerCount = 1},
         .imageOffset = {0, 0, 0},
-        .imageExtent = {w, h, 1}});
+        .imageExtent = {(uint32_t)w, (uint32_t)h, 1}});
 
   vkCmdPipelineBarrier(
       ctx->transfer_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -168,17 +170,26 @@ texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
           .dstQueueFamilyIndex = ctx->queue_family,
           .image = r->image,
           .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                               .baseMipLevel = i,
+                               .baseMipLevel = (uint32_t)i,
                                .levelCount = 1,
                                .baseArrayLayer = 0,
                                .layerCount = 1}});
 
-    vkCmdBlitImage(ctx->transfer_cmd, r->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &(VkImageBlit){
-      .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1},
-      .srcOffsets = {{0, 0, 0}, {(int32_t)(w >> (i - 1)), (int32_t)(h >> (i - 1)), 1}},
-      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1},
-      .dstOffsets = {{0, 0, 0}, {(int32_t)(w >> i), (int32_t)(h >> i), 1}}
-    }, VK_FILTER_LINEAR);
+    int32_t src_w = GLM_MAX(1, w >> (i - 1));
+    int32_t src_h = GLM_MAX(1, h >> (i - 1));
+    int32_t dst_w = GLM_MAX(1, w >> i);
+    int32_t dst_h = GLM_MAX(1, h >> i);
+    vkCmdBlitImage(ctx->transfer_cmd, r->image,
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                   &(VkImageBlit){
+                     .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT,
+                                        (uint32_t)(i - 1), 0, 1},
+                     .srcOffsets = {{0, 0, 0}, {src_w, src_h, 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT,
+                                        (uint32_t)i, 0, 1},
+                     .dstOffsets = {{0, 0, 0}, {dst_w, dst_h, 1}}
+                   }, VK_FILTER_LINEAR);
 
     vkCmdPipelineBarrier(
       ctx->transfer_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -194,7 +205,7 @@ texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
           .dstQueueFamilyIndex = ctx->queue_family,
           .image = r->image,
           .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                               .baseMipLevel = i,
+                               .baseMipLevel = (uint32_t)i,
                                .levelCount = 1,
                                .baseArrayLayer = 0,
                                .layerCount = 1}});
@@ -215,48 +226,75 @@ texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
           .image = r->image,
           .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                                .baseMipLevel = 0,
-                               .levelCount = mip_levels,
+                               .levelCount = (uint32_t)mip_levels,
                                .baseArrayLayer = 0,
                                .layerCount = 1}});
 
   vkEndCommandBuffer(ctx->transfer_cmd);
-
   vkQueueSubmit(ctx->queue, 1,
                 &(VkSubmitInfo){.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                                 .pNext = NULL,
                                 .commandBufferCount = 1,
                                 .pCommandBuffers = &ctx->transfer_cmd},
                 ctx->transfer_fence);
-
   vkWaitForFences(ctx->device, 1, &ctx->transfer_fence, VK_TRUE, UINT64_MAX);
   vkResetFences(ctx->device, 1, &ctx->transfer_fence);
 
-  vkCreateImageView(
-      ctx->device,
-      &(VkImageViewCreateInfo){
-          .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-          .pNext = NULL,
-          .flags = 0,
-          .image = r->image,
-          .viewType = VK_IMAGE_VIEW_TYPE_2D,
-          .format = VK_FORMAT_R8G8B8A8_UNORM,
-          .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
-                         VK_COMPONENT_SWIZZLE_IDENTITY,
-                         VK_COMPONENT_SWIZZLE_IDENTITY,
-                         VK_COMPONENT_SWIZZLE_IDENTITY},
-          .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                               .baseMipLevel = 0,
-                               .levelCount = mip_levels,
-                               .baseArrayLayer = 0,
-                               .layerCount = 1}},
-      NULL, &r->view);
+  if (vkCreateImageView(
+          ctx->device,
+          &(VkImageViewCreateInfo){
+              .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+              .pNext = NULL,
+              .flags = 0,
+              .image = r->image,
+              .viewType = VK_IMAGE_VIEW_TYPE_2D,
+              .format = VK_FORMAT_R8G8B8A8_UNORM,
+              .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                             VK_COMPONENT_SWIZZLE_IDENTITY,
+                             VK_COMPONENT_SWIZZLE_IDENTITY,
+                             VK_COMPONENT_SWIZZLE_IDENTITY},
+              .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                   .baseMipLevel = 0,
+                                   .levelCount = (uint32_t)mip_levels,
+                                   .baseArrayLayer = 0,
+                                   .layerCount = 1}},
+          NULL, &r->view) != VK_SUCCESS) {
+    vmaDestroyImage(ctx->allocator, r->image, r->memory);
+    vmaDestroyBuffer(ctx->allocator, staging_buffer, staging_memory);
+    free(r);
+    return NULL;
+  }
 
   vmaDestroyBuffer(ctx->allocator, staging_buffer, staging_memory);
-
   r->size[0] = w;
   r->size[1] = h;
-
   return r;
+}
+
+texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
+  int w = 0, h = 0, c = 0;
+#ifdef ANDROID
+  stbi_uc* data = _load_from_asset(filename, &w, &h, &c);
+#else
+  stbi_uc* data = stbi_load(filename, &w, &h, &c, 4);
+#endif
+  if (!data) return NULL;
+  texture* result = create_mipmap_texture_rgba(ctx, data, w, h);
+  stbi_image_free(data);
+  return result;
+}
+
+texture* create_mipmap_texture_from_memory(tcontext* ctx,
+                                            const unsigned char* encoded,
+                                            size_t encoded_size) {
+  if (!encoded || encoded_size == 0 || encoded_size > INT_MAX) return NULL;
+  int w = 0, h = 0, c = 0;
+  stbi_uc* data = stbi_load_from_memory(encoded, (int)encoded_size,
+                                        &w, &h, &c, 4);
+  if (!data) return NULL;
+  texture* result = create_mipmap_texture_rgba(ctx, data, w, h);
+  stbi_image_free(data);
+  return result;
 }
 
 texture* create_minimap_texture(tcontext* ctx, int width) {

@@ -1,6 +1,8 @@
 #include "game/loop.h"
 #include "game/bg_preview.h"
 #include "game/ntl_team.h"
+#include "game/ntl_tags.h"
+#include "game/vlither_tags.h"
 #include "ui/skin_editor.h"
 #include "ui/title_screen.h"
 #include "ui/settings.h"
@@ -94,12 +96,16 @@ void tinit(tenv* env) {
   game_data_init(env);
   ui_key_buttons_init(env);
   ntl_team_init(env);
+  ntl_tags_init(env);
+  vlither_tags_init(env);
   DLOG("tinit: game_data_init done");
   DLOG("tinit: complete");
 }
 
 void tdestroy(tenv* env) {
   ui_key_buttons_destroy(env);
+  vlither_tags_destroy(env);
+  ntl_tags_destroy(env);
   ntl_team_destroy(env);
   game_data_destroy(env);
   ui_controls_destroy(env);
@@ -177,6 +183,7 @@ void trender(tenv* env) {
                     gdata->curr_screen == CONTROLS ||
                     gdata->curr_screen == SKIN_EDITOR ||
                     gdata->curr_screen == NTL_PANEL ||
+                    gdata->curr_screen == KEYBOARD_EDITOR ||
                     igGetIO_Nil()->WantTextInput);
     if (g_panel_open) {
       touch_state* t = &env->wnd->touch;
@@ -230,12 +237,13 @@ void trender(tenv* env) {
        populated official one. */
     bg_preview_update(env);
     ntl_team_update(env);
+    ntl_tags_update(env);
+    vlither_tags_update(env);
 
     /* Process on-screen key buttons before gameplay input. Android keeps a
        separate UI pointer stream, so a button gesture can be consumed here
        without interrupting the button hold itself or reaching the trackpad. */
-    if (usr->gdata.curr_screen == PLAYING ||
-        usr->gdata.curr_screen == TITLE_SCREEN)
+    if (usr->gdata.curr_screen == PLAYING)
       ui_key_buttons(env);
     if (usr->gdata.curr_screen == PLAYING)
       ntl_team_consume_ui_touch(env);
@@ -256,6 +264,10 @@ void trender(tenv* env) {
         break;
       case NTL_PANEL:
         ntl_team_panel(env);
+        break;
+      case KEYBOARD_EDITOR:
+        /* Dedicated black-screen editor for user-created keyboard buttons. */
+        ui_key_buttons(env);
         break;
       case CONTROLS:
         /* Use the same owned background-preview path as Settings. Calling

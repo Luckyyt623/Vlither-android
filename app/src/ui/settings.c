@@ -56,6 +56,14 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Show snake scores");
       igAlignTextToFramePadding();
+      igText("Show tags");
+      igAlignTextToFramePadding();
+      igText("Show NTL tags");
+      igAlignTextToFramePadding();
+      igText("Show Vlither tags");
+      igAlignTextToFramePadding();
+      igText("Background style");
+      igAlignTextToFramePadding();
       igText("Smooth zoom");
       igAlignTextToFramePadding();
       igText("Zoom step");
@@ -120,6 +128,14 @@ void ui_settings(tenv* env) {
                       (int*)&usrs->snake_names_font_size,
                       (const char*[]){"Small", "Regular", "Large"}, 3, -1);
       igCheckbox("##snake scores", &usrs->snake_scores);
+      igCheckbox("##show all tags", &usrs->show_tags);
+      igBeginDisabled(!usrs->show_tags);
+      igCheckbox("##show NTL tags", &usrs->show_ntl_tags);
+      igCheckbox("##show Vlither tags", &usrs->show_vlither_tags);
+      igEndDisabled();
+      igSetNextItemWidth(-1);
+      igCombo_Str_arr("##background style", &usrs->background_style,
+                      (const char*[]){"Classic", "Dark tiles"}, 2, -1);
       igCheckbox("##smooth zoom", &usrs->smooth_zoom);
       igSetNextItemWidth(-1);
       igSliderFloat("##zoom step", &usrs->zoom_step, 0.05f, 0.5f, "%.2f",

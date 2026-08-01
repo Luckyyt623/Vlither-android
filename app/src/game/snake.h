@@ -20,6 +20,10 @@ typedef struct snake {
   int rsc;
   int iiv;
   int edir;
+  int ntl_tag_id;
+  int ntl_packet_tag_id;
+  int vlither_tag_id;
+  uint16_t ntl_id;
 
   float xx;
   float yy;
@@ -54,6 +58,13 @@ typedef struct snake {
   float sep;
   float fchl;
 
+  /* Smoothed tag headings are kept per snake so tags trail turns naturally
+     without sharing state between players or tag systems. */
+  float ntl_tag_follow_ang;
+  float ntl_tag_follow_mtm;
+  float vlither_tag_follow_ang;
+  float vlither_tag_follow_mtm;
+
   float fxs[GD_EEZ];
   float fys[GD_EEZ];
   float fchls[GD_EEZ];
@@ -66,6 +77,8 @@ typedef struct snake {
 
   bool cusk;
   bool dead;
+  bool ntl_tag_follow_ready;
+  bool vlither_tag_follow_ready;
 
   body_part* pts;
   gpt* gptz;

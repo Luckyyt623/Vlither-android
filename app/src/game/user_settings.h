@@ -168,6 +168,33 @@ typedef struct user_settings {
      stable so nickname changes update the existing player instead of creating
      a nameless/new entry. */
   char ntl_client_id[9];
+
+  /* NTL tag selection. Public tags are also embedded in the normal Slither
+     skin packet; protected tags use the NTL tag mapping service. */
+  int ntl_tag_id;
+  char ntl_tag_password_md5[33];
+
+  /* Vlither-only backend tags. The URL field is retained only for binary
+     settings compatibility; current builds use the official hardcoded
+     Vlither backend. The selected assignment is persisted against
+     ntl_client_id. */
+  char vlither_tag_backend_url[192];
+  int vlither_tag_id;
+  char vlither_tag_name[64];
+
+  /* Tag visibility controls. The master switch hides both systems without
+     disconnecting either service or clearing the player's selected tags. */
+  bool show_tags;
+  bool show_ntl_tags;
+  bool show_vlither_tags;
+
+  /* v2.6 extension fields. */
+  int background_style;
+  uint8_t key_btn_shape[MAX_KEY_BTNS];
+
+  /* Shared NTL/Vlither tag display editor. */
+  float tag_size_scale;
+  bool tag_size_with_zoom;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

@@ -9,6 +9,7 @@
 
 #include "../game/food.h"
 #include "../game/snake.h"
+#include "../game/ntl_tags.h"
 #include "../user.h"
 
 void snl(game_data* gdata, snake* o) {
@@ -103,6 +104,28 @@ uint8_t* get_skin_compressed(tuser_data* usr) {
   return reduced;
 }
 
+static uint8_t* get_default_skin_compressed(tuser_data* usr) {
+  user_settings* usrs = &usr->usrs;
+  game_data* gdata = &usr->gdata;
+  int skin = usrs->default_skin % NUM_DEFAULT_SKINS;
+  int skin_len = gdata->default_skins[skin][0];
+  uint8_t* reduced = tdarray_create(uint8_t);
+  if (skin_len <= 0) return reduced;
+
+  uint8_t sequence_count = 0;
+  for (int i = 0; i < skin_len; ++i) {
+    uint8_t cg_id = gdata->default_skins[skin][i + 1];
+    ++sequence_count;
+    if (i + 1 == skin_len ||
+        gdata->default_skins[skin][i + 2] != cg_id) {
+      tdarray_push(&reduced, &sequence_count);
+      tdarray_push(&reduced, &cg_id);
+      sequence_count = 0;
+    }
+  }
+  return reduced;
+}
+
 void got_packet(tenv* env, uint8_t* a, int a_len) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -126,9 +149,14 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     uint8_t* ba = NULL;
     uint8_t* skin_compressed = NULL;
     int skin_compressed_len = 0;
+    int selected_tag = usrs->ntl_tag_id;
+    bool packet_tag = ntl_tags_is_packet_tag(selected_tag);
+    bool send_skin_payload = usrs->custom_skin || packet_tag;
 
-    if (usrs->custom_skin) {
-      skin_compressed = get_skin_compressed(usr);
+    if (send_skin_payload) {
+      skin_compressed = usrs->custom_skin
+                            ? get_skin_compressed(usr)
+                            : get_default_skin_compressed(usr);
       skin_compressed_len = tdarray_length(skin_compressed);
       ba = malloc(8 + 20 + nick_len + 8 + skin_compressed_len);
     } else {
@@ -156,21 +184,30 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     ba[m] = usrs->accessory;
     m++;
 
-    if (usrs->custom_skin) {
-      ba[m++] = 255;
-      ba[m++] = 255;
-      ba[m++] = 255;
-      ba[m++] = 0;
-      ba[m++] = 0;
-      ba[m++] = 0;
-      ba[m++] = rand() % 256;
-      ba[m++] = rand() % 256;
-
-      for (int i = 0; i < skin_compressed_len; i++) {
-        ba[m] = skin_compressed[i];
-        m++;
+    if (send_skin_payload) {
+      uint8_t marker0 = 255;
+      uint8_t marker1 = 255;
+      uint8_t marker6 = (uint8_t)(rand() % 256);
+      if (packet_tag && selected_tag <= 59) {
+        marker0 = 254;
+        marker1 = 18;
+        marker6 = (uint8_t)selected_tag;
+      } else if (packet_tag) {
+        marker0 = 255;
+        marker1 = 38;
+        marker6 = (uint8_t)(selected_tag - 200);
       }
 
+      ba[m++] = marker0;
+      ba[m++] = marker1;
+      ba[m++] = usrs->custom_skin ? 255 : usrs->default_skin;
+      ba[m++] = 0;
+      ba[m++] = 0;
+      ba[m++] = 0;
+      ba[m++] = marker6;
+      ba[m++] = rand() % 256;
+
+      for (int i = 0; i < skin_compressed_len; i++) ba[m++] = skin_compressed[i];
       tdarray_destroy(skin_compressed);
     }
 
@@ -257,13 +294,23 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       m += nl;
       int skl = a[m];
       m++;
-      if (skl > 0) {
+      o.ntl_tag_id = -1;
+      o.ntl_packet_tag_id = -1;
+      o.vlither_tag_id = -1;
+      o.ntl_id = (uint16_t)id;
+      if (skl >= 8 && m + skl <= alen) {
+        if (a[m] == 254 && a[m + 1] == 18 && a[m + 6] <= 59) {
+          o.ntl_packet_tag_id = (int)a[m + 6];
+        } else if (a[m] == 255 && a[m + 1] == 38) {
+          int public_tag = 200 + (int)a[m + 6];
+          if (ntl_tags_exists(public_tag)) o.ntl_packet_tag_id = public_tag;
+        }
+        o.ntl_tag_id = o.ntl_packet_tag_id;
 
-        for (int j = 8; j < skl; j += 2) {
+        for (int j = 8; j + 1 < skl; j += 2) {
           for (int i = 0; i < a[m + j]; i++) {
-            if (o.cusk_len < MAX_SKIN_CODE_LEN) {
+            if (o.cusk_len < MAX_SKIN_CODE_LEN)
               o.cusk_data[o.cusk_len++] = a[m + j + 1];
-            }
           }
         }
       }
@@ -437,6 +484,19 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
           break;
         }
       }
+    }
+  } else if (cmd == 'S') {
+    if (alen >= 7) {
+      int snake_id = a[m] << 8 | a[m + 1];
+      m += 2;
+      uint32_t encoded = ((uint32_t)a[m] << 24) |
+                         ((uint32_t)a[m + 1] << 16) |
+                         ((uint32_t)a[m + 2] << 8) |
+                         (uint32_t)a[m + 3];
+      uint16_t ntl_id = (uint16_t)((((encoded & 63u) << 10) |
+                                    ((uint32_t)snake_id & 1023u)) & 65535u);
+      snake* mapped = get_snake(gdata, snake_id);
+      if (mapped) mapped->ntl_id = ntl_id;
     }
   } else if (cmd == 'e' || cmd == 'E' || cmd == '3' || cmd == '4' ||
              cmd == '5' || cmd == 'd' || cmd == '7') {

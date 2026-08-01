@@ -5,12 +5,16 @@
 #include <stdio.h>
 
 #include "../user.h"
+#include "../game/ntl_tags.h"
+#include "../game/vlither_tags.h"
 
 int skin_code_filter(ImGuiInputTextCallbackData* data) {
   return !((data->EventChar >= 'a' && data->EventChar <= 'z') ||
            (data->EventChar == '-') || (data->EventChar == ',') ||
            (data->EventChar >= '0' && data->EventChar <= '9'));
 }
+
+static int s_skin_panel = 1; /* 0 custom editor, 1 NTL tags, 2 Vlither tags */
 
 void ui_skin_editor_init(tenv* env) {}
 
@@ -207,6 +211,15 @@ void ui_skin_editor(tenv* env) {
         &(bp_instance){{acx - m, acy - m, m * 2, 0}, acc->uv, {1, 1, 1, 1}});
   }
 
+  /* Show the currently highlighted NTL image on the upper preview snake. A
+     private image can be previewed before its password is authorized. */
+  int preview_tag_id = ntl_tags_preview_id();
+  if (preview_tag_id >= 0)
+    ntl_tags_draw_preview(env, preview_tag_id,
+                          last_bp_pos[0] + scale * 0.5f,
+                          last_bp_pos[1] + scale * 0.5f,
+                          0.0f, scale / 48.0f);
+
   igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
   igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 3));
@@ -243,8 +256,12 @@ void ui_skin_editor(tenv* env) {
   igSetCursorPosY((grid_y) -
                   ((style->ItemSpacing.y + frame_height) * 2));
   if (igButton(usrs->custom_skin ? "\uea40 Default" : "\ue905 Custom",
-               (ImVec2){tot_size[0]}))
+               (ImVec2){tot_size[0]})) {
     usrs->custom_skin = !usrs->custom_skin;
+    /* The separate Skin tab was removed. Opening Custom now brings the
+       colour/accessory editor into view; returning to Default opens NTL tags. */
+    s_skin_panel = usrs->custom_skin ? 0 : 1;
+  }
 
   igSetCursorPosX(ctx->size[0] * 0.5 - tot_size[0] * 0.5f);
   igSetCursorPosY((grid_y) -
@@ -255,7 +272,7 @@ void ui_skin_editor(tenv* env) {
     save_user_settings(usrs);
   }
 
-  if (usrs->custom_skin) {
+  {
     float panel_w = tot_size[0] + style->ScrollbarSize + style->WindowPadding.x * 2.0f;
     if (panel_w > ctx->size[0] - style->WindowPadding.x * 2.0f)
       panel_w = ctx->size[0] - style->WindowPadding.x * 2.0f;
@@ -271,6 +288,18 @@ void ui_skin_editor(tenv* env) {
         ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_NoMove);
 
     if (child_visible) {
+      float tab_w = (panel_w - style->WindowPadding.x * 2.0f -
+                     style->ItemSpacing.x) / 2.0f;
+      if (igButton("NTL Tags", (ImVec2){tab_w, 0})) s_skin_panel = 1;
+      igSameLine(0, style->ItemSpacing.x);
+      if (igButton("Vlither Tags", (ImVec2){tab_w, 0})) s_skin_panel = 2;
+      igSeparator();
+
+      if (s_skin_panel == 1) {
+        ntl_tags_skin_panel(env);
+      } else if (s_skin_panel == 2) {
+        vlither_tags_skin_panel(env);
+      } else if (usrs->custom_skin) {
       float clip_x1 = panel_x;
       float clip_y1 = grid_y;
       float clip_x2 = panel_x + panel_w - style->ScrollbarSize;
@@ -391,6 +420,10 @@ void ui_skin_editor(tenv* env) {
       igSetCursorPosX(0);
       igSetCursorPosY(accessories_y + (style->ItemSpacing.y + scale) * 5.0f);
       igDummy((ImVec2){tot_size[0], style->ItemSpacing.y});
+      } else {
+        /* Default skins do not need a separate lower-panel tab. */
+        s_skin_panel = 1;
+      }
     }
     igEndChild();
   }

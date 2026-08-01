@@ -1,6 +1,8 @@
 #include "redraw.h"
 
 #include "../user.h"
+#include "ntl_tags.h"
+#include "vlither_tags.h"
 
 void lerp_minimap_float(float* dst, const uint8_t* src, int mmsz, float alpha) {
   int stride = MAX_MINIMAP_SIZE;
@@ -1492,11 +1494,29 @@ void redraw(tenv* env) {
 
   igPopFont();
 
+  /* NTL-compatible tags are attached to every visible snake. Public tags
+     come from the normal Slither skin packet; protected tags are supplied by
+     the same NTL mapping service used by the browser extension. */
+  ntl_tags_begin_frame();
+  if (usrs->show_tags) {
+    int tag_snakes_len = tdarray_length(gdata->data.snakes);
+    for (int i = tag_snakes_len - 1; i >= 0; --i) {
+      snake* tagged = &gdata->data.snakes[i];
+      if (!tagged->iiv) continue;
+      float tag_alpha = tagged->alive_amt * (1.0f - tagged->dead_amt);
+      if (usrs->show_ntl_tags && tagged->ntl_tag_id >= 0)
+        ntl_tags_draw(env, tagged, tag_alpha, mww2, mhh2);
+      if (usrs->show_vlither_tags && tagged->vlither_tag_id >= 0)
+        vlither_tags_draw(env, tagged, tag_alpha, mww2, mhh2);
+    }
+  }
+
   usr->r->global.view[0] = gdata->data.view_xx;
   usr->r->global.view[1] = gdata->data.view_yy;
   usr->r->global.zoom = gdata->data.gsc;
   usr->r->global.grd = gdata->data.grd;
   usr->r->global.bd_radius = gdata->data.flux_grd;
+  renderer_set_background_variant(usr->r, env->ctx, usrs->background_style);
   usr->r->global.bd_color[0] = usrs->bd_color[0];
   usr->r->global.bd_color[1] = usrs->bd_color[1];
   usr->r->global.bd_color[2] = usrs->bd_color[2];

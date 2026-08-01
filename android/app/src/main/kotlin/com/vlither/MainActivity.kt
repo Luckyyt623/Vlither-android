@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.2"
+        private const val CURRENT_VERSION   = "4.3"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -207,31 +207,40 @@ class MainActivity : Activity() {
         btnPlay.alpha = 0.6f
     }
 
-    private fun showChangelog() {
-        val message = """
-Update 4.2
 
-  • Added separate Transparent Skin opacity and Center Line options.
-  • Added responsive UI scaling for different phone resolutions.
-  • Added a scrollable Custom Skin panel.
-  • Added Android clipboard paste support for nickname, IP, NTL and chat fields.
-  • Added draggable and resizable minimap controls.
-  • Added custom minimap marker shapes, sizes and colours.
-  • Added teammate positions and names on the minimap.
-  • Added saved NTL team profiles for Team ID and Auth Key.
-  • Added minimizable in-game NTL chat and a separate player list.
-  • Added 60/90/120/144 FPS caps and Performance Mode.
-  • Improved mobile multitouch so UI buttons work while using the Arrow.
-  • Fixed boost so it activates only from the Boost button.
-  • Now NTL Chat also available enter your NTL keys to join.
-  • Replaced the on-screen Boost button with the new custom image button.
-  • Various stability and interface fixes.
+private fun showChangelog() {
+    val message = """
+Update 4.3
+
+What's New:
+
+• Vlither Tags have been added. Check them out, and message Lucky on Discord to upload your own tags.
+
+• NTL Tags are now supported. You can view and apply NTL tags directly in Vlither.
+
+• Fixed inaccurate player positions on the minimap.
+
+• Removed the old on-screen buttons.
+
+• Added a complete keyboard-button editor. Go to:
+  Controls > Adjust Keyboard Buttons
+  You can add, move, resize, edit, or delete buttons.
+
+• Added tag visibility settings. Go to:
+  Settings > General
+  You can show or hide all tags, NTL tags, or Vlither tags.
+
+• Added global tag-size customization.
+
+• Added a new background. You can switch backgrounds from:
+  Settings > General
 
 Changes made by Lucky
-        """.trimIndent()
+    """.trimIndent()
+}
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.2")
+            .setTitle("What's New in v4.3")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

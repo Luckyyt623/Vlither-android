@@ -1,4 +1,6 @@
 #include "ntl_team.h"
+#include "ntl_tags.h"
+#include "vlither_tags.h"
 #include "../user.h"
 #include "../external/mongoose.h"
 #include <stdio.h>
@@ -26,9 +28,10 @@
 typedef struct {
   char nick[64], msg[NTL_CHAT_SNAPSHOT_MAX], srv[64], dt[128];
   float x, y;
-  int sid, score, rank;
+  int sid, score, rank, tg;
 } ntl_member;
 typedef struct {
+  tenv *env;
   struct mg_mgr mgr;
   struct mg_connection *request_conn;
   bool ready, request_active;
@@ -76,6 +79,7 @@ static const char *ntl_clean_name(const char *name);
 static void ntl_reset_feed(bool clear_history);
 static void ntl_ensure_client_id(user_settings *us);
 static void ntl_schedule_retry(double now);
+static bool same_server(const char *a, const char *b);
 static size_t ntl_append_utf8(char *out, size_t cap, size_t n,
                               unsigned int cp);
 
@@ -373,6 +377,41 @@ static void add_history(const char *nick, const char *text) {
   S.scroll_chat_bottom = true;
 }
 
+void ntl_team_system_message(const char *text) {
+  if (text && text[0]) add_history("SCRIPTBOT", text);
+}
+
+bool ntl_team_send_text(const char *text) {
+  if (!S.ready || !S.env || !S.env->usr || !text || !text[0]) return false;
+  user_settings *us = &S.env->usr->usrs;
+  if (!us->ntl_enabled || strlen(us->ntl_auth_key) < 16 ||
+      strlen(us->ntl_team_id) < 16) {
+    ntl_team_system_message(
+        "NTL chat is not configured. Add your team ID and auth key first.");
+    S.chat_open = true;
+    return false;
+  }
+
+  strncpy(S.input, text, sizeof S.input - 1);
+  S.input[sizeof S.input - 1] = 0;
+  S.chat_open = true;
+  us->ntl_chat_minimized = false;
+  ntl_queue_message(us);
+  return true;
+}
+
+int ntl_team_tag_for_snake(uint16_t ntl_id, const char *server) {
+  if (!S.ready || !server || !server[0]) return -1;
+  for (int i = 0; i < S.count; ++i) {
+    ntl_member *m = &S.members[i];
+    if (m->sid == (int)ntl_id && same_server(m->srv, server) &&
+        m->tg >= 0 && m->tg <= 666)
+      return m->tg;
+  }
+  return -1;
+}
+
+
 static void ntl_message_key(const char *nick, char *out, size_t cap) {
   if (!out || cap == 0) return;
   out[0] = 0;
@@ -641,6 +680,7 @@ static bool parse_members(const char *s, size_t len) {
       m->sid = (int)field_num(p, e, "sid", -1);
       m->score = (int)field_num(p, e, "score", 0);
       m->rank = (int)field_num(p, e, "rank", 0);
+      m->tg = (int)field_num(p, e, "tg", -1);
 
       if (S.inflight_msg[0] && strlen(m->nick) >= 8 &&
           !strncmp(m->nick, S.request_client_id, 8) &&
@@ -767,9 +807,12 @@ static void ntl_poll_request(tenv *env) {
   bool in_game = g->conn == CONNECTED && g->curr_screen == PLAYING;
   snake *local = in_game ? local_snake(g) : NULL;
   const char *presence_server = local ? us->ipv4 : "_GAME_MENU_";
-  float x = local ? local->xx + local->fx : 0.0f;
-  float y = local ? local->yy + local->fy : 0.0f;
-  int sid = local ? local->id : -1;
+  /* Match the official NTL client: publish the authoritative world
+     coordinates, not the short-lived render correction offsets (fx/fy).
+     Sending fx/fy can make the team marker jump ahead/behind after packets. */
+  float x = local ? local->xx : 0.0f;
+  float y = local ? local->yy : 0.0f;
+  int sid = local ? (int)local->ntl_id : -1;
   int score = local ? g->data.score : 0;
   int rank = local ? g->data.rank : 0;
 
@@ -799,9 +842,9 @@ static void ntl_poll_request(tenv *env) {
       S.request_path, sizeof S.request_path,
       "/slither/ntlplay-mt.php?auth=%s&tid=%s&nick=%s&score=%d"
       "&valx=%.0f&valy=%.0f&bot=false&sos=false&food=false&srv=%s"
-      "&sid=%d&msg=%s&rank=%d&dt=Vlither&cs=%d&ver=4.1&tlm=&di=1000",
+      "&sid=%d&msg=%s&rank=%d&dt=Vlither&cs=%d&tg=%d&ver=4.1&tlm=&di=1000",
       us->ntl_auth_key, us->ntl_team_id, nick, score, x, y, srv, sid,
-      msg, rank, local ? local->accessory : 0);
+      msg, rank, local ? local->accessory : 0, us->ntl_tag_id);
 
   S.request_conn =
       mg_http_connect(&S.mgr, "https://ntl-slither.com", cb, NULL);
@@ -811,6 +854,7 @@ static void ntl_poll_request(tenv *env) {
 }
 void ntl_team_init(tenv *env) {
   memset(&S, 0, sizeof S);
+  S.env = env;
   mg_mgr_init(&S.mgr);
   S.ready = true;
   if (env && env->usr) {
@@ -839,6 +883,7 @@ void ntl_team_init(tenv *env) {
 }
 void ntl_team_update(tenv *env) {
   if (!S.ready || !env || !env->usr) return;
+  S.env = env;
 
   user_settings *us = &env->usr->usrs;
   game_data *g = &env->usr->gdata;
@@ -923,6 +968,57 @@ static const char *ntl_clean_name(const char *name) {
   return name[0] ? name : "Player";
 }
 
+static bool ntl_member_same_client(const ntl_member *a,
+                                   const ntl_member *b) {
+  if (!a || !b || strlen(a->nick) < 8 || strlen(b->nick) < 8) return false;
+  for (int i = 0; i < 8; ++i) {
+    unsigned char ca = (unsigned char)a->nick[i];
+    unsigned char cb = (unsigned char)b->nick[i];
+    if (!isxdigit(ca) || !isxdigit(cb) || tolower(ca) != tolower(cb))
+      return false;
+  }
+  return true;
+}
+
+static bool ntl_member_is_local(const ntl_member *m,
+                                const user_settings *us,
+                                const snake *local) {
+  if (!m || !us) return false;
+
+  /* The eight-character client prefix survives nickname changes, respawns,
+     server changes and secondary-ID updates. It is the safest way to reject
+     our own echoed NTL presence record. */
+  if (strlen(m->nick) >= 8 && strlen(us->ntl_client_id) == 8) {
+    bool same_client = true;
+    for (int i = 0; i < 8; ++i) {
+      if (tolower((unsigned char)m->nick[i]) !=
+          tolower((unsigned char)us->ntl_client_id[i])) {
+        same_client = false;
+        break;
+      }
+    }
+    if (same_client) return true;
+  }
+
+  /* NTL's `sid` field is snake.ntlid (the secondary NTL ID), not the normal
+     Slither snake ID. The old comparison used local->id and intermittently
+     left a second, stale marker for the local player. */
+  return local && m->sid >= 0 && m->sid == (int)local->ntl_id;
+}
+
+static snake *ntl_visible_snake_for_member(game_data *g,
+                                            const ntl_member *m,
+                                            const snake *local) {
+  if (!g || !m || m->sid < 0) return NULL;
+  int count = tdarray_length(g->data.snakes);
+  for (int i = 0; i < count; ++i) {
+    snake *candidate = &g->data.snakes[i];
+    if (candidate == local || candidate->dead || !candidate->iiv) continue;
+    if ((int)candidate->ntl_id == m->sid) return candidate;
+  }
+  return NULL;
+}
+
 static void ntl_draw_marker(ImDrawList *dl, ImVec2 p, float radius,
                             int shape, ImU32 fill) {
   ImU32 border = IM_COL32(0, 0, 0, 210);
@@ -993,19 +1089,28 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
   tuser_data *u = env->usr;
   user_settings *us = &u->usrs;
   game_data *g = &u->gdata;
-  if (g->conn != CONNECTED || g->data.grd <= 0.0f) return;
+  if (g->conn != CONNECTED || g->data.grd <= 0.0f ||
+      !isfinite(g->data.flux_grd) || g->data.flux_grd <= 1.0f)
+    return;
 
   ImDrawList *dl = igGetWindowDrawList();
   if (!dl) return;
   float radius = size * 0.5f;
+  /* Keep CPU markers in the exact coordinate space used by mm.slang. The
+     minimap shader normalizes world positions by the current (possibly
+     shrinking) border radius and then applies its 0.90 shadow scale. Using
+     the fixed world-center value as the divisor makes a snake at a shrinking
+     border appear incorrectly near the middle of the minimap. */
   float map_radius = radius * 0.90f;
+  float world_radius = g->data.flux_grd;
   ImVec2 center = {x + radius, y + radius};
 
-  /* Cover the shader's fixed local marker with the player's chosen marker. */
+  /* Draw the local snake with the same dynamic-border transform used by the
+     location percentage HUD and minimap shader. */
   snake *local = local_snake(g);
   if (local) {
-    float rx = (local->xx - g->data.grd) / g->data.grd;
-    float ry = (local->yy - g->data.grd) / g->data.grd;
+    float rx = (local->xx - g->data.grd) / world_radius;
+    float ry = (local->yy - g->data.grd) / world_radius;
     float dist = sqrtf(rx * rx + ry * ry);
     if (dist > 1.0f) { rx /= dist; ry /= dist; }
     ImVec2 p = {center.x + rx * map_radius, center.y + ry * map_radius};
@@ -1021,16 +1126,54 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
   ImU32 team_col = igColorConvertFloat4ToU32((ImVec4){
       us->ntl_marker_color[0], us->ntl_marker_color[1],
       us->ntl_marker_color[2], us->ntl_marker_color[3]});
-  int local_sid = local ? local->id : -1;
-
   for (int i = 0; i < S.count; ++i) {
     ntl_member *m = &S.members[i];
-    if (!same_server(m->srv, us->ipv4) || m->sid == local_sid) continue;
-    if (!isfinite(m->x) || !isfinite(m->y) || (m->x == 0.0f && m->y == 0.0f))
+    if (!same_server(m->srv, us->ipv4) ||
+        ntl_member_is_local(m, us, local))
       continue;
 
-    float rx = (m->x - g->data.grd) / g->data.grd;
-    float ry = (m->y - g->data.grd) / g->data.grd;
+    float marker_x = m->x;
+    float marker_y = m->y;
+
+    /* When the teammate's snake is currently known by this game client, use
+       its live Slither coordinates. The NTL team endpoint updates roughly
+       once per second, so the network copy naturally trails fast movement. */
+    snake *visible = ntl_visible_snake_for_member(g, m, local);
+    if (visible) {
+      marker_x = visible->xx;
+      marker_y = visible->yy;
+    }
+
+    /* A reconnect or respawn can briefly leave two endpoint records carrying
+       the same stable client prefix. Draw only the best copy: a record that
+       maps to a live snake wins; otherwise the later endpoint record wins. */
+    int quality = visible ? 2 :
+        (isfinite(marker_x) && isfinite(marker_y) &&
+         !(marker_x == 0.0f && marker_y == 0.0f) ? 1 : 0);
+    bool superseded = false;
+    for (int j = i + 1; j < S.count; ++j) {
+      ntl_member *other = &S.members[j];
+      if (!same_server(other->srv, us->ipv4) ||
+          !ntl_member_same_client(m, other))
+        continue;
+      snake *other_visible =
+          ntl_visible_snake_for_member(g, other, local);
+      int other_quality = other_visible ? 2 :
+          (isfinite(other->x) && isfinite(other->y) &&
+           !(other->x == 0.0f && other->y == 0.0f) ? 1 : 0);
+      if (other_quality >= quality) {
+        superseded = true;
+        break;
+      }
+    }
+    if (superseded) continue;
+
+    if (!isfinite(marker_x) || !isfinite(marker_y) ||
+        (marker_x == 0.0f && marker_y == 0.0f))
+      continue;
+
+    float rx = (marker_x - g->data.grd) / world_radius;
+    float ry = (marker_y - g->data.grd) / world_radius;
     float dist = sqrtf(rx * rx + ry * ry);
     if (dist > 1.0f) { rx /= dist; ry /= dist; }
     ImVec2 p = {center.x + rx * map_radius, center.y + ry * map_radius};
@@ -1285,6 +1428,14 @@ void ntl_team_destroy(tenv *env) {
 static void ntl_queue_message(const user_settings *us) {
   ntl_normalize_chat_text(S.input, sizeof S.input);
   if (!S.input[0]) return;
+  if (vlither_tags_handle_command(S.input)) {
+    S.input[0] = 0;
+    return;
+  }
+  if (ntl_tags_handle_command(S.input)) {
+    S.input[0] = 0;
+    return;
+  }
 
   double now = mg_millis() / 1000.0;
   if (!strcmp(S.last_sent_text, S.input) && now - S.last_sent_time < 1.5) {

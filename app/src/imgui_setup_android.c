@@ -270,8 +270,15 @@ void imgui_prerender(void) {
 
     if (g_android_app->userData) {
         twindow* wnd = (twindow*)g_android_app->userData;
-        io->MousePos     = (ImVec2){wnd->ui_touch.x, wnd->ui_touch.y};
-        io->MouseDown[0] = wnd->ui_touch.down;
+        /* Use Dear ImGui's input-event queue instead of assigning MouseDown
+           directly. When Android reports DOWN+UP between two rendered frames,
+           the queue trickles those transitions across frames and preserves a
+           real click instead of losing it. */
+        ImGuiIO_AddMousePosEvent(io, wnd->ui_touch.x, wnd->ui_touch.y);
+        if (wnd->ui_touch.just_down)
+            ImGuiIO_AddMouseButtonEvent(io, 0, true);
+        if (wnd->ui_touch.just_up)
+            ImGuiIO_AddMouseButtonEvent(io, 0, false);
         if (wnd->size[0] > 0 && wnd->size[1] > 0)
             io->DisplaySize = (ImVec2){(float)wnd->size[0], (float)wnd->size[1]};
 
@@ -279,15 +286,16 @@ void imgui_prerender(void) {
         static float s_scroll_last_y   = 0.0f;
         static bool  s_scroll_was_down = false;
         if (g_panel_open) {
-            bool down_now = io->MouseDown[0];
+            bool down_now = wnd->ui_touch.down;
+            float pointer_y = wnd->ui_touch.y;
             if (down_now && s_scroll_was_down) {
-                float dy = io->MousePos.y - s_scroll_last_y;
+                float dy = pointer_y - s_scroll_last_y;
 
                 if (dy < -2.0f || dy > 2.0f)
                     io->MouseWheel += dy / 30.0f;
             }
             s_scroll_was_down = down_now;
-            s_scroll_last_y   = down_now ? io->MousePos.y : 0.0f;
+            s_scroll_last_y   = down_now ? pointer_y : 0.0f;
         } else {
             s_scroll_was_down = false;
         }
@@ -300,17 +308,17 @@ void imgui_prerender(void) {
         static ImVec2 s_paste_start = {0.0f, 0.0f};
         static double s_paste_start_time = 0.0;
 
-        if (!io->MouseDown[0] || !io->WantTextInput) {
+        if (!wnd->ui_touch.down || !io->WantTextInput) {
             s_paste_tracking = false;
             s_paste_fired = false;
         } else if (!s_paste_tracking) {
             s_paste_tracking = true;
             s_paste_fired = false;
-            s_paste_start = io->MousePos;
+            s_paste_start = (ImVec2){wnd->ui_touch.x, wnd->ui_touch.y};
             s_paste_start_time = monotonic_seconds();
         } else {
-            float dx = io->MousePos.x - s_paste_start.x;
-            float dy = io->MousePos.y - s_paste_start.y;
+            float dx = wnd->ui_touch.x - s_paste_start.x;
+            float dy = wnd->ui_touch.y - s_paste_start.y;
             float cancel_distance = 18.0f * g_android_imgui_scale;
             if (dx * dx + dy * dy > cancel_distance * cancel_distance) {
                 s_paste_tracking = false;
