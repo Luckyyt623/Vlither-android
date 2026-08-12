@@ -6,10 +6,154 @@
 
 #include "../network/server.h"
 #include "../user.h"
+#include "../game/vlither_tags.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 bool g_sl_popup_open = false;
 
 static int g_privacy_section = 0;
+
+static long long event_now_ms(void) {
+  return (long long)time(NULL) * 1000LL;
+}
+
+static void event_format_local_time(long long timestamp_ms,
+                                    char *out, size_t cap) {
+  if (!out || cap == 0) return;
+  out[0] = 0;
+  if (timestamp_ms <= 0) {
+    snprintf(out, cap, "Not set");
+    return;
+  }
+  time_t seconds = (time_t)(timestamp_ms / 1000LL);
+  struct tm local_value;
+#ifdef _WIN32
+  localtime_s(&local_value, &seconds);
+#else
+  localtime_r(&seconds, &local_value);
+#endif
+  if (!strftime(out, cap, "%a, %d %b %Y - %I:%M %p", &local_value))
+    snprintf(out, cap, "Time unavailable");
+}
+
+static void event_format_countdown(long long remaining_ms,
+                                   char *out, size_t cap) {
+  if (!out || cap == 0) return;
+  long long total = remaining_ms > 0 ? remaining_ms / 1000LL : 0;
+  long long days = total / 86400LL;
+  long long hours = (total % 86400LL) / 3600LL;
+  long long minutes = (total % 3600LL) / 60LL;
+  long long seconds = total % 60LL;
+  if (days > 0)
+    snprintf(out, cap, "%lldd %02lld:%02lld:%02lld",
+             days, hours, minutes, seconds);
+  else
+    snprintf(out, cap, "%02lld:%02lld:%02lld", hours, minutes, seconds);
+}
+
+static void join_event(tenv *env, int index) {
+  if (!env || !env->usr) return;
+  const char *server_ip = vlither_event_server_at(index);
+  if (!server_ip || !server_ip[0]) return;
+  tuser_data *usr = env->usr;
+  strncpy(usr->usrs.ipv4, server_ip, MAX_IPV4_LEN);
+  usr->usrs.ipv4[MAX_IPV4_LEN] = 0;
+  save_user_settings(&usr->usrs);
+  usr->gdata.conn = CONNECTING;
+  usr->gdata.curr_screen = PLAYING;
+  glfwSetTime(0);
+  server_connect(env);
+}
+
+void ui_events_panel(tenv *env) {
+  if (!env || !env->usr) return;
+  tuser_data *usr = env->usr;
+  ImGuiStyle *style = igGetStyle();
+
+  igPushFont(usr->imgui_data.regular_font[usr->usrs.ui_font_size],
+             usr->imgui_data.regular_font[usr->usrs.ui_font_size]->LegacySize);
+  igTextColored((ImVec4){0.45f, 0.68f, 1.0f, 1.0f}, "Vlither Events");
+  igTextDisabled("Times below use this phone's timezone.");
+  ImVec2 nav_avail;
+  igGetContentRegionAvail(&nav_avail);
+  float nav_w = (nav_avail.x - style->ItemSpacing.x) * 0.5f;
+  if (igButton("Back to homepage##events", (ImVec2){nav_w, 0})) {
+    usr->gdata.curr_screen = TITLE_SCREEN;
+    igPopFont();
+    return;
+  }
+  igSameLine(0, style->ItemSpacing.x);
+  if (igButton("Refresh events", (ImVec2){nav_w, 0}))
+    vlither_event_refresh();
+  igSeparator();
+
+  igBeginChild_Str("##events_full_page_scroll", (ImVec2){0, 0},
+                   ImGuiChildFlags_None,
+                   ImGuiWindowFlags_AlwaysVerticalScrollbar);
+  int count = vlither_event_count();
+  if (count <= 0) {
+    igTextWrapped("%s", vlither_event_status());
+  }
+  const long long now_ms = event_now_ms();
+  for (int i = 0; i < count; ++i) {
+    igPushID_Int(i);
+    const long long start_ms = vlither_event_start_at_ms(i);
+    const long long end_ms = vlither_event_end_at_ms(i);
+    const long long remove_ms = vlither_event_remove_at_ms(i);
+    const bool live = start_ms > 0 && now_ms >= start_ms &&
+                      (remove_ms <= 0 || now_ms < remove_ms);
+    char start_text[96], end_text[96], countdown[64];
+    event_format_local_time(start_ms, start_text, sizeof start_text);
+    event_format_local_time(end_ms, end_text, sizeof end_text);
+
+    igSeparatorText(vlither_event_name_at(i));
+    if (live)
+      igTextColored((ImVec4){0.20f, 0.92f, 0.55f, 1.0f}, "LIVE NOW");
+    else if (start_ms > now_ms) {
+      event_format_countdown(start_ms - now_ms, countdown, sizeof countdown);
+      igTextColored((ImVec4){0.95f, 0.78f, 0.28f, 1.0f},
+                    "Starts in %s", countdown);
+    }
+    igText("Country: %s", vlither_event_country_at(i));
+    igText("Start: %s", start_text);
+    if (end_ms > 0) igText("End: %s", end_text);
+    igText("Prize: %s", vlither_event_prize_at(i));
+    igText("Server: %s", vlither_event_server_at(i));
+    igTextDisabled("%d player%s interested",
+                   vlither_event_interested_count_at(i),
+                   vlither_event_interested_count_at(i) == 1 ? "" : "s");
+    igSpacing();
+    igTextColored((ImVec4){0.72f, 0.80f, 0.94f, 1.0f}, "Rules");
+    igPushTextWrapPos(0.0f);
+    igTextWrapped("%s", vlither_event_rules_at(i));
+    igPopTextWrapPos();
+    igSpacing();
+
+    bool interested = vlither_event_interested_at(i);
+    if (interested)
+      igPushStyleColor_Vec4(ImGuiCol_Button,
+                            (ImVec4){0.12f, 0.58f, 0.38f, 0.95f});
+    if (igButton(interested ? "Interested - ON" : "Interested",
+                 (ImVec2){180.0f, 0}))
+      vlither_event_set_interested(i, !interested);
+    if (interested) igPopStyleColor(1);
+
+    if (interested) {
+      igSameLine(0, -1);
+      if (igButton("Join Event", (ImVec2){180.0f, 0}))
+        join_event(env, i);
+    } else {
+      igTextDisabled("Turn on Interested to unlock one-tap joining and reminders.");
+    }
+    igSpacing();
+    igPopID();
+  }
+  igEndChild();
+  igPopFont();
+}
 
 static void draw_privacy_policy_popup(tenv *env) {
   if (!env || !env->usr) return;
@@ -130,6 +274,38 @@ void ui_title_screen(tenv* env) {
                       (ImVec4){0, 0, 0, 0}, (ImVec4){1, 1, 1, 1}))
       android_jni_open_url("https://discord.gg/CJEeSScTJs");
     if (igIsItemHovered(0)) igSetTooltip("Open Vlither Discord");
+  }
+
+  /* Event access stays directly below Discord as requested. The compact
+     countdown is shown only for this player's interested event. */
+  const float event_button_y =
+      16.0f + frame_height * 1.15f + 8.0f + 82.0f + 8.0f;
+  igSetCursorPos((ImVec2){16.0f, event_button_y});
+  if (igButton("Events", (ImVec2){170.0f, frame_height * 1.15f})) {
+    vlither_event_refresh();
+    usr->gdata.curr_screen = EVENTS_PANEL;
+  }
+  int next_event = vlither_event_next_interested();
+  if (next_event >= 0) {
+    long long start_ms = vlither_event_start_at_ms(next_event);
+    long long now_ms = event_now_ms();
+    char countdown[64];
+    igSetCursorPos((ImVec2){16.0f,
+        event_button_y + frame_height * 1.15f + 5.0f});
+    igPushFont(usr->imgui_data.regular_font[FONT_SIZE_SMALL],
+               usr->imgui_data.regular_font[FONT_SIZE_SMALL]->LegacySize);
+    igPushTextWrapPos(186.0f);
+    if (start_ms <= now_ms) {
+      igTextColored((ImVec4){0.20f, 0.95f, 0.56f, 1.0f},
+                    "LIVE: %s", vlither_event_name_at(next_event));
+    } else {
+      event_format_countdown(start_ms - now_ms, countdown, sizeof countdown);
+      igTextColored((ImVec4){0.96f, 0.78f, 0.28f, 1.0f},
+                    "%s\nStarts in %s",
+                    vlither_event_name_at(next_event), countdown);
+    }
+    igPopTextWrapPos();
+    igPopFont();
   }
 #endif
 
@@ -333,6 +509,13 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
                   frame_height * 5);
+  if (igButton("Voice Chat", (ImVec2){logo_size})) {
+    usr->gdata.curr_screen = VOICE_PANEL;
+  }
+
+  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
+                  frame_height * 6);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);

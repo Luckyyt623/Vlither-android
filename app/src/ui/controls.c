@@ -287,6 +287,10 @@ void ui_controls(tenv* env) {
           igText("Boost arrow glow");
           igAlignTextToFramePadding();
           igText("Invisible arrow");
+          igAlignTextToFramePadding();
+          igText("Sync with zoom");
+          igAlignTextToFramePadding();
+          igText("Head dot colour");
 
           igTableSetColumnIndex(1);
           igSetNextItemWidth(-1);
@@ -297,15 +301,26 @@ void ui_controls(tenv* env) {
                         ImGuiSliderFlags_AlwaysClamp);
           igCheckbox("##boost arrow anim", &usrs->boost_arrow_anim);
           igCheckbox("##arrow invisible", &usrs->arrow_invisible);
+          igCheckbox("##arrow sync zoom", &usrs->arrow_sync_with_zoom);
+          igSetNextItemWidth(-1);
+          igColorEdit3("##head dot colour", usrs->head_dot_color,
+                       ImGuiColorEditFlags_None);
           igIndent(-style->WindowPadding.x);
           igEndTable();
         }
-        igTextDisabled("These options affect the on-screen Arrow control, not the physical mouse cursor.");
-        if (igButton("Reset arrow cursor", (ImVec2){-1, 0.0f})) {
+        if (usrs->arrow_sync_with_zoom)
+          igTextDisabled("Arrow size follows game zoom. Head dot size always stays fixed.");
+        else
+          igTextDisabled("Arrow and head dot keep a fixed on-screen size while zooming.");
+        if (igButton("Reset arrow and head dot", (ImVec2){-1, 0.0f})) {
           usrs->arrow_size        = 1.0f;
           usrs->arrow_sensitivity = 1.0f;
           usrs->boost_arrow_anim  = true;
           usrs->arrow_invisible   = false;
+          usrs->arrow_sync_with_zoom = true;
+          usrs->head_dot_color[0] = 1.0f;
+          usrs->head_dot_color[1] = 1.0f;
+          usrs->head_dot_color[2] = 1.0f;
         }
         igSpacing();
         igSpacing();
@@ -414,6 +429,10 @@ void ui_controls(tenv* env) {
         usrs->arrow_sensitivity  = 1.0f;
         usrs->boost_arrow_anim   = true;
         usrs->arrow_invisible    = false;
+        usrs->arrow_sync_with_zoom = true;
+        usrs->head_dot_color[0]  = 1.0f;
+        usrs->head_dot_color[1]  = 1.0f;
+        usrs->head_dot_color[2]  = 1.0f;
         usrs->bot_vis            = true;
         usrs->zslider_rel_x      = 0.968f;
         usrs->zslider_rel_y      = 0.500f;

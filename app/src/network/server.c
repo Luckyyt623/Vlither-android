@@ -64,12 +64,24 @@ static const char* CUSTOM_SERVER_IPS[CUSTOM_SERVER_COUNT] = {
   "139.84.170.60:444",
   "51.91.19.175:444",
   "206.221.176.241:444",
+  "81.169.165.225:444",
+  "81.169.165.225:446",
+  "81.169.165.225:447",
+  "149.28.247.102:444",
+  "216.128.169.33:444",
+  "45.76.102.107:444",
 };
 const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT] = {
   "Singapore Battledome",
   "India Battledome",
   "EU Battledome",
   "USA Battledome",
+  "Europe Battledome",
+  "Europe Knockout Only",
+  "Europe Paintball Only",
+  "North America Battledome",
+  "Brazil Battledome",
+  "Japan Battledome",
 };
 
 static void server_list_seed_custom(game_data* gdata) {

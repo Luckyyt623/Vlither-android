@@ -1559,8 +1559,9 @@ void redraw(tenv* env) {
   if (mode->show_crosshair) {
     /* Local-player head dot. The old show_crosshair setting name is retained
        internally so existing settings files keep working, but the marker is
-       now a small white dot fixed to the player's own snake head. It is never
-       drawn for remote snakes and does not depend on the Android touch cursor. */
+       now a small configurable-colour dot fixed to the player's own snake
+       head. It is never drawn for remote snakes and does not depend on the
+       Android touch cursor. */
     snake *me = get_snake(gdata, gdata->data.snake_id);
     if (me && me->iiv && !me->dead) {
       float head_alpha = me->alive_amt * (1.0f - me->dead_amt);
@@ -1581,7 +1582,9 @@ void redraw(tenv* env) {
         const float head_dot_radius_px = 3.75f;
         ImDrawList_AddCircleFilled(
             igGetWindowDrawList(), (ImVec2){head_x, head_y}, head_dot_radius_px,
-            igColorConvertFloat4ToU32((ImVec4){1.0f, 1.0f, 1.0f, head_alpha}),
+            igColorConvertFloat4ToU32(
+                (ImVec4){usrs->head_dot_color[0], usrs->head_dot_color[1],
+                         usrs->head_dot_color[2], head_alpha}),
             16);
       }
     }

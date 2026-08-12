@@ -75,8 +75,14 @@ typedef struct {
   char last_presence_server[MAX_IPV4_LEN + 1];
   bool last_presence_playing;
   bool vlither_chat_active;
+  bool voice_controls_open;
   bool focus_vlither_input;
   int last_vlither_history_count;
+  char voice_room_name_input[48];
+  char voice_room_password_input[72];
+  char voice_join_password_input[72];
+  int voice_selected_room;
+  bool voice_create_pending;
 } ntl_state;
 static ntl_state S;
 
@@ -996,6 +1002,7 @@ void ntl_team_init(tenv *env) {
   }
   S.ntl_chat_open = true;
   S.vlither_chat_open = true;
+  S.voice_selected_room = -1;
   S.select_chat_tab = true;
   tuser_data *u = env ? env->usr : NULL;
   if (u && u->usrs.ntl_active_team_profile >= 0 &&
@@ -1013,6 +1020,10 @@ void ntl_team_update(tenv *env) {
 
   user_settings *us = &env->usr->usrs;
   game_data *g = &env->usr->gdata;
+
+  if (g->curr_screen != PLAYING || g->conn != CONNECTED)
+    S.voice_controls_open = false;
+
   ntl_sync_active_credentials(us);
   ntl_ensure_client_id(us);
 
@@ -1051,6 +1062,17 @@ void ntl_team_update(tenv *env) {
       S.next_poll = now + NTL_POLL_SECONDS;
   }
 }
+
+bool ntl_team_voice_controls_open(void) {
+  return S.voice_controls_open;
+}
+
+void ntl_team_handle_voice_key(void) {
+  ImGuiIO *io = igGetIO_Nil();
+  if (!(io && io->WantTextInput))
+    S.voice_controls_open = !S.voice_controls_open;
+}
+
 static void normalize_server(char *out, size_t cap, const char *in) {
   if (!out || cap == 0) return;
   out[0] = 0;
@@ -1417,19 +1439,25 @@ void ntl_team_consume_ui_touch(tenv *env) {
 }
 
 static void draw_chat_network_switch(void) {
-  float button_w = 92.0f;
-  if (S.vlither_chat_active)
-    igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0.20f, 0.22f, 0.28f, 0.92f});
-  else
+  const float button_w = 110.0f;
+  bool ntl_active = !S.vlither_chat_active;
+  bool vlither_active = S.vlither_chat_active;
+  if (ntl_active)
     igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0.16f, 0.52f, 0.72f, 0.92f});
-  if (igButton("NTL##chat_network", (ImVec2){button_w, 0})) S.vlither_chat_active = false;
+  else
+    igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0.20f, 0.22f, 0.28f, 0.92f});
+  if (igButton("NTL##chat_network", (ImVec2){button_w, 0})) {
+    S.vlither_chat_active = false;
+  }
   igPopStyleColor(1);
   igSameLine(0, 6);
-  if (S.vlither_chat_active)
+  if (vlither_active)
     igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0.35f, 0.35f, 0.82f, 0.92f});
   else
     igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0.20f, 0.22f, 0.28f, 0.92f});
-  if (igButton("Vlither##chat_network", (ImVec2){button_w, 0})) S.vlither_chat_active = true;
+  if (igButton("Vlither##chat_network", (ImVec2){button_w, 0})) {
+    S.vlither_chat_active = true;
+  }
   igPopStyleColor(1);
   igSameLine(0, 8);
   if (S.vlither_chat_active) {
@@ -1448,6 +1476,61 @@ static void chat_submit_current(const user_settings *us) {
     return;
   }
   ntl_queue_message(us);
+}
+
+static VkDescriptorSet ntl_voice_icon_ds(tuser_data *u) {
+  if (!u || !u->r) return VK_NULL_HANDLE;
+  return u->r->voice_status_atlas_ds;
+}
+
+static void ntl_voice_icon_uv(bool microphone, bool off,
+                              ImVec2 *uv0, ImVec2 *uv1) {
+  /* voice_status_atlas.png is a 2x2 grid. Inset by half a texel so linear
+     sampling cannot pull a neighbouring state across a cell boundary. */
+  const float inset = 0.5f / 512.0f;
+  float left = off ? 0.5f : 0.0f;
+  float top = microphone ? 0.0f : 0.5f;
+  *uv0 = (ImVec2){left + inset, top + inset};
+  *uv1 = (ImVec2){left + 0.5f - inset, top + 0.5f - inset};
+}
+
+static void ntl_draw_voice_icon(tuser_data *u, bool microphone,
+                                bool off, float size) {
+  VkDescriptorSet ds = ntl_voice_icon_ds(u);
+  if (ds) {
+    ImVec2 uv0, uv1;
+    ntl_voice_icon_uv(microphone, off, &uv0, &uv1);
+    ImTextureRef tex = {NULL, (ImTextureID)ds};
+    igImage(tex, (ImVec2){size, size}, uv0, uv1);
+  } else {
+    igTextColored(off ? (ImVec4){1.0f, 0.35f, 0.30f, 1.0f}
+                      : (ImVec4){0.45f, 0.95f, 0.60f, 1.0f},
+                  microphone ? (off ? "[MIC OFF]" : "[MIC]")
+                             : (off ? "[DEAF]" : "[SOUND]"));
+  }
+}
+
+static bool ntl_voice_icon_button(tuser_data *u, const char *id,
+                                  bool microphone, bool off, float size) {
+  VkDescriptorSet ds = ntl_voice_icon_ds(u);
+  bool pressed;
+  if (ds) {
+    ImVec2 uv0, uv1;
+    ntl_voice_icon_uv(microphone, off, &uv0, &uv1);
+    ImTextureRef tex = {NULL, (ImTextureID)ds};
+    pressed = igImageButton(id, tex, (ImVec2){size, size},
+                            uv0, uv1,
+                            (ImVec4){0.04f, 0.04f, 0.05f, 0.75f},
+                            (ImVec4){1, 1, 1, 1});
+  } else {
+    pressed = igButton(microphone ? (off ? "UNMUTE" : "MUTE")
+                                  : (off ? "UNDEAFEN" : "DEAFEN"),
+                       (ImVec2){size * 1.7f, size});
+  }
+  if (igIsItemHovered(0))
+    igSetTooltip("%s", microphone ? (off ? "Turn microphone on" : "Mute microphone")
+                                   : (off ? "Hear voice chat" : "Deafen voice chat"));
+  return pressed;
 }
 
 void ntl_team_draw(tenv *env) {
@@ -1744,6 +1827,89 @@ void ntl_team_draw(tenv *env) {
     igEnd();
   }
 
+  if (!settings_open && g->curr_screen == PLAYING) {
+    bool enabled = vlither_voice_enabled();
+    bool muted = vlither_voice_muted();
+    bool deafened = vlither_voice_deafened();
+
+    /* The bottom-right artwork is status-only. All interaction lives behind
+       V, so an accidental gameplay tap can never mute or deafen the player. */
+    if (enabled && !us->voice_status_icons_hidden) {
+      float icon_size = 40.0f;
+      float status_w = icon_size * 2.0f + 24.0f;
+      float status_h = icon_size + 14.0f;
+      igSetNextWindowPos(
+          (ImVec2){vp->WorkPos.x + vp->WorkSize.x - status_w - 14.0f,
+                   vp->WorkPos.y + vp->WorkSize.y - status_h - 14.0f},
+          ImGuiCond_Always, (ImVec2){0, 0});
+      igSetNextWindowSize((ImVec2){status_w, status_h}, ImGuiCond_Always);
+      igSetNextWindowBgAlpha(0.48f);
+      if (igBegin("##vlither_voice_status", NULL,
+                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoScrollbar)) {
+        ntl_draw_voice_icon(u, true, muted, icon_size);
+        igSameLine(0, 6);
+        ntl_draw_voice_icon(u, false, deafened, icon_size);
+      }
+      igEnd();
+    }
+
+    if (S.voice_controls_open) {
+      float panel_w = fminf(430.0f, vp->WorkSize.x - 24.0f);
+      float panel_h = 245.0f;
+      igSetNextWindowPos(
+          (ImVec2){vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+                   vp->WorkPos.y + vp->WorkSize.y * 0.5f},
+          ImGuiCond_Always, (ImVec2){0.5f, 0.5f});
+      igSetNextWindowSize((ImVec2){panel_w, panel_h}, ImGuiCond_Always);
+      igPushStyleColor_Vec4(ImGuiCol_WindowBg,
+                            (ImVec4){0.055f, 0.060f, 0.080f, 0.96f});
+      if (igBegin("Voice Controls##in_game_voice", NULL,
+                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                      ImGuiWindowFlags_NoCollapse |
+                      ImGuiWindowFlags_NoSavedSettings)) {
+        if (igCheckbox("Enable voice chat##v_overlay", &enabled))
+          vlither_voice_set_enabled(enabled);
+
+        igSeparator();
+        igBeginDisabled(!enabled || deafened);
+        if (ntl_voice_icon_button(u, "##v_overlay_mic", true, muted, 64.0f))
+          vlither_voice_set_muted(!muted);
+        igEndDisabled();
+        igSameLine(0, 16);
+        igBeginDisabled(!enabled);
+        if (ntl_voice_icon_button(u, "##v_overlay_speaker", false,
+                                  deafened, 64.0f))
+          vlither_voice_set_deafened(!deafened);
+        igEndDisabled();
+        igSameLine(0, 16);
+        igTextColored(deafened ? (ImVec4){1.0f, 0.35f, 0.30f, 1.0f}
+                               : muted ? (ImVec4){1.0f, 0.72f, 0.25f, 1.0f}
+                                       : (ImVec4){0.40f, 1.0f, 0.55f, 1.0f},
+                      !enabled ? "VOICE OFF"
+                               : deafened ? "DEAFENED"
+                                          : muted ? "MUTED" : "OPEN MIC");
+
+        bool show_status = !us->voice_status_icons_hidden;
+        if (igCheckbox("Show my voice status at bottom-right", &show_status)) {
+          us->voice_status_icons_hidden = !show_status;
+          save_user_settings(us);
+        }
+        if (igButton("Close (V)", (ImVec2){-1, 0}))
+          S.voice_controls_open = false;
+#ifdef ANDROID
+        ImVec2 p, sz;
+        igGetWindowPos(&p);
+        igGetWindowSize(&sz);
+        android_ui_capture_rect(p.x, p.y, p.x + sz.x, p.y + sz.y);
+#endif
+      }
+      igEnd();
+      igPopStyleColor(1);
+    }
+  }
+
 #ifdef ANDROID
   if (S.layout_dirty && igIsMouseReleased_Nil(0)) {
     save_user_settings(us);
@@ -1794,6 +1960,255 @@ static void ntl_queue_message(const user_settings *us) {
   S.next_poll = 0;
 }
 
+static void draw_chat_how_to_use_popup(void) {
+  ImGuiViewport *vp = igGetMainViewport();
+  float width = fminf(620.0f, vp->WorkSize.x - 24.0f);
+  float height = fminf(360.0f, vp->WorkSize.y - 24.0f);
+  igSetNextWindowSize((ImVec2){width, height}, ImGuiCond_Appearing);
+  if (!igBeginPopupModal("How to use Chat", NULL,
+                         ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoCollapse))
+    return;
+
+  float close_space = igGetFrameHeight() + igGetStyle()->ItemSpacing.y * 2.0f;
+  igBeginChild_Str("##chat_help_body", (ImVec2){0, -close_space},
+                   ImGuiChildFlags_None,
+                   ImGuiWindowFlags_AlwaysVerticalScrollbar);
+  igBulletText("Open Chat from the homepage, then choose NTL or Vlither.");
+  igBulletText("NTL needs your Team ID and Auth Key. Save a team to switch credentials later.");
+  igBulletText("Vlither connects automatically and shows online Vlither players.");
+  igBulletText("Use the message box and Send button; only live messages are shown.");
+  igEndChild();
+
+  igSeparator();
+  if (igButton("Close##chat_help", (ImVec2){-1, 0}))
+    igCloseCurrentPopup();
+  igEndPopup();
+}
+
+static void draw_voice_how_to_use_popup(void) {
+  ImGuiViewport *vp = igGetMainViewport();
+  float width = fminf(620.0f, vp->WorkSize.x - 24.0f);
+  float height = fminf(520.0f, vp->WorkSize.y - 24.0f);
+  igSetNextWindowSize((ImVec2){width, height}, ImGuiCond_Appearing);
+  if (!igBeginPopupModal("How to use Voice Chat", NULL,
+                         ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoCollapse))
+    return;
+
+  float close_space = igGetFrameHeight() + igGetStyle()->ItemSpacing.y * 2.0f;
+  igBeginChild_Str("##voice_help_body", (ImVec2){0, -close_space},
+                   ImGuiChildFlags_None,
+                   ImGuiWindowFlags_AlwaysVerticalScrollbar);
+  igBulletText("Enable Voice Chat once. Open mic starts automatically.");
+  igBulletText("With no room selected, nearby Vlither players on the same game server can hear you.");
+  igBulletText("Create a public room, add a password for a private room, or select a room to join.");
+  igBulletText("Every public or private room lists its current players by name.");
+  igBulletText("Mute stops your microphone. Deafen stops incoming audio and also mutes your microphone.");
+  igSpacing();
+  igSeparatorText("While playing");
+  igBulletText("Press V to open Voice Controls. Your snake uses temporary bot steering until the panel closes.");
+  igBulletText("Press V again or tap Close to return to normal controls.");
+  igBulletText("The bottom-right microphone and speaker images show your status; they are not buttons.");
+  igBulletText("Disable 'Show status icons' in Voice Chat to hide them.");
+  igEndChild();
+
+  igSeparator();
+  if (igButton("Close##voice_help", (ImVec2){-1, 0}))
+    igCloseCurrentPopup();
+  igEndPopup();
+}
+
+static void draw_voice_quick_controls(tuser_data *u, user_settings *us,
+                                      const char *id) {
+  igPushID_Str(id);
+  bool enabled = vlither_voice_enabled();
+  if (igCheckbox("Enable voice chat", &enabled))
+    vlither_voice_set_enabled(enabled);
+  igSameLine(0, 12);
+  igTextColored(vlither_chat_connected()
+                    ? (ImVec4){0.35f, 1.0f, 0.50f, 1.0f}
+                    : (ImVec4){1.0f, 0.72f, 0.25f, 1.0f},
+                vlither_chat_connected() ? "Online" : "Reconnecting");
+
+  bool muted = vlither_voice_muted();
+  bool deafened = vlither_voice_deafened();
+  igBeginDisabled(!enabled || deafened);
+  if (ntl_voice_icon_button(u, "##quick_mic", true, muted, 42.0f))
+    vlither_voice_set_muted(!muted);
+  igEndDisabled();
+  igSameLine(0, 10);
+  igBeginDisabled(!enabled);
+  if (ntl_voice_icon_button(u, "##quick_speaker", false, deafened, 42.0f))
+    vlither_voice_set_deafened(!deafened);
+  igEndDisabled();
+  igSameLine(0, 14);
+  bool show_status = !us->voice_status_icons_hidden;
+  if (igCheckbox("Show status icons", &show_status)) {
+    us->voice_status_icons_hidden = !show_status;
+    save_user_settings(us);
+  }
+  igPopID();
+}
+
+static void draw_voice_room_members(tuser_data *u) {
+  int member_count = vlither_voice_member_count();
+  if (member_count <= 0) {
+    igTextDisabled("Waiting for room members...");
+    return;
+  }
+  for (int i = 0; i < member_count; ++i) {
+    igTextColored((ImVec4){1.0f, 0.82f, 0.10f, 1.0f}, "%s%s",
+                  vlither_voice_member_name_at(i),
+                  vlither_voice_member_host_at(i) ? " (Host)" : "");
+    igSameLine(0, 8);
+    ntl_draw_voice_icon(u, true, vlither_voice_member_muted_at(i), 22.0f);
+    igSameLine(0, 3);
+    ntl_draw_voice_icon(u, false, vlither_voice_member_deafened_at(i), 22.0f);
+  }
+}
+
+static void draw_voice_rooms(tuser_data *u) {
+  if (S.voice_create_pending) {
+    const char *status = vlither_voice_status();
+    if (!strncmp(status, "Joined ", 7)) {
+      S.voice_room_name_input[0] = 0;
+      S.voice_room_password_input[0] = 0;
+      S.voice_create_pending = false;
+    } else if (strcmp(status, "Creating voice room...")) {
+      /* Keep the fields populated after a backend rejection so the player can
+         correct the request instead of retyping the room name/password. */
+      S.voice_create_pending = false;
+    }
+  }
+
+  if (vlither_voice_in_room()) {
+    igText("Current room: %s%s", vlither_voice_room_name(),
+           vlither_voice_room_host() ? " (Host)" : "");
+    if (igButton("Leave room / use proximity voice", (ImVec2){0, 0}))
+      vlither_voice_leave_room();
+    igSpacing();
+    igSeparatorText("Players in this room");
+    draw_voice_room_members(u);
+  } else {
+    igTextColored((ImVec4){0.78f, 0.92f, 1.0f, 1.0f},
+                  "Proximity voice");
+  }
+
+  igSpacing();
+  igSeparatorText("Voice Rooms");
+  if (igButton("Refresh rooms", (ImVec2){0, 0}))
+    vlither_voice_refresh_rooms();
+  int room_count = vlither_voice_room_count();
+  if (room_count == 0) {
+    igTextDisabled("No voice rooms are open yet.");
+  } else {
+    for (int i = 0; i < room_count; ++i) {
+      char label[128];
+      snprintf(label, sizeof label, "%s%s  %d/%d##voice_room_new_%d",
+               vlither_voice_room_locked_at(i) ? "[Private] " : "[Public] ",
+               vlither_voice_room_name_at(i),
+               vlither_voice_room_members_at(i),
+               vlither_voice_room_max_at(i), i);
+      if (igButton(label, (ImVec2){0, 0})) {
+        S.voice_selected_room = i;
+        S.voice_join_password_input[0] = 0;
+      }
+      int listed_members = vlither_voice_room_member_count_at(i);
+      for (int j = 0; j < listed_members; ++j) {
+        igTextDisabled("  - %s%s",
+                       vlither_voice_room_member_name_at(i, j),
+                       vlither_voice_room_member_host_at(i, j)
+                           ? " (Host)" : "");
+        igSameLine(0, 6);
+        ntl_draw_voice_icon(u, true,
+                            vlither_voice_room_member_muted_at(i, j), 18.0f);
+        igSameLine(0, 2);
+        ntl_draw_voice_icon(u, false,
+                            vlither_voice_room_member_deafened_at(i, j), 18.0f);
+      }
+    }
+  }
+  if (S.voice_selected_room >= room_count) S.voice_selected_room = -1;
+  if (S.voice_selected_room >= 0) {
+    int i = S.voice_selected_room;
+    igSpacing();
+    igText("Selected: %s", vlither_voice_room_name_at(i));
+    if (vlither_voice_room_locked_at(i))
+      igInputTextWithHint("##voice_join_password_new", "Room password",
+                          S.voice_join_password_input,
+                          sizeof S.voice_join_password_input,
+                          ImGuiInputTextFlags_Password, NULL, NULL);
+    if (igButton("Join selected room##new", (ImVec2){0, 0}))
+      vlither_voice_join_room(vlither_voice_room_id_at(i),
+                              S.voice_join_password_input);
+  }
+
+  igSpacing();
+  igSeparatorText("Create Voice Room");
+  igInputTextWithHint("##voice_create_name_new", "Room name",
+                      S.voice_room_name_input,
+                      sizeof S.voice_room_name_input,
+                      ImGuiInputTextFlags_None, NULL, NULL);
+  igInputTextWithHint("##voice_create_password_new",
+                      "Password (optional - leave empty for public)",
+                      S.voice_room_password_input,
+                      sizeof S.voice_room_password_input,
+                      ImGuiInputTextFlags_Password, NULL, NULL);
+  if (igButton("Create room##new", (ImVec2){0, 0}) &&
+      vlither_voice_create_room(S.voice_room_name_input,
+                                S.voice_room_password_input)) {
+    S.voice_create_pending = true;
+    S.voice_selected_room = -1;
+  }
+}
+
+void ntl_voice_panel(tenv *env) {
+  tuser_data *u = env->usr;
+  user_settings *us = &u->usrs;
+  game_data *g = &u->gdata;
+
+  igPushFont(u->imgui_data.regular_font[us->ui_font_size],
+             u->imgui_data.regular_font[us->ui_font_size]->LegacySize);
+  igText("Voice Chat");
+  igSameLine(0, 14);
+  igTextColored(vlither_chat_connected()
+                    ? (ImVec4){0.35f, 1.0f, 0.50f, 1.0f}
+                    : (ImVec4){1.0f, 0.72f, 0.25f, 1.0f},
+                vlither_chat_connected() ? "Online" : "Reconnecting");
+  igSameLine(0, 18);
+  if (igButton("How to use##voice_home_help", (ImVec2){0, 0}))
+    igOpenPopup_Str("How to use Voice Chat", 0);
+  igSeparator();
+
+  if (igButton("Back to homepage##voice_home_back", (ImVec2){170.0f, 0})) {
+    save_user_settings(us);
+    g->curr_screen = TITLE_SCREEN;
+    igPopFont();
+    return;
+  }
+  igSameLine(0, 10);
+  if (igButton("Open Chat##voice_home_chat", (ImVec2){140.0f, 0}))
+    g->curr_screen = NTL_PANEL;
+
+  igBeginChild_Str("##voice_main_body", (ImVec2){0, 0},
+                   ImGuiChildFlags_None,
+                   ImGuiWindowFlags_AlwaysVerticalScrollbar);
+  igSeparatorText("My Voice Status");
+  draw_voice_quick_controls(u, us, "voice_home_controls");
+  if (vlither_voice_status()[0])
+    igTextWrapped("%s", vlither_voice_status());
+  igSeparator();
+  if (vlither_voice_enabled())
+    draw_voice_rooms(u);
+  else
+    igTextDisabled("Enable voice chat to use proximity voice and rooms.");
+  igEndChild();
+
+  draw_voice_how_to_use_popup();
+  igPopFont();
+}
+
 void ntl_team_panel(tenv *env) {
   tuser_data *u = env->usr;
   user_settings *us = &u->usrs;
@@ -1808,7 +2223,12 @@ void ntl_team_panel(tenv *env) {
   igText("Chat Network");
   igSameLine(0, 14);
   draw_chat_network_switch();
+  igSameLine(0, 12);
+  if (igButton("How to use", (ImVec2){0, 0}))
+    igOpenPopup_Str("How to use Chat", 0);
   igSeparator();
+  draw_chat_how_to_use_popup();
+  igGetContentRegionAvail(&avail);
 
   if (S.vlither_chat_active) {
     igTextColored(vlither_chat_connected()

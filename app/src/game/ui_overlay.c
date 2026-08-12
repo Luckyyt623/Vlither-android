@@ -519,8 +519,19 @@ void ui_overlay(tenv* env) {
         float sn_v = sinf(rot);
 
         float boost_sz = 1.0f + 0.5f * s_accel_a;
-        float aw = sh * 0.11f  * usrs->arrow_size * boost_sz;
-        float ah = sh * 0.066f * usrs->arrow_size * boost_sz;
+        /* At the normal 1.5x game zoom the multiplier is 1.0. Sync mode makes
+           the overlay shrink while zooming out and grow while zooming in, but
+           clamps extreme game zoom values so the control remains usable. When
+           sync is disabled, the multiplier stays exactly 1.0 in screen space. */
+        float arrow_zoom_scale = 1.0f;
+        if (usrs->arrow_sync_with_zoom) {
+          arrow_zoom_scale = gdata->data.gsc / 1.5f;
+          if (!isfinite(arrow_zoom_scale)) arrow_zoom_scale = 1.0f;
+          if (arrow_zoom_scale < 0.45f) arrow_zoom_scale = 0.45f;
+          if (arrow_zoom_scale > 2.25f) arrow_zoom_scale = 2.25f;
+        }
+        float aw = sh * 0.11f  * usrs->arrow_size * boost_sz * arrow_zoom_scale;
+        float ah = sh * 0.066f * usrs->arrow_size * boost_sz * arrow_zoom_scale;
 
         #define ARPT(px, py) \
           (ImVec2){ acx + (px)*cs - (py)*sn_v, \

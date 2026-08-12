@@ -5,6 +5,7 @@
 
 void ui_title_screen_init(tenv* env);
 void ui_title_screen(tenv* env);
+void ui_events_panel(tenv* env);
 void ui_title_screen_destroy(tenv* env);
 
 #endif

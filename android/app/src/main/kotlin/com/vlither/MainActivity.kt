@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.4"
+        private const val CURRENT_VERSION   = "4.5"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,42 +209,25 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-            Update 4.4
+            Update 4.5
 
             What's New:
 
-            • Mouse Controls
-              External mouse controls are now supported. Connect a mouse to your phone and control your snake directly with smoother, more precise movement.
+            • Voice Chat
+              Voice Chat is now available in Vlither Android. Create or join public and private voice rooms, or use proximity voice to talk openly with nearby Vlither Android players. Press the V keybind to mute or deafen yourself. Open "How to Use" for complete instructions.
 
-            • Improved FPS & Performance
-              Rendering and performance have been further optimized to provide higher FPS, smoother gameplay, and better responsiveness on supported devices.
+            • Arrow Sync with Zoom
+              A new Sync with Zoom option has been added to the Arrow controls. Keep it enabled to scale the arrow with your zoom, or disable it to keep the arrow at a fixed on-screen size.
 
-            • Vlither Chat
-              Vlither Chat has been added. You can now talk with other Vlither Android players directly from the mod — completely free.
+            • Events
+              The Events system is now available. Mark an event as Interested to receive a notification when it starts, view the event time in your local timezone, and join the event server directly from Vlither.
 
-            • Highlighted Teammate Names
-              NTL and Vlither player names are now highlighted, making teammates easier to identify during gameplay.
-
-            • Square Food Shader
-              A new Square Food shader has been added, giving you another visual style for food in the game.
-
-            • New NTL Chat UI
-              The NTL Chat interface has been redesigned for a cleaner, easier-to-read experience.
-
-            • Privacy & Policy
-              A dedicated Privacy & Policy section has been added to make important Vlither information and terms easier to access.
-
-            • 4K Vlither Tags
-              Vlither Tags now support high-resolution images up to 4K quality for sharper and more detailed tags.
-              
-            • Multiple backgrounds added
-            
             Thanks for using Vlither Android!
             Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.4")
+            .setTitle("What's New in v4.5")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

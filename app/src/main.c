@@ -183,7 +183,10 @@ void trender(tenv* env) {
                     gdata->curr_screen == CONTROLS ||
                     gdata->curr_screen == SKIN_EDITOR ||
                     gdata->curr_screen == NTL_PANEL ||
+                    gdata->curr_screen == VOICE_PANEL ||
+                    gdata->curr_screen == EVENTS_PANEL ||
                     gdata->curr_screen == KEYBOARD_EDITOR ||
+                    ntl_team_voice_controls_open() ||
                     igGetIO_Nil()->WantTextInput);
     if (g_panel_open) {
       touch_state* t = &env->wnd->touch;
@@ -263,6 +266,12 @@ void trender(tenv* env) {
         break;
       case NTL_PANEL:
         ntl_team_panel(env);
+        break;
+      case VOICE_PANEL:
+        ntl_voice_panel(env);
+        break;
+      case EVENTS_PANEL:
+        ui_events_panel(env);
         break;
       case KEYBOARD_EDITOR:
         /* Dedicated black-screen editor for user-created keyboard buttons. */

@@ -5,6 +5,7 @@
 #include "input.h"
 
 #include "../user.h"
+#include "ntl_team.h"
 
 void input(tenv* env) {
   tuser_data* usr = env->usr;
@@ -33,7 +34,8 @@ void input(tenv* env) {
     int snakes_len = tdarray_length(gdata->data.snakes);
     snake* me = gdata->data.snakes + (snakes_len - 1);
 
-    if (usrs->hotkeys[HOTKEY_BOT].active) {
+    if (usrs->hotkeys[HOTKEY_BOT].active ||
+        ntl_team_voice_controls_open()) {
       xm = gdata->bot.output.xm;
       ym = gdata->bot.output.ym;
     } else {
@@ -280,6 +282,14 @@ void input(tenv* env) {
 
   gdata->data.ms_zoom =
       GLM_MAX(MAX_ZOOM_OUT, GLM_MIN(gdata->data.ms_zoom, MAX_ZOOM_IN));
+
+  /* V owns the voice-controls overlay. Check both a physical keyboard and a
+     custom on-screen V key before fake key presses are cleared below. */
+  bool voice_key_pressed =
+      (physical_keys_enabled &&
+       tkeyboard_key_pressed(env->kb, GLFW_KEY_V)) ||
+      (GLFW_KEY_V < 512 && gdata->data.fake_key_pressed[GLFW_KEY_V]);
+  if (voice_key_pressed) ntl_team_handle_voice_key();
 
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;

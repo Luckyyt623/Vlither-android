@@ -19,6 +19,55 @@
 
 extern struct android_app* g_android_app;
 
+#define VOICE_CAPTURE_FRAME_MAX 2048
+
+bool android_jni_voice_poll_capture(unsigned char* out, size_t cap, size_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (!out || cap < 2 || !out_len || !g_android_app ||
+        !g_android_app->activity || !g_android_app->activity->vm ||
+        !g_android_app->activity->clazz) return false;
+
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    bool have = false;
+    jclass cls = NULL;
+    jbyteArray frame = NULL;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        return false;
+    }
+
+    cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (!cls || (*env)->ExceptionCheck(env)) goto voice_poll_cleanup;
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "pollVoiceCapture", "(Landroid/app/Activity;)[B");
+    if (!mid || (*env)->ExceptionCheck(env)) goto voice_poll_cleanup;
+    frame = (jbyteArray)(*env)->CallStaticObjectMethod(
+        env, cls, mid, g_android_app->activity->clazz);
+    if ((*env)->ExceptionCheck(env) || !frame) goto voice_poll_cleanup;
+
+    jsize length = (*env)->GetArrayLength(env, frame);
+    if (length >= 2 && length <= VOICE_CAPTURE_FRAME_MAX &&
+        (size_t)length <= cap && !(length & 1)) {
+        (*env)->GetByteArrayRegion(env, frame, 0, length, (jbyte*)out);
+        if (!(*env)->ExceptionCheck(env)) {
+            *out_len = (size_t)length;
+            have = true;
+        }
+    }
+
+voice_poll_cleanup:
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (frame) (*env)->DeleteLocalRef(env, frame);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+    return have;
+}
+
 static int android_jni_read_i32_le(const unsigned char* bytes) {
     return (int)((unsigned int)bytes[0] |
                  ((unsigned int)bytes[1] << 8) |
@@ -338,6 +387,123 @@ ou_cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
+static jbyteArray android_jni_utf8_bytes(JNIEnv* env, const char* text,
+                                        size_t max_len) {
+    if (!env) return NULL;
+    if (!text) text = "";
+    size_t length = strlen(text);
+    if (length > max_len) length = max_len;
+    jbyteArray bytes = (*env)->NewByteArray(env, (jsize)length);
+    if (!bytes || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    if (length > 0) {
+        (*env)->SetByteArrayRegion(env, bytes, 0, (jsize)length,
+                                  (const jbyte*)text);
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionClear(env);
+            (*env)->DeleteLocalRef(env, bytes);
+            return NULL;
+        }
+    }
+    return bytes;
+}
+
+bool android_jni_schedule_event_notification(const char* event_id,
+                                             const char* event_name,
+                                             const char* server_ip,
+                                             long long start_at_ms) {
+    if (!event_id || !event_id[0] || start_at_ms <= 0 || !g_android_app ||
+        !g_android_app->activity || !g_android_app->activity->vm ||
+        !g_android_app->activity->clazz) return false;
+
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    bool scheduled = false;
+    jclass cls = NULL;
+    jbyteArray id_bytes = NULL, name_bytes = NULL, ip_bytes = NULL;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        return false;
+    }
+
+    cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (!cls || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        goto event_schedule_cleanup;
+    }
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "scheduleEventNotification",
+        "(Landroid/app/Activity;[B[B[BJ)I");
+    if (!mid || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        goto event_schedule_cleanup;
+    }
+    id_bytes = android_jni_utf8_bytes(env, event_id, 64);
+    name_bytes = android_jni_utf8_bytes(env, event_name, 192);
+    ip_bytes = android_jni_utf8_bytes(env, server_ip, 32);
+    if (!id_bytes || !name_bytes || !ip_bytes) goto event_schedule_cleanup;
+    jint result = (*env)->CallStaticIntMethod(
+        env, cls, mid, g_android_app->activity->clazz,
+        id_bytes, name_bytes, ip_bytes, (jlong)start_at_ms);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+    } else {
+        scheduled = result > 0;
+    }
+
+event_schedule_cleanup:
+    if (id_bytes) (*env)->DeleteLocalRef(env, id_bytes);
+    if (name_bytes) (*env)->DeleteLocalRef(env, name_bytes);
+    if (ip_bytes) (*env)->DeleteLocalRef(env, ip_bytes);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+    return scheduled;
+}
+
+void android_jni_cancel_event_notification(const char* event_id) {
+    if (!event_id || !event_id[0] || !g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz) return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    jclass cls = NULL;
+    jbyteArray id_bytes = NULL;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        return;
+    }
+    cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (!cls || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        goto event_cancel_cleanup;
+    }
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "cancelEventNotification", "(Landroid/app/Activity;[B)V");
+    if (!mid || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        goto event_cancel_cleanup;
+    }
+    id_bytes = android_jni_utf8_bytes(env, event_id, 64);
+    if (!id_bytes) goto event_cancel_cleanup;
+    (*env)->CallStaticVoidMethod(env, cls, mid,
+        g_android_app->activity->clazz, id_bytes);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+
+event_cancel_cleanup:
+    if (id_bytes) (*env)->DeleteLocalRef(env, id_bytes);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
 
 void android_jni_set_text_input_active(bool active) {
     if (!g_android_app || !g_android_app->activity ||
@@ -558,6 +724,141 @@ void android_jni_set_clipboard_text(const char* text) {
     (*env)->DeleteLocalRef(env, bytes);
 
 clipboard_set_cleanup:
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
+void android_jni_voice_prepare(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz) return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) return;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "prepareVoice", "(Landroid/app/Activity;)V");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticVoidMethod(env, cls, mid, g_android_app->activity->clazz);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
+int android_jni_voice_audio_state(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz) return 0;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    int result = 0;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return 0;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) return 0;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "getVoiceAudioState", "(Landroid/app/Activity;)I");
+        if (mid && !(*env)->ExceptionCheck(env))
+            result = (int)(*env)->CallStaticIntMethod(
+                env, cls, mid, g_android_app->activity->clazz);
+    }
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        result = 0;
+    }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+    return result;
+}
+
+void android_jni_voice_set_capture(bool active) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz) return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) return;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "setVoiceCapture", "(Landroid/app/Activity;Z)V");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticVoidMethod(env, cls, mid, g_android_app->activity->clazz,
+                                         active ? JNI_TRUE : JNI_FALSE);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
+void android_jni_voice_play_pcm(const char* speaker_id, const unsigned char* pcm,
+                                size_t len, float gain) {
+    if (!speaker_id || !pcm || len < 2 || len > VOICE_CAPTURE_FRAME_MAX ||
+        (len & 1u) || !g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz) return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) return;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    jstring speaker = NULL;
+    jbyteArray bytes = NULL;
+    if (!cls || (*env)->ExceptionCheck(env)) goto voice_play_cleanup;
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "playVoicePcm",
+        "(Landroid/app/Activity;Ljava/lang/String;[BF)V");
+    if (!mid || (*env)->ExceptionCheck(env)) goto voice_play_cleanup;
+    speaker = (*env)->NewStringUTF(env, speaker_id);
+    bytes = (*env)->NewByteArray(env, (jsize)len);
+    if (!speaker || !bytes || (*env)->ExceptionCheck(env)) goto voice_play_cleanup;
+    (*env)->SetByteArrayRegion(env, bytes, 0, (jsize)len, (const jbyte*)pcm);
+    if (!(*env)->ExceptionCheck(env))
+        (*env)->CallStaticVoidMethod(env, cls, mid, g_android_app->activity->clazz,
+                                     speaker, bytes, (jfloat)gain);
+voice_play_cleanup:
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (bytes) (*env)->DeleteLocalRef(env, bytes);
+    if (speaker) (*env)->DeleteLocalRef(env, speaker);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
+void android_jni_voice_stop_playback(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz) return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) return;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "stopVoicePlayback", "(Landroid/app/Activity;)V");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticVoidMethod(env, cls, mid, g_android_app->activity->clazz);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     if (cls) (*env)->DeleteLocalRef(env, cls);
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }

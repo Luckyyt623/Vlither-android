@@ -4,15 +4,27 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
 import android.app.NativeActivity
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -31,13 +43,92 @@ import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.util.HashMap
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class GameActivity : NativeActivity() {
 
+    private data class VoicePacket(
+        val speakerId: String,
+        val pcm: ByteArray,
+        val gain: Float
+    )
+
+    private data class VoiceTrackHolder(
+        val track: AudioTrack,
+        @Volatile var lastUsedMs: Long
+    )
+
+    private data class VoiceCaptureConfig(
+        val source: Int,
+        val sampleRate: Int
+    )
+
+    private data class EncodedVoiceFrame(
+        val pcm: ByteArray,
+        val peak: Int
+    )
+
     companion object {
         private const val TAG = "VlitherGame"
+
+        private const val VOICE_PERMISSION_REQUEST = 4401
+        private const val EVENT_NOTIFICATION_PERMISSION_REQUEST = 4402
+        private const val EVENT_ALARM_ACTION = "com.vlither.EVENT_START"
+        private const val VOICE_SAMPLE_RATE = 16_000
+        private const val VOICE_FRAME_BYTES = 640 // 20 ms, PCM16 mono @ 16 kHz
+        private const val VOICE_MAX_QUEUE = 24
+        private const val VOICE_MAX_SPEAKERS = 16
+        private val VOICE_CAPTURE_CONFIGS = arrayOf(
+            // Prefer a native-rate microphone path. Several Android/OEM audio
+            // HALs advertise 16 kHz but fail on the first blocking read.
+            VoiceCaptureConfig(MediaRecorder.AudioSource.MIC, 48_000),
+            VoiceCaptureConfig(MediaRecorder.AudioSource.MIC, 16_000),
+            VoiceCaptureConfig(MediaRecorder.AudioSource.MIC, 44_100),
+            VoiceCaptureConfig(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16_000),
+            VoiceCaptureConfig(MediaRecorder.AudioSource.VOICE_RECOGNITION, 48_000),
+            VoiceCaptureConfig(MediaRecorder.AudioSource.VOICE_COMMUNICATION, 16_000),
+            VoiceCaptureConfig(MediaRecorder.AudioSource.VOICE_COMMUNICATION, 48_000)
+        )
+        private val voiceCaptureWanted = AtomicBoolean(false)
+        private val voiceCaptureRunning = AtomicBoolean(false)
+        private val voiceCaptureGeneration = AtomicLong(0)
+        private val voiceCaptureFault = AtomicBoolean(false)
+        private val voiceCaptureError = AtomicInteger(0)
+        private val voiceCaptureSampleRate = AtomicInteger(0)
+        private val voiceCaptureQueue = ArrayBlockingQueue<ByteArray>(VOICE_MAX_QUEUE)
+        @Volatile private var voiceCaptureThread: Thread? = null
+        @Volatile private var voiceRecord: AudioRecord? = null
+        private val voicePlaybackQueue = LinkedBlockingQueue<VoicePacket>(VOICE_MAX_QUEUE)
+        private val voicePlaybackRunning = AtomicBoolean(false)
+        private val voicePlaybackGeneration = AtomicLong(0)
+        private val voicePlaybackFault = AtomicBoolean(false)
+        private val voiceNextPlaybackAttemptMs = AtomicLong(0)
+        private val voiceLastPlaybackAtMs = AtomicLong(0)
+        @Volatile private var voicePlaybackThread: Thread? = null
+        private val voiceCaptureFrames = AtomicLong(0)
+        private val voicePlaybackFrames = AtomicLong(0)
+        private val voiceCapturePeak = AtomicInteger(0)
+        private val voicePermissionRequestPending = AtomicBoolean(false)
+        private val voicePermissionDenied = AtomicBoolean(false)
+        private val eventNotificationPermissionRequestPending = AtomicBoolean(false)
+
+        private data class PendingEventNotification(
+            val id: String,
+            val name: String,
+            val serverIp: String,
+            val startAtMs: Long
+        )
+
+        private val pendingEventNotifications =
+            ConcurrentHashMap<String, PendingEventNotification>()
 
         /* Weak ref to the overlay so the static JNI callback can reach it */
         private var overlayRef: FrameLayout? = null
@@ -204,6 +295,620 @@ class GameActivity : NativeActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "requestAdFromC error: ${e.message}")
             }
+        }
+
+        private fun eventRequestCode(eventId: String): Int =
+            eventId.hashCode() and 0x7fffffff
+
+        private fun eventAlarmIntent(
+            activity: Activity,
+            event: PendingEventNotification
+        ): PendingIntent {
+            val intent = Intent(activity, EventNotificationReceiver::class.java).apply {
+                action = EVENT_ALARM_ACTION
+                putExtra(EventNotificationReceiver.EXTRA_EVENT_ID, event.id)
+                putExtra(EventNotificationReceiver.EXTRA_EVENT_NAME, event.name)
+                putExtra(EventNotificationReceiver.EXTRA_SERVER_IP, event.serverIp)
+            }
+            return PendingIntent.getBroadcast(
+                activity,
+                eventRequestCode(event.id),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun scheduleEventAlarm(
+            activity: Activity,
+            event: PendingEventNotification
+        ): Boolean {
+            if (event.startAtMs <= System.currentTimeMillis()) return false
+            return try {
+                val manager = activity.getSystemService(Context.ALARM_SERVICE)
+                    as? AlarmManager ?: return false
+                val pendingIntent = eventAlarmIntent(activity, event)
+                when {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        manager.canScheduleExactAlarms() ->
+                        manager.setExactAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP, event.startAtMs, pendingIntent
+                        )
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+                        manager.setAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP, event.startAtMs, pendingIntent
+                        )
+                    else -> manager.setExact(
+                        AlarmManager.RTC_WAKEUP, event.startAtMs, pendingIntent
+                    )
+                }
+                Log.i(TAG, "Event reminder scheduled: ${event.id} at ${event.startAtMs}")
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not schedule event reminder: ${e.message}")
+                false
+            }
+        }
+
+        @JvmStatic
+        fun scheduleEventNotification(
+            activity: Activity,
+            eventIdUtf8: ByteArray,
+            eventNameUtf8: ByteArray,
+            serverIpUtf8: ByteArray,
+            startAtMs: Long
+        ): Int {
+            val game = activity as? GameActivity ?: return 0
+            val event = PendingEventNotification(
+                eventIdUtf8.toString(Charsets.UTF_8),
+                eventNameUtf8.toString(Charsets.UTF_8),
+                serverIpUtf8.toString(Charsets.UTF_8),
+                startAtMs
+            )
+            if (event.id.isBlank() || event.startAtMs <= System.currentTimeMillis()) return 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                game.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) {
+                pendingEventNotifications[event.id] = event
+                if (eventNotificationPermissionRequestPending.compareAndSet(false, true)) {
+                    game.runOnUiThread {
+                        try {
+                            game.requestPermissions(
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                EVENT_NOTIFICATION_PERMISSION_REQUEST
+                            )
+                        } catch (e: Exception) {
+                            eventNotificationPermissionRequestPending.set(false)
+                            Log.w(TAG, "Could not request notification permission: ${e.message}")
+                        }
+                    }
+                }
+                return 0
+            }
+            pendingEventNotifications.remove(event.id)
+            return if (scheduleEventAlarm(game, event)) 1 else 0
+        }
+
+        @JvmStatic
+        fun cancelEventNotification(activity: Activity, eventIdUtf8: ByteArray) {
+            val eventId = eventIdUtf8.toString(Charsets.UTF_8)
+            if (eventId.isBlank()) return
+            pendingEventNotifications.remove(eventId)
+            try {
+                val placeholder = PendingEventNotification(eventId, "", "", Long.MAX_VALUE)
+                val manager = activity.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                manager?.cancel(eventAlarmIntent(activity, placeholder))
+                val notifications = activity.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as? android.app.NotificationManager
+                notifications?.cancel(eventRequestCode(eventId))
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not cancel event reminder: ${e.message}")
+            }
+        }
+
+        /** Prepare microphone permission before open-mic voice starts.
+         *  The explicit Enable Voice action owns the Android permission prompt. */
+        @JvmStatic
+        fun prepareVoice(activity: Activity) {
+            val game = activity as? GameActivity ?: return
+            if (game.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED) {
+                voicePermissionRequestPending.set(false)
+                voicePermissionDenied.set(false)
+                return
+            }
+            if (voicePermissionDenied.get()) return
+            if (!voicePermissionRequestPending.compareAndSet(false, true)) return
+            game.runOnUiThread {
+                try {
+                    game.requestPermissions(
+                        arrayOf(Manifest.permission.RECORD_AUDIO),
+                        VOICE_PERMISSION_REQUEST
+                    )
+                } catch (e: Exception) {
+                    voicePermissionRequestPending.set(false)
+                    Log.w(TAG, "Could not request microphone permission: ${e.message}")
+                }
+            }
+        }
+
+        /** Bitmask queried by native UI for live voice diagnostics.
+         *  1=permission, 2=capture wanted, 4=capturing, 8=playback active,
+         *  16=recent microphone signal above the noise floor,
+         *  32=the last capture attempt failed and is being retried,
+         *  64=the last speaker-output attempt failed and is being retried. */
+        @JvmStatic
+        fun getVoiceAudioState(activity: Activity): Int {
+            val game = activity as? GameActivity ?: return 0
+            var state = 0
+            if (game.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED) state = state or 1
+            if (voiceCaptureWanted.get()) state = state or 2
+            if (voiceCaptureRunning.get()) state = state or 4
+            val lastPlayback = voiceLastPlaybackAtMs.get()
+            if (lastPlayback > 0 && SystemClock.elapsedRealtime() - lastPlayback < 1_000)
+                state = state or 8
+            if (voiceCapturePeak.get() >= 180) state = state or 16
+            if (voiceCaptureFault.get()) state = state or 32
+            if (voicePlaybackFault.get()) state = state or 64
+            state = state or ((voiceCaptureError.get() and 0xff) shl 8)
+            state = state or (((voiceCaptureSampleRate.get() / 1000) and 0xff) shl 16)
+            return state
+        }
+
+        /** Native networking polls complete 20 ms PCM16/16 kHz frames here.
+         *  Keeping this as a normal static JNI call avoids relying on a lazily
+         *  resolved Kotlin external callback from the real-time recorder thread. */
+        @JvmStatic
+        fun pollVoiceCapture(activity: Activity): ByteArray? {
+            if (activity !is GameActivity) return null
+            return voiceCaptureQueue.poll()
+        }
+
+        @JvmStatic
+        fun clearVoiceCapture(activity: Activity) {
+            if (activity !is GameActivity) return
+            voiceCaptureQueue.clear()
+        }
+
+        /** Enable or disable microphone transmission for Vlither Voice. */
+        @JvmStatic
+        fun setVoiceCapture(activity: Activity, active: Boolean) {
+            val game = activity as? GameActivity ?: return
+            voiceCaptureWanted.set(active)
+            if (!active) {
+                stopVoiceCapture()
+                return
+            }
+            if (game.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED) {
+                prepareVoice(game)
+                return
+            }
+            startVoiceCapture()
+        }
+
+        @Synchronized
+        private fun startVoiceCapture() {
+            if (!voiceCaptureWanted.get() || voiceCaptureThread?.isAlive == true) return
+            val generation = voiceCaptureGeneration.incrementAndGet()
+            voiceCaptureQueue.clear()
+            voiceCapturePeak.set(0)
+            voiceCaptureError.set(0)
+            voiceCaptureFault.set(false)
+            val captureThread = Thread({
+                runVoiceCapture(generation)
+            }, "VlitherVoiceCapture")
+            voiceCaptureThread = captureThread
+            try {
+                captureThread.priority = Thread.MAX_PRIORITY
+                captureThread.start()
+            } catch (e: Exception) {
+                if (voiceCaptureThread === captureThread) voiceCaptureThread = null
+                markVoiceCaptureFailure(11, generation)
+                Log.w(TAG, "Could not start voice worker: ${e.message}")
+            }
+        }
+
+        private fun runVoiceCapture(generation: Long) {
+            try {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+            } catch (_: Exception) {}
+
+            var configIndex = 0
+            try {
+                while (voiceCaptureWanted.get() &&
+                    voiceCaptureGeneration.get() == generation) {
+                    val config = VOICE_CAPTURE_CONFIGS[
+                        configIndex % VOICE_CAPTURE_CONFIGS.size
+                    ]
+                    configIndex += 1
+                    val recorder = openVoiceRecorder(config, generation)
+                    if (recorder == null) {
+                        waitForVoiceRetry(generation)
+                        continue
+                    }
+                    if (!voiceCaptureWanted.get() ||
+                        voiceCaptureGeneration.get() != generation) {
+                        try { recorder.stop() } catch (_: Exception) {}
+                        recorder.release()
+                        break
+                    }
+
+                    voiceRecord = recorder
+                    voiceCaptureRunning.set(true)
+                    voiceCaptureSampleRate.set(config.sampleRate)
+                    val input = ShortArray(maxOf(1, config.sampleRate / 50))
+                    var filled = 0
+                    try {
+                        while (voiceCaptureWanted.get() &&
+                            voiceCaptureGeneration.get() == generation) {
+                            val read = recorder.read(
+                                input,
+                                filled,
+                                input.size - filled,
+                                AudioRecord.READ_BLOCKING
+                            )
+                            if (!voiceCaptureWanted.get() ||
+                                voiceCaptureGeneration.get() != generation) break
+                            if (read > 0) {
+                                filled += read
+                                if (filled < input.size) continue
+                                val encoded = encodeVoiceFrame(input, config.sampleRate)
+                                voiceCapturePeak.set(encoded.peak)
+                                voiceCaptureFrames.incrementAndGet()
+                                voiceCaptureError.set(0)
+                                voiceCaptureFault.set(false)
+                                if (!voiceCaptureQueue.offer(encoded.pcm)) {
+                                    voiceCaptureQueue.poll()
+                                    voiceCaptureQueue.offer(encoded.pcm)
+                                }
+                                filled = 0
+                            } else if (read == 0) {
+                                try { Thread.sleep(2) } catch (_: InterruptedException) {}
+                            } else {
+                                val error = when (read) {
+                                    AudioRecord.ERROR_DEAD_OBJECT -> 5
+                                    AudioRecord.ERROR_INVALID_OPERATION -> 6
+                                    AudioRecord.ERROR_BAD_VALUE -> 7
+                                    else -> 8
+                                }
+                                markVoiceCaptureFailure(error, generation)
+                                Log.w(
+                                    TAG,
+                                    "Voice read failed source=${config.source} " +
+                                        "rate=${config.sampleRate} code=$read"
+                                )
+                                break
+                            }
+                        }
+                    } catch (e: Exception) {
+                        markVoiceCaptureFailure(10, generation)
+                        Log.w(
+                            TAG,
+                            "Voice capture exception source=${config.source} " +
+                                "rate=${config.sampleRate}: ${e.message}"
+                        )
+                    } finally {
+                        try { recorder.stop() } catch (_: Exception) {}
+                        recorder.release()
+                        if (voiceCaptureGeneration.get() == generation) {
+                            if (voiceRecord === recorder) voiceRecord = null
+                            voiceCaptureRunning.set(false)
+                            voiceCapturePeak.set(0)
+                        }
+                    }
+                    waitForVoiceRetry(generation)
+                }
+            } finally {
+                if (voiceCaptureGeneration.get() == generation) {
+                    if (voiceCaptureThread === Thread.currentThread()) {
+                        voiceCaptureThread = null
+                    }
+                    voiceRecord = null
+                    voiceCaptureRunning.set(false)
+                    voiceCaptureSampleRate.set(0)
+                    voiceCapturePeak.set(0)
+                }
+            }
+        }
+
+        private fun openVoiceRecorder(
+            config: VoiceCaptureConfig,
+            generation: Long
+        ): AudioRecord? {
+            voiceCaptureSampleRate.set(config.sampleRate)
+            val minBuffer = AudioRecord.getMinBufferSize(
+                config.sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            if (minBuffer <= 0) {
+                markVoiceCaptureFailure(2, generation)
+                return null
+            }
+            var recorder: AudioRecord? = null
+            try {
+                val inputFrameBytes = maxOf(2, config.sampleRate / 50 * 2)
+                recorder = AudioRecord.Builder()
+                    .setAudioSource(config.source)
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(config.sampleRate)
+                            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(maxOf(minBuffer, inputFrameBytes * 8))
+                    .build()
+                if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                    markVoiceCaptureFailure(3, generation)
+                    recorder.release()
+                    return null
+                }
+                recorder.startRecording()
+                if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                    markVoiceCaptureFailure(4, generation)
+                    try { recorder.stop() } catch (_: Exception) {}
+                    recorder.release()
+                    return null
+                }
+                Log.i(
+                    TAG,
+                    "Vlither Voice input source=${config.source} rate=${config.sampleRate}"
+                )
+                return recorder
+            } catch (e: SecurityException) {
+                markVoiceCaptureFailure(9, generation)
+                Log.w(TAG, "Microphone permission unavailable: ${e.message}")
+            } catch (e: Exception) {
+                markVoiceCaptureFailure(3, generation)
+                Log.w(
+                    TAG,
+                    "Voice input unavailable source=${config.source} " +
+                        "rate=${config.sampleRate}: ${e.message}"
+                )
+            }
+            try { recorder?.stop() } catch (_: Exception) {}
+            try { recorder?.release() } catch (_: Exception) {}
+            return null
+        }
+
+        private fun encodeVoiceFrame(input: ShortArray, sampleRate: Int): EncodedVoiceFrame {
+            val outputSamples = VOICE_FRAME_BYTES / 2
+            val pcm = ByteArray(VOICE_FRAME_BYTES)
+            var peak = 0
+            for (i in 0 until outputSamples) {
+                val positionNumerator = i.toLong() * sampleRate.toLong()
+                val index = (positionNumerator / VOICE_SAMPLE_RATE).toInt()
+                    .coerceIn(0, input.lastIndex)
+                val remainder = (positionNumerator % VOICE_SAMPLE_RATE).toInt()
+                val nextIndex = minOf(index + 1, input.lastIndex)
+                val sample = if (remainder == 0 || nextIndex == index) {
+                    input[index].toInt()
+                } else {
+                    val a = input[index].toLong()
+                    val b = input[nextIndex].toLong()
+                    ((a * (VOICE_SAMPLE_RATE - remainder) + b * remainder) /
+                        VOICE_SAMPLE_RATE).toInt()
+                }.coerceIn(-32768, 32767)
+                val absSample = if (sample == -32768) 32768 else kotlin.math.abs(sample)
+                if (absSample > peak) peak = absSample
+                pcm[i * 2] = (sample and 0xff).toByte()
+                pcm[i * 2 + 1] = ((sample ushr 8) and 0xff).toByte()
+            }
+            return EncodedVoiceFrame(pcm, peak)
+        }
+
+        private fun waitForVoiceRetry(generation: Long) {
+            if (!voiceCaptureWanted.get() ||
+                voiceCaptureGeneration.get() != generation) return
+            try { Thread.sleep(180) } catch (_: InterruptedException) {}
+        }
+
+        private fun markVoiceCaptureFailure(error: Int, generation: Long) {
+            if (!voiceCaptureWanted.get() ||
+                voiceCaptureGeneration.get() != generation) return
+            voiceCaptureRunning.set(false)
+            voiceCaptureFault.set(true)
+            voiceCaptureError.set(error)
+        }
+
+        @Synchronized
+        private fun stopVoiceCapture() {
+            voiceCaptureWanted.set(false)
+            voiceCaptureGeneration.incrementAndGet()
+            voiceCaptureRunning.set(false)
+            voiceCapturePeak.set(0)
+            voiceCaptureFault.set(false)
+            voiceCaptureError.set(0)
+            voiceCaptureSampleRate.set(0)
+            voiceCaptureQueue.clear()
+            voicePermissionDenied.set(false)
+            val recorder = voiceRecord
+            val thread = voiceCaptureThread
+            voiceRecord = null
+            voiceCaptureThread = null
+            try { recorder?.stop() } catch (_: Exception) {}
+            thread?.interrupt()
+        }
+
+        /** Queue one remote PCM packet without blocking the native render loop. */
+        @JvmStatic
+        fun playVoicePcm(activity: Activity, speakerId: String, pcm: ByteArray, gain: Float) {
+            if (activity !is GameActivity || speakerId.isBlank() || pcm.size < 2) return
+            ensureVoicePlaybackThread()
+            val packet = VoicePacket(
+                speakerId.take(64), pcm.copyOf(), gain.coerceIn(0f, 1f)
+            )
+            if (!voicePlaybackQueue.offer(packet)) {
+                voicePlaybackQueue.poll()
+                voicePlaybackQueue.offer(packet)
+            }
+        }
+
+        @Synchronized
+        private fun ensureVoicePlaybackThread() {
+            if (voicePlaybackRunning.get() && voicePlaybackThread?.isAlive == true) return
+            val generation = voicePlaybackGeneration.incrementAndGet()
+            voicePlaybackRunning.set(true)
+            voicePlaybackThread = Thread({
+                val tracks = HashMap<String, VoiceTrackHolder>()
+                try {
+                    while (voicePlaybackRunning.get() &&
+                        voicePlaybackGeneration.get() == generation) {
+                        val packet = try {
+                            voicePlaybackQueue.poll(1, TimeUnit.SECONDS)
+                        } catch (_: InterruptedException) {
+                            if (voicePlaybackGeneration.get() != generation) break
+                            null
+                        }
+                        if (packet == null) {
+                            cleanupIdleVoiceTracks(tracks)
+                            continue
+                        }
+                        var holder = tracks[packet.speakerId]
+                        if (holder == null) {
+                            if (tracks.size >= VOICE_MAX_SPEAKERS) continue
+                            val track = createVoiceTrack() ?: continue
+                            val created = VoiceTrackHolder(track, System.currentTimeMillis())
+                            tracks[packet.speakerId] = created
+                            holder = created
+                        }
+                        val activeHolder = holder
+                        val scaled = scalePcm16(packet.pcm, packet.gain)
+                        try {
+                            val written = activeHolder.track.write(
+                                scaled, 0, scaled.size, AudioTrack.WRITE_BLOCKING
+                            )
+                            if (written <= 0) {
+                                markVoicePlaybackFailure()
+                                tracks.remove(packet.speakerId)?.let {
+                                    releaseVoiceTrack(it.track)
+                                }
+                                continue
+                            }
+                            voicePlaybackFault.set(false)
+                            voiceNextPlaybackAttemptMs.set(0)
+                            voiceLastPlaybackAtMs.set(SystemClock.elapsedRealtime())
+                            voicePlaybackFrames.incrementAndGet()
+                            activeHolder.lastUsedMs = System.currentTimeMillis()
+                        } catch (_: Exception) {
+                            markVoicePlaybackFailure()
+                            tracks.remove(packet.speakerId)?.let { releaseVoiceTrack(it.track) }
+                        }
+                    }
+                } finally {
+                    for (holder in tracks.values) releaseVoiceTrack(holder.track)
+                    tracks.clear()
+                    if (voicePlaybackGeneration.get() == generation) {
+                        voicePlaybackQueue.clear()
+                        voicePlaybackRunning.set(false)
+                        if (voicePlaybackThread === Thread.currentThread()) {
+                            voicePlaybackThread = null
+                        }
+                    }
+                }
+            }, "VlitherVoicePlayback").also {
+                it.priority = Thread.NORM_PRIORITY + 2
+                it.start()
+            }
+        }
+
+        private fun createVoiceTrack(): AudioTrack? {
+            if (SystemClock.elapsedRealtime() < voiceNextPlaybackAttemptMs.get()) return null
+            return try {
+                val minBuffer = AudioTrack.getMinBufferSize(
+                    VOICE_SAMPLE_RATE,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                if (minBuffer <= 0) {
+                    markVoicePlaybackFailure()
+                    return null
+                }
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(VOICE_SAMPLE_RATE)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .setBufferSizeInBytes(maxOf(minBuffer, VOICE_FRAME_BYTES * 8))
+                    .build()
+                if (track.state != AudioTrack.STATE_INITIALIZED) {
+                    track.release()
+                    markVoicePlaybackFailure()
+                    return null
+                }
+                track.play()
+                voicePlaybackFault.set(false)
+                voiceNextPlaybackAttemptMs.set(0)
+                track
+            } catch (e: Exception) {
+                markVoicePlaybackFailure()
+                Log.w(TAG, "Could not create voice output: ${e.message}")
+                null
+            }
+        }
+
+        private fun markVoicePlaybackFailure() {
+            voicePlaybackFault.set(true)
+            voiceNextPlaybackAttemptMs.set(SystemClock.elapsedRealtime() + 750)
+        }
+
+        private fun scalePcm16(input: ByteArray, gain: Float): ByteArray {
+            if (gain >= 0.995f) return input
+            val out = input.copyOf()
+            var i = 0
+            while (i + 1 < out.size) {
+                val raw = (out[i].toInt() and 0xff) or (out[i + 1].toInt() shl 8)
+                val sample = raw.toShort().toInt()
+                val scaled = (sample * gain).toInt().coerceIn(-32768, 32767)
+                out[i] = (scaled and 0xff).toByte()
+                out[i + 1] = ((scaled shr 8) and 0xff).toByte()
+                i += 2
+            }
+            return out
+        }
+
+        private fun cleanupIdleVoiceTracks(tracks: MutableMap<String, VoiceTrackHolder>) {
+            val now = System.currentTimeMillis()
+            val iterator = tracks.entries.iterator()
+            while (iterator.hasNext()) {
+                val (_, holder) = iterator.next()
+                if (now - holder.lastUsedMs > 10_000) {
+                    iterator.remove()
+                    releaseVoiceTrack(holder.track)
+                }
+            }
+        }
+
+        private fun releaseVoiceTrack(track: AudioTrack) {
+            try { track.stop() } catch (_: Exception) {}
+            try { track.flush() } catch (_: Exception) {}
+            try { track.release() } catch (_: Exception) {}
+        }
+
+        @JvmStatic
+        fun stopVoicePlayback(activity: Activity) {
+            if (activity !is GameActivity) return
+            voicePlaybackGeneration.incrementAndGet()
+            voicePlaybackRunning.set(false)
+            val thread = voicePlaybackThread
+            voicePlaybackThread = null
+            voicePlaybackQueue.clear()
+            voicePlaybackFault.set(false)
+            voiceNextPlaybackAttemptMs.set(0)
+            voiceLastPlaybackAtMs.set(0)
+            thread?.interrupt()
         }
 
         /**
@@ -606,9 +1311,51 @@ class GameActivity : NativeActivity() {
         }
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == VOICE_PERMISSION_REQUEST) {
+            voicePermissionRequestPending.set(false)
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED &&
+                voiceCaptureWanted.get()) {
+                voicePermissionDenied.set(false)
+                startVoiceCapture()
+            } else if (grantResults.isEmpty() ||
+                grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                /* Remember a denial so open mic cannot reopen the permission
+                   dialog in a loop. Toggling Voice off/on permits one fresh
+                   request initiated by the user. */
+                voicePermissionDenied.set(true)
+                voiceCaptureWanted.set(false)
+            }
+        } else if (requestCode == EVENT_NOTIFICATION_PERMISSION_REQUEST) {
+            eventNotificationPermissionRequestPending.set(false)
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            val queued = pendingEventNotifications.values.toList()
+            pendingEventNotifications.clear()
+            if (granted) {
+                for (event in queued) scheduleEventAlarm(this, event)
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         hideSystemBars()
+    }
+
+    override fun onPause() {
+        /* Never leave the microphone or a streaming AudioTrack active while
+           Vlither is in the background. Native open-mic state requests a fresh
+           capture session after resume. */
+        setVoiceCapture(this, false)
+        stopVoicePlayback(this)
+        super.onPause()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -619,6 +1366,8 @@ class GameActivity : NativeActivity() {
     }
 
     override fun onDestroy() {
+        setVoiceCapture(this, false)
+        stopVoicePlayback(this)
         setTextInputActiveOnUi(false)
         clearImeEvents(this)
         imeBridgeView = null

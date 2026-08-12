@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #ifdef ANDROID
 #include <android/log.h>
 #define LOG_TAG "vlither"
@@ -107,7 +108,8 @@ void _destroy_image_data(renderer* r, tcontext* ctx) {
 renderer* renderer_create(tenv* env) {
   tcontext* ctx = env->ctx;
   tuser_data* usr = env->usr;
-  renderer* r = malloc(sizeof(renderer));
+  renderer* r = calloc(1, sizeof(renderer));
+  if (!r) return NULL;
 
   vkCreateSampler(
       ctx->device,
@@ -163,6 +165,14 @@ renderer* renderer_create(tenv* env) {
   r->discord_ds = VK_NULL_HANDLE;
   DLOG("renderer: discord_tex=%p", (void*)r->discord_tex);
 
+  /* Voice icons are packed into one optional 2x2 atlas:
+       mic on | mic off
+       sound  | deafened
+     One Vulkan image and descriptor are safer on low-memory Android drivers
+     than four independently loaded resources. Text remains the fallback. */
+  r->voice_status_atlas_tex = create_mipmap_texture(
+      ctx, "app/res/textures/voice_status_atlas.png");
+
   if (!r->bg_tex || !r->tex_atlas || !r->boost_button_tex) {
     DLOG("FATAL: texture load failed bg=%p atlas=%p boost=%p — likely OOM or missing asset",
          (void*)r->bg_tex, (void*)r->tex_atlas, (void*)r->boost_button_tex);
@@ -171,6 +181,8 @@ renderer* renderer_create(tenv* env) {
     if (r->tex_atlas) { destroy_texture(ctx, r->tex_atlas); }
     if (r->boost_button_tex) { destroy_texture(ctx, r->boost_button_tex); }
     if (r->discord_tex) { destroy_texture(ctx, r->discord_tex); }
+    if (r->voice_status_atlas_tex)
+      destroy_texture(ctx, r->voice_status_atlas_tex);
     free(r);
     return NULL;
   }
@@ -183,6 +195,10 @@ renderer* renderer_create(tenv* env) {
   if (r->discord_tex)
     r->discord_ds = igImplVulkan_AddTexture(
         r->linear_sampler, r->discord_tex->view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  if (r->voice_status_atlas_tex)
+    r->voice_status_atlas_ds = igImplVulkan_AddTexture(
+        r->linear_sampler, r->voice_status_atlas_tex->view,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
   vkCreateRenderPass(
@@ -555,7 +571,11 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
   free(r->images);
   if (r->boost_button_ds) igImplVulkan_RemoveTexture(r->boost_button_ds);
   if (r->discord_ds) igImplVulkan_RemoveTexture(r->discord_ds);
+  if (r->voice_status_atlas_ds)
+    igImplVulkan_RemoveTexture(r->voice_status_atlas_ds);
   if (r->discord_tex) destroy_texture(ctx, r->discord_tex);
+  if (r->voice_status_atlas_tex)
+    destroy_texture(ctx, r->voice_status_atlas_tex);
   destroy_texture(ctx, r->boost_button_tex);
   destroy_texture(ctx, r->tex_atlas);
   if (r->bg_tex_custom) destroy_texture(ctx, r->bg_tex_custom);

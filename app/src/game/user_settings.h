@@ -207,6 +207,21 @@ typedef struct user_settings {
   bool vlither_show_minimap_players;
   bool vlither_show_player_stats;
   bool ntl_show_player_stats;
+
+  /* v3.0 extension: keep the player's explicit Voice Chat on/off choice
+     across game refreshes and app restarts. This bool reuses the first byte
+     of the original v3.0 reserve, so the binary layout and all later settings
+     remain compatible with existing user.dat files. */
+  bool voice_chat_enabled;
+  uint8_t voice_settings_reserved[15];
+  bool voice_status_icons_hidden;
+
+  /* v3.1 extension: touch-arrow zoom behaviour and the local head-dot
+     appearance. The reserve starts after v3.0's last logical byte so an old
+     settings file's compiler tail padding cannot overwrite these defaults. */
+  uint8_t arrow_head_settings_reserved[16];
+  bool arrow_sync_with_zoom;
+  vec3 head_dot_color;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

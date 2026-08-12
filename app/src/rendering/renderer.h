@@ -51,6 +51,10 @@ typedef struct renderer {
   VkDescriptorSet boost_button_ds;
   texture* discord_tex;
   VkDescriptorSet discord_ds;
+  /* All four Vlither Voice states share one atlas/descriptor. This keeps the
+     Android Vulkan texture count low and avoids partial icon-load failures. */
+  texture* voice_status_atlas_tex;
+  VkDescriptorSet voice_status_atlas_ds;
 
   VkSampler linear_sampler;
   VkSampler nearest_sampler;

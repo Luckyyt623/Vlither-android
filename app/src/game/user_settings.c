@@ -206,6 +206,16 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->vlither_show_minimap_players = true;
   usr_settings->vlither_show_player_stats = true;
   usr_settings->ntl_show_player_stats = true;
+  usr_settings->voice_chat_enabled = false;
+  memset(usr_settings->voice_settings_reserved, 0,
+         sizeof usr_settings->voice_settings_reserved);
+  usr_settings->voice_status_icons_hidden = false;
+  memset(usr_settings->arrow_head_settings_reserved, 0,
+         sizeof usr_settings->arrow_head_settings_reserved);
+  usr_settings->arrow_sync_with_zoom = true;
+  usr_settings->head_dot_color[0] = 1.0f;
+  usr_settings->head_dot_color[1] = 1.0f;
+  usr_settings->head_dot_color[2] = 1.0f;
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -273,9 +283,19 @@ void read_user_settings(user_settings* usr_settings) {
   size_t v27_prefix = offsetof(user_settings, tag_size_scale);
   size_t v28_prefix = offsetof(user_settings, external_input_mode);
   size_t v29_prefix = offsetof(user_settings, vlither_show_minimap_players);
+  size_t v30_prefix = offsetof(user_settings, voice_chat_enabled);
+  size_t v31_prefix = offsetof(user_settings, arrow_head_settings_reserved);
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v31_prefix)
+    /* v3.0 contains the complete Voice status-icon preference. Ignore only
+       its old tail padding so Arrow sync and head-dot colour use defaults. */
+    bytes_to_read = v31_prefix;
+  else if ((size_t)file_size >= v30_prefix)
+    /* v2.9 contains all telemetry controls. Ignore its old tail padding so
+       the new voice-status visibility preference keeps its default. */
+    bytes_to_read = v30_prefix;
   else if ((size_t)file_size >= v29_prefix)
     /* v2.8 includes the complete external mouse/keyboard field. Ignore only
        its final struct padding so the new telemetry defaults remain intact. */
@@ -445,6 +465,14 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.vlither_show_minimap_players = !!loaded.vlither_show_minimap_players;
   loaded.vlither_show_player_stats = !!loaded.vlither_show_player_stats;
   loaded.ntl_show_player_stats = !!loaded.ntl_show_player_stats;
+  loaded.voice_chat_enabled = !!loaded.voice_chat_enabled;
+  loaded.arrow_sync_with_zoom = !!loaded.arrow_sync_with_zoom;
+  for (int c = 0; c < 3; ++c) {
+    if (!isfinite(loaded.head_dot_color[c]) ||
+        loaded.head_dot_color[c] < 0.0f ||
+        loaded.head_dot_color[c] > 1.0f)
+      loaded.head_dot_color[c] = 1.0f;
+  }
 
   *usr_settings = loaded;
 }
