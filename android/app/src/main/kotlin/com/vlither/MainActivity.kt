@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.5"
+        private const val CURRENT_VERSION   = "4.6"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,25 +209,35 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-            Update 4.5
+     Update 4.6
 
-            What's New:
+        What's New:
 
-            • Voice Chat
-              Voice Chat is now available in Vlither Android. Create or join public and private voice rooms, or use proximity voice to talk openly with nearby Vlither Android players. Press the V keybind to mute or deafen yourself. Open "How to Use" for complete instructions.
+        • Homepage Backgrounds
+          New backgrounds added on the homepage. Blur can be adjusted from 0% to 100%.
 
-            • Arrow Sync with Zoom
-              A new Sync with Zoom option has been added to the Arrow controls. Keep it enabled to scale the arrow with your zoom, or disable it to keep the arrow at a fixed on-screen size.
+        • Events
+          A badge now shows the number of new events on the Events icon. Mark an event as Interested to get notified when it starts, view the time in your local timezone, and join the event server directly from Vlither.
 
-            • Events
-              The Events system is now available. Mark an event as Interested to receive a notification when it starts, view the event time in your local timezone, and join the event server directly from Vlither.
+        • Selectable Arrow Designs
+          Arrow colour no longer changes based on your snake colour. Choose any arrow design from the Controls panel.
 
-            Thanks for using Vlither Android!
-            Changes made by Lucky
+        • Head Dot Colour
+          You can now change your head dot colour from the Controls panel.
+
+        • In-game Centre Marker
+          A small fading red circle marks the exact centre of map
+
+
+
+
+
+        Thanks for using Vlither Android!
+        Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.5")
+            .setTitle("What's New in v4.6")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

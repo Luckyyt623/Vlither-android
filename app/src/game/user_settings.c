@@ -66,7 +66,7 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->zoom_sensitivity    = 1.0f;
   usr_settings->arrow_size          = 1.0f;
   usr_settings->arrow_sensitivity   = 1.0f;
-  usr_settings->boost_arrow_anim    = true;
+  usr_settings->boost_arrow_anim    = false;
   usr_settings->arrow_invisible     = false;
   usr_settings->bot_vis             = true;
   usr_settings->zslider_rel_x       = 0.968f;
@@ -216,6 +216,14 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->head_dot_color[0] = 1.0f;
   usr_settings->head_dot_color[1] = 1.0f;
   usr_settings->head_dot_color[2] = 1.0f;
+  memset(usr_settings->arrow_style_settings_reserved, 0,
+         sizeof usr_settings->arrow_style_settings_reserved);
+  usr_settings->arrow_style = 0;
+  memset(usr_settings->homepage_settings_reserved, 0,
+         sizeof usr_settings->homepage_settings_reserved);
+  /* Normal Vlither is 0; Galaxy is the requested first-run default. */
+  usr_settings->homepage_background = 5;
+  usr_settings->homepage_blur = 0.0f;
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -285,9 +293,19 @@ void read_user_settings(user_settings* usr_settings) {
   size_t v29_prefix = offsetof(user_settings, vlither_show_minimap_players);
   size_t v30_prefix = offsetof(user_settings, voice_chat_enabled);
   size_t v31_prefix = offsetof(user_settings, arrow_head_settings_reserved);
+  size_t v32_prefix = offsetof(user_settings, arrow_style_settings_reserved);
+  size_t v33_prefix = offsetof(user_settings, homepage_settings_reserved);
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v33_prefix)
+    /* Preserve the selected v3.2 arrow while keeping Galaxy and zero blur as
+       the new homepage defaults. */
+    bytes_to_read = v33_prefix;
+  else if ((size_t)file_size >= v32_prefix)
+    /* v3.1 contains the complete Arrow sync and head-dot preferences. Ignore
+       only its old tail padding so the new arrow style stays Red Arrow. */
+    bytes_to_read = v32_prefix;
   else if ((size_t)file_size >= v31_prefix)
     /* v3.0 contains the complete Voice status-icon preference. Ignore only
        its old tail padding so Arrow sync and head-dot colour use defaults. */
@@ -467,6 +485,16 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.ntl_show_player_stats = !!loaded.ntl_show_player_stats;
   loaded.voice_chat_enabled = !!loaded.voice_chat_enabled;
   loaded.arrow_sync_with_zoom = !!loaded.arrow_sync_with_zoom;
+  /* The old boost animation preference is intentionally retired: selected
+     arrow artwork must remain identical during normal movement and boost. */
+  loaded.boost_arrow_anim = false;
+  if (loaded.arrow_style < 0 || loaded.arrow_style >= ARROW_STYLE_COUNT)
+    loaded.arrow_style = 0;
+  if (loaded.homepage_background < 0 || loaded.homepage_background > 6)
+    loaded.homepage_background = 5;
+  if (!isfinite(loaded.homepage_blur) || loaded.homepage_blur < 0.0f ||
+      loaded.homepage_blur > 100.0f)
+    loaded.homepage_blur = 0.0f;
   for (int c = 0; c < 3; ++c) {
     if (!isfinite(loaded.head_dot_color[c]) ||
         loaded.head_dot_color[c] < 0.0f ||

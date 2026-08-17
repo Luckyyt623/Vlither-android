@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #ifdef ANDROID
+#include "../android_jni.h"
 #include <android/asset_manager.h>
 #include <android_native_app_glue.h>
 #include <android/log.h>
@@ -34,8 +35,14 @@ static stbi_uc* _load_from_asset(const char* filename, int* w, int* h, int* c) {
     AAsset_close(asset);
     stbi_uc* pixels = stbi_load_from_memory((stbi_uc*)buf, (int)len, w, h, c, 4);
     free(buf);
-    if (!pixels)
-        LOGE("stbi failed to decode texture asset: %s", path);
+    if (!pixels) {
+        /* stb_image has no WebP decoder. Android's BitmapFactory does, and
+           the JNI bridge returns the same malloc/free-compatible RGBA layout
+           expected by the Vulkan upload path. */
+        pixels = android_jni_decode_asset_rgba(filename, w, h);
+        if (pixels) *c = 4;
+        else LOGE("Failed to decode texture asset: %s", path);
+    }
     return pixels;
 }
 #endif

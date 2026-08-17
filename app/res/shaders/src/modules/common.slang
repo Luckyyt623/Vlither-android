@@ -20,4 +20,5 @@ public struct Global {
   public float max_minimap_size;
   public float minimap_data_size;
   public float minimap_opacity;
+  public float bg_blur;
 }

@@ -15,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -177,6 +178,43 @@ class GameActivity : NativeActivity() {
             packet[offset + 1] = (value ushr 8).toByte()
             packet[offset + 2] = (value ushr 16).toByte()
             packet[offset + 3] = (value ushr 24).toByte()
+        }
+
+        /** Decode packaged image assets for native Vulkan textures. Android's
+         * BitmapFactory supplies WebP support that stb_image does not have. */
+        @JvmStatic
+        fun decodeAssetRgba(activity: Activity, pathUtf8: ByteArray): ByteArray? {
+            val path = pathUtf8.toString(Charsets.UTF_8).removePrefix("app/res/")
+            return try {
+                activity.assets.open(path).use { input ->
+                    val bitmap = BitmapFactory.decodeStream(input) ?: return null
+                    val width = bitmap.width
+                    val height = bitmap.height
+                    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
+                        bitmap.recycle()
+                        return null
+                    }
+                    val count = width * height
+                    val argb = IntArray(count)
+                    bitmap.getPixels(argb, 0, width, 0, 0, width, height)
+                    bitmap.recycle()
+
+                    val packet = ByteArray(8 + count * 4)
+                    putIntLe(packet, 0, width)
+                    putIntLe(packet, 4, height)
+                    var out = 8
+                    for (pixel in argb) {
+                        packet[out++] = (pixel ushr 16).toByte()
+                        packet[out++] = (pixel ushr 8).toByte()
+                        packet[out++] = pixel.toByte()
+                        packet[out++] = (pixel ushr 24).toByte()
+                    }
+                    packet
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not decode asset $path", e)
+                null
+            }
         }
 
         private fun enqueueImeKey(keyCode: Int, action: Int, metaState: Int) {

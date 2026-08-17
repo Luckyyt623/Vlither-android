@@ -222,6 +222,17 @@ typedef struct user_settings {
   uint8_t arrow_head_settings_reserved[16];
   bool arrow_sync_with_zoom;
   vec3 head_dot_color;
+
+  /* v3.2 extension: selected fixed-colour touch-arrow artwork. Reserve a
+     clean boundary so an older file's tail padding cannot select garbage. */
+  uint8_t arrow_style_settings_reserved[16];
+  int arrow_style;
+
+  /* v3.3 extension: homepage-only scene and user-controlled blur. The
+     reserve protects defaults from the previous layout's compiler padding. */
+  uint8_t homepage_settings_reserved[16];
+  int homepage_background;
+  float homepage_blur;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

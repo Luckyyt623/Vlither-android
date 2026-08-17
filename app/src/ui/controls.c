@@ -1,7 +1,15 @@
 #include "controls.h"
 
+#include <stdio.h>
+
+#include "../arrow_styles.h"
 #include "../user.h"
 #include "key_buttons.h"
+
+static const char* const ARROW_STYLE_NAMES[ARROW_STYLE_COUNT] = {
+    "Red Arrow", "Red 3D", "Blue 3D", "Blue Neon", "Colourful",
+    "Wing 3D", "Yellow Double", "Purple", "Magenta",
+};
 
 void ui_controls_init(tenv* env) {}
 
@@ -284,8 +292,6 @@ void ui_controls(tenv* env) {
           igAlignTextToFramePadding();
           igText("Sensitivity");
           igAlignTextToFramePadding();
-          igText("Boost arrow glow");
-          igAlignTextToFramePadding();
           igText("Invisible arrow");
           igAlignTextToFramePadding();
           igText("Sync with zoom");
@@ -299,13 +305,58 @@ void ui_controls(tenv* env) {
           igSetNextItemWidth(-1);
           igSliderFloat("##arrow sens", &usrs->arrow_sensitivity, 0.25f, 3.00f, "%.2f",
                         ImGuiSliderFlags_AlwaysClamp);
-          igCheckbox("##boost arrow anim", &usrs->boost_arrow_anim);
           igCheckbox("##arrow invisible", &usrs->arrow_invisible);
           igCheckbox("##arrow sync zoom", &usrs->arrow_sync_with_zoom);
           igSetNextItemWidth(-1);
           igColorEdit3("##head dot colour", usrs->head_dot_color,
                        ImGuiColorEditFlags_None);
           igIndent(-style->WindowPadding.x);
+          igEndTable();
+        }
+        igSpacing();
+        int displayed_arrow_style = usrs->arrow_style;
+        if (displayed_arrow_style < 0 ||
+            displayed_arrow_style >= ARROW_STYLE_COUNT)
+          displayed_arrow_style = 0;
+        igText("Arrow design: %s", ARROW_STYLE_NAMES[displayed_arrow_style]);
+        ImVec2 arrow_picker_avail;
+        igGetContentRegionAvail(&arrow_picker_avail);
+        float arrow_tile = (arrow_picker_avail.x - style->ItemSpacing.x * 2.0f) / 3.0f;
+        if (arrow_tile > 74.0f) arrow_tile = 74.0f;
+        if (arrow_tile < 42.0f) arrow_tile = 42.0f;
+        if (igBeginTable("arrow_design_picker", 3, ImGuiTableFlags_None,
+                         (ImVec2){0, 0}, 0)) {
+          for (int i = 0; i < ARROW_STYLE_COUNT; ++i) {
+            igTableNextColumn();
+            char arrow_id[32];
+            snprintf(arrow_id, sizeof arrow_id, "##arrow_style_%d", i);
+            bool selected = usrs->arrow_style == i;
+            igPushStyleColor_Vec4(
+                ImGuiCol_Button,
+                selected ? (ImVec4){0.72f, 0.12f, 0.16f, 0.90f}
+                         : (ImVec4){0.05f, 0.07f, 0.10f, 0.72f});
+            igPushStyleColor_Vec4(
+                ImGuiCol_ButtonHovered, (ImVec4){0.28f, 0.42f, 0.64f, 0.90f});
+            bool picked = false;
+            if (usr->r && usr->r->arrow_atlas_ds) {
+              float u0, v0, u1, v1;
+              arrow_style_uv_bounds(i, &u0, &v0, &u1, &v1);
+              float preview_w = arrow_tile;
+              float preview_h = arrow_tile / arrow_style_aspect(i);
+              ImTextureRef arrow_tex = {
+                  NULL, (ImTextureID)usr->r->arrow_atlas_ds};
+              picked = igImageButton(
+                  arrow_id, arrow_tex, (ImVec2){preview_w, preview_h},
+                  (ImVec2){u0, v0}, (ImVec2){u1, v1},
+                  (ImVec4){0, 0, 0, 0}, (ImVec4){1, 1, 1, 1});
+            } else {
+              picked = igButton(ARROW_STYLE_NAMES[i],
+                                (ImVec2){arrow_tile, arrow_tile});
+            }
+            if (picked) usrs->arrow_style = i;
+            if (igIsItemHovered(0)) igSetTooltip("%s", ARROW_STYLE_NAMES[i]);
+            igPopStyleColor(2);
+          }
           igEndTable();
         }
         if (usrs->arrow_sync_with_zoom)
@@ -315,7 +366,8 @@ void ui_controls(tenv* env) {
         if (igButton("Reset arrow and head dot", (ImVec2){-1, 0.0f})) {
           usrs->arrow_size        = 1.0f;
           usrs->arrow_sensitivity = 1.0f;
-          usrs->boost_arrow_anim  = true;
+          usrs->boost_arrow_anim  = false;
+          usrs->arrow_style       = 0;
           usrs->arrow_invisible   = false;
           usrs->arrow_sync_with_zoom = true;
           usrs->head_dot_color[0] = 1.0f;
@@ -427,7 +479,8 @@ void ui_controls(tenv* env) {
         usrs->zoom_sensitivity   = 1.0f;
         usrs->arrow_size         = 1.0f;
         usrs->arrow_sensitivity  = 1.0f;
-        usrs->boost_arrow_anim   = true;
+        usrs->boost_arrow_anim   = false;
+        usrs->arrow_style        = 0;
         usrs->arrow_invisible    = false;
         usrs->arrow_sync_with_zoom = true;
         usrs->head_dot_color[0]  = 1.0f;

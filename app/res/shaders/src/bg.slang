@@ -25,5 +25,18 @@ float4 fs_main(vs_output input) {
   float2 wp = (sx - c) / (global.zoom) + global.view;
   float2 uv = wp / (global.bg_size * global.bg_scale);
   float4 bg_col = bg_tex.Sample(uv);
+  if (global.bg_blur > 0.001) {
+    float radius = saturate(global.bg_blur) * 12.0;
+    float2 px = radius / global.bg_size;
+    bg_col *= 0.24;
+    bg_col += bg_tex.Sample(uv + float2( px.x, 0.0)) * 0.12;
+    bg_col += bg_tex.Sample(uv + float2(-px.x, 0.0)) * 0.12;
+    bg_col += bg_tex.Sample(uv + float2(0.0,  px.y)) * 0.12;
+    bg_col += bg_tex.Sample(uv + float2(0.0, -px.y)) * 0.12;
+    bg_col += bg_tex.Sample(uv + float2( px.x,  px.y)) * 0.07;
+    bg_col += bg_tex.Sample(uv + float2(-px.x,  px.y)) * 0.07;
+    bg_col += bg_tex.Sample(uv + float2( px.x, -px.y)) * 0.07;
+    bg_col += bg_tex.Sample(uv + float2(-px.x, -px.y)) * 0.07;
+  }
   return float4(bg_col.rgb * global.bg_color, global.bg_opacity);
 }

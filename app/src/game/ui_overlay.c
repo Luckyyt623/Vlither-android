@@ -8,6 +8,8 @@
 #endif
 #include "ui_overlay.h"
 
+#include "../arrow_styles.h"
+
 #include <math.h>
 #include "../user.h"
 #include "user_settings.h"
@@ -16,6 +18,40 @@
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
 #endif
+
+static void draw_world_center_marker(tenv* env, float half_width,
+                                     float half_height) {
+  game_data* gdata = &env->usr->gdata;
+  if (gdata->curr_screen != PLAYING || gdata->conn != CONNECTED ||
+      !isfinite(gdata->data.grd) || gdata->data.grd <= 0.0f ||
+      !isfinite(gdata->data.gsc) || gdata->data.gsc <= 0.0f ||
+      !isfinite(gdata->data.view_xx) || !isfinite(gdata->data.view_yy))
+    return;
+
+  /* The Slither arena is centred at (grd, grd). Transform that world point
+     with the same camera and zoom used by snakes, so the marker only enters
+     the screen when the player actually approaches the centre. */
+  float screen_x = half_width +
+      (gdata->data.grd - gdata->data.view_xx) * gdata->data.gsc;
+  float screen_y = half_height +
+      (gdata->data.grd - gdata->data.view_yy) * gdata->data.gsc;
+  float pulse = 0.5f + 0.5f * sinf((float)igGetTime() * 2.2f);
+  float radius = 22.0f * gdata->data.gsc * (0.94f + pulse * 0.08f);
+  radius = fmaxf(7.0f, fminf(radius, 26.0f));
+
+  if (screen_x + radius < 0.0f || screen_x - radius > half_width * 2.0f ||
+      screen_y + radius < 0.0f || screen_y - radius > half_height * 2.0f)
+    return;
+
+  int fill_alpha = (int)(22.0f + pulse * 24.0f);
+  int ring_alpha = (int)(105.0f + pulse * 105.0f);
+  ImDrawList* draw = igGetWindowDrawList();
+  ImVec2 center = {screen_x, screen_y};
+  ImDrawList_AddCircleFilled(draw, center, radius,
+                             IM_COL32(255, 24, 38, fill_alpha), 32);
+  ImDrawList_AddCircle(draw, center, radius,
+                       IM_COL32(255, 42, 52, ring_alpha), 32, 2.0f);
+}
 
 void ui_overlay(tenv* env) {
   tuser_data* usr = env->usr;
@@ -30,6 +66,8 @@ void ui_overlay(tenv* env) {
 
   float mww2 = ctx->size[0] / 2.0f;
   float mhh2 = ctx->size[1] / 2.0f;
+
+  draw_world_center_marker(env, mww2, mhh2);
 
   int snakes_len = tdarray_length(gdata->data.snakes);
   if (snakes_len) {
@@ -470,40 +508,6 @@ void ui_overlay(tenv* env) {
 
     } else {
 
-      float ar = 0.776f, ag = 0.263f, ab = 0.310f;
-      {
-        int sl2 = tdarray_length(gdata->data.snakes);
-        if (sl2 > 0) {
-          snake* mptr = gdata->data.snakes + (sl2 - 1);
-          if (gdata->data.snake_id == mptr->id) {
-            int cv = mptr->cv;
-            if (cv < 0) cv = 0;
-            if (cv >= NUM_COLOR_GROUPS) cv = NUM_COLOR_GROUPS - 1;
-            vec3s* sc = gdata->cg_colors + cv;
-            ar = 0.25f + 0.75f * sc->r;
-            ag = 0.25f + 0.75f * sc->g;
-            ab = 0.25f + 0.75f * sc->b;
-            if (ar > 1.0f) ar = 1.0f;
-            if (ag > 1.0f) ag = 1.0f;
-            if (ab > 1.0f) ab = 1.0f;
-          }
-        }
-      }
-
-      static float s_accel_a  = 0.0f;
-      static float s_accel_fr = 0.0f;
-      bool is_boosting = boost_on;
-      float vfr2 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
-
-      if (is_boosting) {
-        s_accel_a += vfr2 * 0.03f;
-        if (s_accel_a > 1.0f) s_accel_a = 1.0f;
-      } else {
-        s_accel_a -= vfr2 * 0.03f;
-        if (s_accel_a < 0.0f) s_accel_a = 0.0f;
-      }
-      s_accel_fr += vfr2 * 0.22f;
-
       /* The touch-arrow cursor belongs only to touch controls. When
          Mouse + Keyboard mode is active, main.c draws the custom hardware
          mouse texture instead. Never render both cursors at once. */
@@ -518,7 +522,6 @@ void ui_overlay(tenv* env) {
         float cs   = cosf(rot);
         float sn_v = sinf(rot);
 
-        float boost_sz = 1.0f + 0.5f * s_accel_a;
         /* At the normal 1.5x game zoom the multiplier is 1.0. Sync mode makes
            the overlay shrink while zooming out and grow while zooming in, but
            clamps extreme game zoom values so the control remains usable. When
@@ -530,73 +533,42 @@ void ui_overlay(tenv* env) {
           if (arrow_zoom_scale < 0.45f) arrow_zoom_scale = 0.45f;
           if (arrow_zoom_scale > 2.25f) arrow_zoom_scale = 2.25f;
         }
-        float aw = sh * 0.11f  * usrs->arrow_size * boost_sz * arrow_zoom_scale;
-        float ah = sh * 0.066f * usrs->arrow_size * boost_sz * arrow_zoom_scale;
+        int arrow_style = usrs->arrow_style;
+        if (arrow_style < 0 || arrow_style >= ARROW_STYLE_COUNT)
+          arrow_style = 0;
+        VkDescriptorSet arrow_ds = usr->r ? usr->r->arrow_atlas_ds
+                                           : VK_NULL_HANDLE;
+        float aspect = arrow_style_aspect(arrow_style);
+        float arrow_u0, arrow_v0, arrow_u1, arrow_v1;
+        arrow_style_uv_bounds(arrow_style, &arrow_u0, &arrow_v0,
+                              &arrow_u1, &arrow_v1);
+        float ah = sh * 0.085f * usrs->arrow_size * arrow_zoom_scale;
+        float aw = ah * aspect;
 
         #define ARPT(px, py) \
           (ImVec2){ acx + (px)*cs - (py)*sn_v, \
                     acy + (px)*sn_v + (py)*cs }
 
-        ImU32 fill_col   = IM_COL32((int)(ar*255),(int)(ag*255),(int)(ab*255), 230);
-
-        ImU32 border_col = IM_COL32((int)(ar*178),(int)(ag*178),(int)(ab*178), 255);
-
-        ImVec2 body[4] = {
-          ARPT(-0.10f*aw, -0.25f*ah),
-          ARPT( 0.50f*aw, -0.25f*ah),
-          ARPT( 0.50f*aw,  0.25f*ah),
-          ARPT(-0.10f*aw,  0.25f*ah),
-        };
-        ImDrawList_AddConvexPolyFilled(dl, body, 4, fill_col);
-
-        ImDrawList_AddTriangleFilled(dl,
-          ARPT(-0.10f*aw, -0.50f*ah),
-          ARPT(-0.10f*aw, -0.25f*ah),
-          ARPT(-0.50f*aw,  0.00f   ),
-          fill_col);
-
-        ImDrawList_AddTriangleFilled(dl,
-          ARPT(-0.10f*aw,  0.25f*ah),
-          ARPT(-0.10f*aw,  0.50f*ah),
-          ARPT(-0.50f*aw,  0.00f   ),
-          fill_col);
-
-        ImVec2 outline[7] = {
-          ARPT(-0.10f*aw, -0.50f*ah),
-          ARPT(-0.10f*aw, -0.25f*ah),
-          ARPT( 0.50f*aw, -0.25f*ah),
-          ARPT( 0.50f*aw,  0.25f*ah),
-          ARPT(-0.10f*aw,  0.25f*ah),
-          ARPT(-0.10f*aw,  0.50f*ah),
-          ARPT(-0.50f*aw,  0.00f   ),
-        };
-        ImDrawList_AddPolyline(dl, outline, 7, border_col,
-          ImDrawFlags_Closed, 3.0f);
-
-        if (s_accel_a > 0.0f && usrs->boost_arrow_anim) {
-          float pulse = s_accel_a * (0.5f + 0.5f * cosf(s_accel_fr));
-          int   ga    = (int)(pulse * 200.0f);
-          if (ga > 0) {
-            ImU32 glow_col = IM_COL32((int)(ar*255),(int)(ag*255),(int)(ab*255), ga);
-            float gaw = aw * 1.15f;
-            float gah = ah * 1.15f;
-
-            ImVec2 gbody[4] = {
-              ARPT(-0.10f*gaw, -0.25f*gah),
-              ARPT( 0.50f*gaw, -0.25f*gah),
-              ARPT( 0.50f*gaw,  0.25f*gah),
-              ARPT(-0.10f*gaw,  0.25f*gah),
-            };
-            ImDrawList_AddConvexPolyFilled(dl, gbody, 4, glow_col);
-            ImDrawList_AddTriangleFilled(dl,
-              ARPT(-0.10f*gaw, -0.50f*gah),
-              ARPT(-0.10f*gaw, -0.25f*gah),
-              ARPT(-0.50f*gaw,  0.00f    ), glow_col);
-            ImDrawList_AddTriangleFilled(dl,
-              ARPT(-0.10f*gaw,  0.25f*gah),
-              ARPT(-0.10f*gaw,  0.50f*gah),
-              ARPT(-0.50f*gaw,  0.00f    ), glow_col);
-          }
+        if (arrow_ds) {
+          ImTextureRef arrow_ref = {NULL, (ImTextureID)arrow_ds};
+          ImDrawList_AddImageQuad(
+              dl, arrow_ref,
+              ARPT(-0.5f * aw, -0.5f * ah),
+              ARPT( 0.5f * aw, -0.5f * ah),
+              ARPT( 0.5f * aw,  0.5f * ah),
+              ARPT(-0.5f * aw,  0.5f * ah),
+              (ImVec2){arrow_u0, arrow_v0},
+              (ImVec2){arrow_u1, arrow_v0},
+              (ImVec2){arrow_u1, arrow_v1},
+              (ImVec2){arrow_u0, arrow_v1},
+              IM_COL32(255, 255, 255, 255));
+        } else {
+          /* Safe fixed-red fallback if an optional texture could not load. */
+          ImDrawList_AddTriangleFilled(
+              dl, ARPT(-0.5f * aw, 0),
+              ARPT(0.35f * aw, -0.5f * ah),
+              ARPT(0.35f * aw, 0.5f * ah),
+              IM_COL32(212, 53, 62, 255));
         }
 
         #undef ARPT

@@ -3,6 +3,7 @@
 
 #include <stdalign.h>
 
+#include "../constants.h"
 #include "bg_renderer.h"
 #include "fd_renderer.h"
 #include "bp_renderer.h"
@@ -38,6 +39,7 @@ typedef struct renderer {
     alignas(4) float max_minimap_size;
     alignas(4) float minimap_data_size;
     alignas(4) float minimap_opacity;
+    alignas(4) float bg_blur;
   } global;
 
   texture* tex_atlas;
@@ -47,8 +49,11 @@ typedef struct renderer {
   texture* active_bg_tex;
   int bg_variant;
   int bg_custom_variant;
+  int bg_failed_variant;
   texture* boost_button_tex;
   VkDescriptorSet boost_button_ds;
+  texture* arrow_atlas_tex;
+  VkDescriptorSet arrow_atlas_ds;
   texture* discord_tex;
   VkDescriptorSet discord_ds;
   /* All four Vlither Voice states share one atlas/descriptor. This keeps the

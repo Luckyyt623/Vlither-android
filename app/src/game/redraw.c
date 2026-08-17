@@ -1552,6 +1552,10 @@ void redraw(tenv* env) {
   usr->r->global.bd_color[1] = usrs->bd_color[1];
   usr->r->global.bd_color[2] = usrs->bd_color[2];
   usr->r->global.bg_scale = mode->bg_scale;
+  usr->r->global.bg_blur = 0.0f;
+  usr->r->global.bg_color[0] = 1.0f;
+  usr->r->global.bg_color[1] = 1.0f;
+  usr->r->global.bg_color[2] = 1.0f;
   usr->r->global.bg_opacity = 1;
   usr->r->global.bd_opacity = 0.8f;
   usr->r->global.minimap_data_size = gdata->data.mmsz;

@@ -8,6 +8,7 @@
 #include "../user.h"
 #include "../game/vlither_tags.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -18,6 +19,146 @@ static int g_privacy_section = 0;
 
 static long long event_now_ms(void) {
   return (long long)time(NULL) * 1000LL;
+}
+
+static const char* const HOMEPAGE_BACKGROUND_NAMES[] = {
+    "Normal Vlither", "Alpine Valley", "Himalayan Dawn",
+    "Cloudsea Sunrise", "Neon Bridge", "Galaxy", "Fuji Sunset",
+};
+
+static ImVec4 homepage_accent(int background) {
+  static const ImVec4 accents[] = {
+      {0.36f, 0.30f, 0.62f, 1.0f}, /* Normal Vlither */
+      {0.18f, 0.48f, 0.24f, 1.0f}, /* Alpine Valley */
+      {0.49f, 0.31f, 0.18f, 1.0f}, /* Himalayan Dawn */
+      {0.08f, 0.38f, 0.70f, 1.0f}, /* Cloudsea Sunrise */
+      {0.55f, 0.20f, 0.62f, 1.0f}, /* Neon Bridge */
+      {0.14f, 0.25f, 0.48f, 1.0f}, /* Galaxy */
+      {0.48f, 0.25f, 0.18f, 1.0f}, /* Fuji Sunset */
+  };
+  if (background < 0 || background > 6) background = 5;
+  return accents[background];
+}
+
+static void push_homepage_theme(int background) {
+  ImVec4 accent = homepage_accent(background);
+  ImVec4 frame = {accent.x * 0.72f, accent.y * 0.72f,
+                  accent.z * 0.72f, 0.78f};
+  ImVec4 button = {accent.x * 0.58f, accent.y * 0.58f,
+                   accent.z * 0.58f, 0.70f};
+  ImVec4 hovered = {accent.x * 0.88f, accent.y * 0.88f,
+                    accent.z * 0.88f, 0.88f};
+  ImVec4 active = {fminf(accent.x * 1.12f, 1.0f),
+                   fminf(accent.y * 1.12f, 1.0f),
+                   fminf(accent.z * 1.12f, 1.0f), 0.94f};
+  igPushStyleColor_Vec4(ImGuiCol_FrameBg, frame);
+  igPushStyleColor_Vec4(ImGuiCol_Button, button);
+  igPushStyleColor_Vec4(ImGuiCol_ButtonHovered, hovered);
+  igPushStyleColor_Vec4(ImGuiCol_ButtonActive, active);
+}
+
+static void apply_homepage_background(tenv* env) {
+  if (!env || !env->usr || !env->usr->r || !env->ctx) return;
+  tuser_data* usr = env->usr;
+  renderer* r = usr->r;
+  int selected = usr->usrs.homepage_background;
+  if (selected < 0 || selected > 6) selected = 5;
+
+  r->global.bd_opacity = 0.0f;
+  r->global.minimap_opacity = 0.0f;
+  r->global.bg_blur = 0.0f;
+  r->global.bg_color[0] = 1.0f;
+  r->global.bg_color[1] = 1.0f;
+  r->global.bg_color[2] = 1.0f;
+
+  if (selected == 0) {
+    renderer_set_background_variant(r, env->ctx, 0);
+    r->global.bg_opacity = 0.0f;
+    return;
+  }
+
+  /* Gameplay owns variants 0..15. Homepage scenes are 16..21 and share the
+     same one-texture lazy slot, so only the currently selected photo lives in
+     GPU memory. */
+  const int homepage_variant = 15 + selected;
+  renderer_set_background_variant(r, env->ctx, homepage_variant);
+  if (r->bg_variant != homepage_variant || !r->active_bg_tex ||
+      r->active_bg_tex->size[0] <= 0 || r->active_bg_tex->size[1] <= 0) {
+    r->global.bg_opacity = 0.0f;
+    return;
+  }
+
+  const float scale_x = (float)env->ctx->size[0] /
+                        (float)r->active_bg_tex->size[0];
+  const float scale_y = (float)env->ctx->size[1] /
+                        (float)r->active_bg_tex->size[1];
+  const float cover_scale = fmaxf(scale_x, scale_y);
+  static const float scene_brightness[] = {
+      1.00f, 0.68f, 0.74f, 0.76f, 0.76f, 0.88f, 0.72f};
+  const float brightness = scene_brightness[selected];
+
+  r->global.zoom = 1.0f;
+  r->global.bg_scale = cover_scale;
+  r->global.view[0] = r->active_bg_tex->size[0] * cover_scale * 0.5f;
+  r->global.view[1] = r->active_bg_tex->size[1] * cover_scale * 0.5f;
+  r->global.bg_blur = usr->usrs.homepage_blur / 100.0f;
+  r->global.bg_color[0] = brightness;
+  r->global.bg_color[1] = brightness;
+  r->global.bg_color[2] = brightness;
+  r->global.bg_opacity = 1.0f;
+}
+
+static void draw_homepage_background_picker(tenv* env, float frame_height) {
+  tuser_data* usr = env->usr;
+  user_settings* usrs = &usr->usrs;
+  ImGuiStyle* style = igGetStyle();
+  int selected = usrs->homepage_background;
+  if (selected < 0 || selected > 6) selected = 5;
+
+  const float button_w = 210.0f;
+  char button_label[80];
+  snprintf(button_label, sizeof button_label,
+           "Background: %s##homepage_background_button",
+           HOMEPAGE_BACKGROUND_NAMES[selected]);
+  igSetCursorPos((ImVec2){env->ctx->size[0] - button_w - 16.0f,
+                          16.0f + frame_height + 8.0f});
+  if (igButton(button_label, (ImVec2){button_w, frame_height * 1.15f}))
+    igOpenPopup_Str("Homepage Background", 0);
+
+  igSetNextWindowSize((ImVec2){350.0f, 0.0f}, ImGuiCond_Appearing);
+  if (!igBeginPopup("Homepage Background", ImGuiWindowFlags_NoSavedSettings))
+    return;
+
+  igSeparatorText("Homepage Background");
+  igTextWrapped("The selected scene is previewed live. Only one photo is kept in memory.");
+  igSpacing();
+  igSetNextItemWidth(-1.0f);
+  if (igCombo_Str_arr("##homepage_scene", &usrs->homepage_background,
+                      HOMEPAGE_BACKGROUND_NAMES, 7, 7))
+    save_user_settings(usrs);
+
+  igBeginDisabled(usrs->homepage_background == 0);
+  igText("Background blur");
+  igSetNextItemWidth(-1.0f);
+  igSliderFloat("##homepage_blur", &usrs->homepage_blur, 0.0f, 100.0f,
+                "%.0f%%", ImGuiSliderFlags_AlwaysClamp);
+  if (igIsItemDeactivatedAfterEdit()) save_user_settings(usrs);
+  igEndDisabled();
+
+  igSpacing();
+  ImVec2 avail;
+  igGetContentRegionAvail(&avail);
+  float half = (avail.x - style->ItemSpacing.x) * 0.5f;
+  if (igButton("Normal Vlither", (ImVec2){half, 0.0f})) {
+    usrs->homepage_background = 0;
+    save_user_settings(usrs);
+  }
+  igSameLine(0, style->ItemSpacing.x);
+  if (igButton("Default Galaxy", (ImVec2){half, 0.0f})) {
+    usrs->homepage_background = 5;
+    save_user_settings(usrs);
+  }
+  igEndPopup();
 }
 
 static void event_format_local_time(long long timestamp_ms,
@@ -237,6 +378,8 @@ void ui_title_screen(tenv* env) {
   ImGuiIO* io = igGetIO_Nil();
   game_data* gdata = &usr->gdata;
 
+  apply_homepage_background(env);
+
   char version_str[16] = {0};
   sprintf(version_str, "v%s", APP_VERSION);
   ImVec2 vtxtsz; igCalcTextSize(&vtxtsz, version_str, NULL, false, -1);
@@ -248,12 +391,10 @@ void ui_title_screen(tenv* env) {
 
   igPushFont(usr->imgui_data.regular_font[usrs->ui_font_size],
              usr->imgui_data.regular_font[usrs->ui_font_size]->LegacySize);
-
-  usr->r->global.bg_opacity = 0;
-  usr->r->global.bd_opacity = 0;
-  usr->r->global.minimap_opacity = 0;
+  push_homepage_theme(usrs->homepage_background);
 
   float frame_height = igGetFrameHeight();
+  draw_homepage_background_picker(env, frame_height);
 
 #ifdef ANDROID
   /* Homepage policy entry point and the supplied Discord artwork. The image is
@@ -342,8 +483,6 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y);
   igPushItemWidth(logo_size);
-  igPushStyleColor_Vec4(ImGuiCol_FrameBg,
-                        (ImVec4){0.297f, 0.265f, 0.484f, 1.0f});
   igInputTextWithHint("##nickname_input", "Nickname", usrs->nickname,
                       MAX_NICKNAME_LEN + 1, ImGuiInputTextFlags_None, NULL,
                       NULL);
@@ -356,7 +495,6 @@ void ui_title_screen(tenv* env) {
   igInputTextWithHint("##ipv4_input", "IPv4:Port", usrs->ipv4, MAX_IPV4_LEN + 1,
                       ImGuiInputTextFlags_None, NULL, NULL);
   igPopItemWidth();
-  igPopStyleColor(1);
   igPopItemWidth();
 
   igSameLine(0, style->ItemSpacing.x);
@@ -523,6 +661,7 @@ void ui_title_screen(tenv* env) {
 
   draw_privacy_policy_popup(env);
 
+  igPopStyleColor(4);
   igPopFont();
 }
 

@@ -188,6 +188,17 @@ renderer* renderer_create(tenv* env) {
   }
   r->active_bg_tex = r->bg_tex;
   r->bg_variant = 0;
+  r->bg_failed_variant = -1;
+
+  /* All nine fixed-colour arrows share one atlas and one ImGui descriptor.
+     This avoids exhausting the small Vulkan descriptor pool during startup. */
+  r->arrow_atlas_tex = create_mipmap_texture(
+      ctx, "app/res/textures/arrow_atlas.webp");
+  r->arrow_atlas_ds = VK_NULL_HANDLE;
+  if (r->arrow_atlas_tex)
+    r->arrow_atlas_ds = igImplVulkan_AddTexture(
+        r->linear_sampler, r->arrow_atlas_tex->view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
   r->boost_button_ds = igImplVulkan_AddTexture(
       r->linear_sampler, r->boost_button_tex->view,
@@ -325,6 +336,7 @@ renderer* renderer_create(tenv* env) {
   r->global.minimap_circ[1] = 0;
   r->global.minimap_circ[2] = 256;
   r->global.minimap_opacity = 1;
+  r->global.bg_blur = 0;
   r->global.lview[0] = -1;
   r->global.lview[1] = -1;
 
@@ -402,7 +414,12 @@ renderer* renderer_create(tenv* env) {
 
 void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
   if (!r || !ctx) return;
-  if (variant < 0 || variant > 15) variant = 0;
+  if (variant < 0 || variant > 21) variant = 0;
+  if (variant == r->bg_failed_variant) {
+    r->active_bg_tex = r->bg_tex;
+    r->bg_variant = 0;
+    return;
+  }
   if (r->bg_variant == variant && r->active_bg_tex) return;
 
   static const char* custom_paths[] = {
@@ -421,6 +438,12 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
       "app/res/textures/custom_backgrounds/47_bg_hexB.png",
       "app/res/textures/custom_backgrounds/52_bg_bluecube.png",
       "app/res/textures/custom_backgrounds/53_bg_asanoha.png",
+      "app/res/textures/homepage_backgrounds/01_alpine_valley.webp",
+      "app/res/textures/homepage_backgrounds/02_himalayan_dawn.webp",
+      "app/res/textures/homepage_backgrounds/03_cloudsea_sunrise.webp",
+      "app/res/textures/homepage_backgrounds/04_neon_bridge.webp",
+      "app/res/textures/homepage_backgrounds/05_galaxy.webp",
+      "app/res/textures/homepage_backgrounds/06_fuji_sunset.webp",
   };
 
   texture* desired = r->bg_tex;
@@ -431,8 +454,14 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
     } else {
       int custom_index = variant - 1;
       new_custom = create_mipmap_texture(ctx, custom_paths[custom_index]);
-      if (new_custom) desired = new_custom;
-      else desired = r->bg_tex;
+      if (new_custom) {
+        desired = new_custom;
+        r->bg_failed_variant = -1;
+      } else {
+        r->bg_failed_variant = variant;
+        desired = r->bg_tex;
+        variant = 0;
+      }
     }
   }
   if (!desired) return;
@@ -573,6 +602,10 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
   if (r->discord_ds) igImplVulkan_RemoveTexture(r->discord_ds);
   if (r->voice_status_atlas_ds)
     igImplVulkan_RemoveTexture(r->voice_status_atlas_ds);
+  if (r->arrow_atlas_ds)
+    igImplVulkan_RemoveTexture(r->arrow_atlas_ds);
+  if (r->arrow_atlas_tex)
+    destroy_texture(ctx, r->arrow_atlas_tex);
   if (r->discord_tex) destroy_texture(ctx, r->discord_tex);
   if (r->voice_status_atlas_tex)
     destroy_texture(ctx, r->voice_status_atlas_tex);

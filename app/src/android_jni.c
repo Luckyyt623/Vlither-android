@@ -410,6 +410,72 @@ static jbyteArray android_jni_utf8_bytes(JNIEnv* env, const char* text,
     return bytes;
 }
 
+unsigned char* android_jni_decode_asset_rgba(const char* asset_path,
+                                             int* width, int* height) {
+    if (width) *width = 0;
+    if (height) *height = 0;
+    if (!asset_path || !width || !height || !g_android_app ||
+        !g_android_app->activity || !g_android_app->activity->vm ||
+        !g_android_app->activity->clazz) return NULL;
+
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    unsigned char* rgba = NULL;
+    jclass cls = NULL;
+    jbyteArray path_bytes = NULL;
+    jbyteArray packet = NULL;
+    jbyte* packet_bytes = NULL;
+
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return NULL;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        return NULL;
+    }
+
+    cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (!cls || (*env)->ExceptionCheck(env)) goto decode_cleanup;
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "decodeAssetRgba", "(Landroid/app/Activity;[B)[B");
+    if (!mid || (*env)->ExceptionCheck(env)) goto decode_cleanup;
+
+    path_bytes = android_jni_utf8_bytes(env, asset_path, 1024);
+    if (!path_bytes) goto decode_cleanup;
+    packet = (jbyteArray)(*env)->CallStaticObjectMethod(
+        env, cls, mid, g_android_app->activity->clazz, path_bytes);
+    if ((*env)->ExceptionCheck(env) || !packet) goto decode_cleanup;
+
+    jsize packet_len = (*env)->GetArrayLength(env, packet);
+    if (packet_len < 12) goto decode_cleanup;
+    packet_bytes = (*env)->GetByteArrayElements(env, packet, NULL);
+    if (!packet_bytes || (*env)->ExceptionCheck(env)) goto decode_cleanup;
+
+    int decoded_w = android_jni_read_i32_le((const unsigned char*)packet_bytes);
+    int decoded_h = android_jni_read_i32_le((const unsigned char*)packet_bytes + 4);
+    if (decoded_w <= 0 || decoded_h <= 0 || decoded_w > 4096 || decoded_h > 4096)
+        goto decode_cleanup;
+    size_t pixel_bytes = (size_t)decoded_w * (size_t)decoded_h * 4u;
+    if (pixel_bytes > (size_t)packet_len - 8u) goto decode_cleanup;
+
+    rgba = (unsigned char*)malloc(pixel_bytes);
+    if (!rgba) goto decode_cleanup;
+    memcpy(rgba, (const unsigned char*)packet_bytes + 8, pixel_bytes);
+    *width = decoded_w;
+    *height = decoded_h;
+
+decode_cleanup:
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (packet_bytes)
+        (*env)->ReleaseByteArrayElements(env, packet, packet_bytes, JNI_ABORT);
+    if (packet) (*env)->DeleteLocalRef(env, packet);
+    if (path_bytes) (*env)->DeleteLocalRef(env, path_bytes);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+    return rgba;
+}
+
 bool android_jni_schedule_event_notification(const char* event_id,
                                              const char* event_name,
                                              const char* server_ip,

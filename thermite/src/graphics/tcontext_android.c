@@ -427,11 +427,11 @@ void _tcontext_create_descriptor_pool(tcontext* context) {
         &(VkDescriptorPoolCreateInfo){
             .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-            .maxSets       = 20,
+            .maxSets       = 128,
             .poolSizeCount = 2,
             .pPoolSizes    = (VkDescriptorPoolSize[]){
-                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,          20},
-                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,  20},
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         128},
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 256},
             },
         }, NULL, &context->descriptor_pool);
 }

@@ -14,6 +14,10 @@ void android_jni_notify_game_ready(void);
 
 void android_jni_open_url(const char* url);
 
+/* Decode an Android asset (including WebP) to malloc-owned RGBA bytes. */
+unsigned char* android_jni_decode_asset_rgba(const char* asset_path,
+                                             int* width, int* height);
+
 /* Event reminders survive the game activity and are delivered by Android at
    the event start time. Returns true when scheduled immediately; Android 13+
    may first show its notification-permission dialog. */
