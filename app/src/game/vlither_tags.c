@@ -48,6 +48,8 @@ typedef enum vlither_http_kind {
 
 typedef struct vlither_chat_message {
   long long seq;
+  long long time_ms;
+  char client_id[65];
   char nick[64];
   char text[256];
   char server[96];
@@ -56,12 +58,14 @@ typedef struct vlither_chat_message {
 typedef struct vlither_chat_player {
   char client_id[65];
   char nick[64];
+  char map_name[MAX_NICKNAME_LEN + 1];
   char server[96];
   char version[16];
   char voice_room_id[25];
   int snake_id;
   float x, y;
   int fps, ping;
+  long long sos_until_ms;
   bool voice_enabled;
   bool voice_muted;
   bool voice_deafened;
@@ -92,7 +96,7 @@ typedef struct vlither_event {
   char country[65];
   char prize[97];
   char rules[1601];
-  char server_ip[MAX_IPV4_LEN + 1];
+  char server_ip[MAX_SERVER_IP_LEN + 1];
   long long start_at_ms;
   long long end_at_ms;
   long long remove_at_ms;
@@ -131,6 +135,7 @@ typedef struct vlither_tags_state {
   long long last_chat_seq;
   vlither_chat_player players[VLITHER_CHAT_PLAYER_MAX];
   int player_count;
+  bool presence_baselined;
 
   vlither_event events[VLITHER_EVENT_MAX];
   int event_count;
@@ -155,6 +160,7 @@ typedef struct vlither_tags_state {
   unsigned long long voice_tx_frames;
   unsigned long long voice_rx_frames;
   int voice_listener_count;
+  long long local_sos_until_ms;
 } vlither_tags_state;
 
 static vlither_tags_state S;
@@ -366,10 +372,11 @@ static void copy_json_string(struct mg_str json, const char *path,
   }
 }
 
-static void append_chat_message(long long seq, const char *nick,
+static bool append_chat_message(long long seq, long long time_ms,
+                                const char *client_id, const char *nick,
                                 const char *text, const char *server) {
-  if (!text || !text[0]) return;
-  if (seq > 0 && seq <= S.last_chat_seq) return;
+  if (!text || !text[0]) return false;
+  if (seq > 0 && seq <= S.last_chat_seq) return false;
   int idx;
   if (S.chat_count < VLITHER_CHAT_HISTORY_MAX) {
     idx = (S.chat_start + S.chat_count) % VLITHER_CHAT_HISTORY_MAX;
@@ -381,11 +388,14 @@ static void append_chat_message(long long seq, const char *nick,
   vlither_chat_message *m = &S.chat[idx];
   memset(m, 0, sizeof *m);
   m->seq = seq;
+  m->time_ms = time_ms > 0 ? time_ms : (long long)time(NULL) * 1000LL;
+  strncpy(m->client_id, client_id ? client_id : "", sizeof m->client_id - 1);
   strncpy(m->nick, nick && nick[0] ? nick : "Vlither", sizeof m->nick - 1);
   strncpy(m->text, text, sizeof m->text - 1);
   strncpy(m->server, server && server[0] ? server : "_GAME_MENU_",
           sizeof m->server - 1);
   if (seq > S.last_chat_seq) S.last_chat_seq = seq;
+  return true;
 }
 
 static void clear_chat_messages(void) {
@@ -399,17 +409,41 @@ static void parse_chat_message(struct mg_str json, const char *base_path) {
   char path[128];
   snprintf(path, sizeof path, "%s.seq", base_path);
   long long seq = (long long)mg_json_get_long(json, path, 0);
-  char nick[64], text[256], server[96];
+  double time_number = 0.0;
+  snprintf(path, sizeof path, "%s.time", base_path);
+  long long time_ms = mg_json_get_num(json, path, &time_number)
+                          ? (long long)time_number
+                          : (long long)time(NULL) * 1000LL;
+  char client_id[65], nick[64], text[256], server[96];
+  snprintf(path, sizeof path, "%s.clientId", base_path);
+  copy_json_string(json, path, client_id, sizeof client_id, "");
   snprintf(path, sizeof path, "%s.nickname", base_path);
   copy_json_string(json, path, nick, sizeof nick, "Vlither");
   snprintf(path, sizeof path, "%s.text", base_path);
   copy_json_string(json, path, text, sizeof text, "");
   snprintf(path, sizeof path, "%s.server", base_path);
   copy_json_string(json, path, server, sizeof server, "_GAME_MENU_");
-  append_chat_message(seq, nick, text, server);
+  if (append_chat_message(seq, time_ms, client_id, nick, text, server) &&
+      S.env && S.env->usr &&
+      strcmp(client_id, S.env->usr->usrs.ntl_client_id))
+    ntl_team_emit_alert(NTL_ALERT_CHAT);
 }
 
 static void parse_presence(struct mg_str json) {
+  char previous_ids[VLITHER_CHAT_PLAYER_MAX][65];
+  bool previous_sos[VLITHER_CHAT_PLAYER_MAX];
+  int previous_count = S.player_count;
+  bool baseline_only = !S.presence_baselined;
+  bool alert_player = false;
+  bool alert_sos = false;
+  memset(previous_ids, 0, sizeof previous_ids);
+  memset(previous_sos, 0, sizeof previous_sos);
+  for (int i = 0; i < previous_count; ++i) {
+    strncpy(previous_ids[i], S.players[i].client_id,
+            sizeof previous_ids[i] - 1);
+    previous_sos[i] = S.players[i].sos_until_ms >
+                      (long long)time(NULL) * 1000LL;
+  }
   memset(S.players, 0, sizeof S.players);
   S.player_count = 0;
   for (int i = 0; i < VLITHER_CHAT_PLAYER_MAX; ++i) {
@@ -424,6 +458,8 @@ static void parse_presence(struct mg_str json) {
     mg_free(probe);
     snprintf(path, sizeof path, "%s.clientId", base);
     copy_json_string(json, path, p->client_id, sizeof p->client_id, "");
+    snprintf(path, sizeof path, "%s.mapName", base);
+    copy_json_string(json, path, p->map_name, sizeof p->map_name, "");
     snprintf(path, sizeof path, "%s.server", base);
     copy_json_string(json, path, p->server, sizeof p->server, "_GAME_MENU_");
     snprintf(path, sizeof path, "%s.version", base);
@@ -449,7 +485,27 @@ static void parse_presence(struct mg_str json) {
     p->fps = (int)mg_json_get_long(json, path, -1);
     snprintf(path, sizeof path, "%s.ping", base);
     p->ping = (int)mg_json_get_long(json, path, -1);
+    snprintf(path, sizeof path, "%s.sosUntil", base);
+    p->sos_until_ms = (long long)mg_json_get_long(json, path, 0);
+
+    int old_index = -1;
+    for (int old = 0; old < previous_count; ++old) {
+      if (p->client_id[0] && !strcmp(p->client_id, previous_ids[old])) {
+        old_index = old;
+        break;
+      }
+    }
+    bool local = S.env && S.env->usr && p->client_id[0] &&
+                 !strcmp(p->client_id, S.env->usr->usrs.ntl_client_id);
+    bool sos = p->sos_until_ms > (long long)time(NULL) * 1000LL;
+    if (!baseline_only && !local) {
+      if (sos && (old_index < 0 || !previous_sos[old_index])) alert_sos = true;
+      else if (old_index < 0) alert_player = true;
+    }
   }
+  S.presence_baselined = true;
+  if (alert_sos) ntl_team_emit_alert(NTL_ALERT_SOS);
+  else if (alert_player) ntl_team_emit_alert(NTL_ALERT_PLAYER);
 }
 
 static long long json_millis(struct mg_str json, const char *path) {
@@ -711,9 +767,13 @@ static void handle_ws_json(struct mg_str json) {
        well so a client never resurrects stale messages when connected to an
        older backend build. */
   } else if (!strcmp(type, "chat")) {
-    parse_chat_message(json, "$");
+    if (vlither_chat_joined()) parse_chat_message(json, "$");
   } else if (!strcmp(type, "presence")) {
-    parse_presence(json);
+    if (vlither_chat_joined()) parse_presence(json);
+    else {
+      S.player_count = 0;
+      S.presence_baselined = false;
+    }
   } else if (!strcmp(type, "events")) {
     parse_events(json);
   } else if (!strcmp(type, "event_error")) {
@@ -728,11 +788,12 @@ static void handle_ws_json(struct mg_str json) {
       mg_ws_send(S.ws, refresh, sizeof refresh - 1, WEBSOCKET_OP_TEXT);
     }
   } else if (!strcmp(type, "voice_rooms")) {
-    parse_voice_rooms(json);
+    if (vlither_chat_joined()) parse_voice_rooms(json);
   } else if (!strcmp(type, "voice_state")) {
-    parse_voice_state(json);
+    if (vlither_chat_joined()) parse_voice_state(json);
   } else if (!strcmp(type, "voice_tx_status")) {
-    S.voice_listener_count = (int)mg_json_get_long(json, "$.listeners", 0);
+    if (vlither_chat_joined())
+      S.voice_listener_count = (int)mg_json_get_long(json, "$.listeners", 0);
   } else if (!strcmp(type, "voice_error")) {
     char *message = mg_json_get_str(json, "$.message");
     if (message) {
@@ -785,7 +846,7 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
   } else if (ev == MG_EV_WS_MSG) {
     struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
     if ((wm->flags & 0x0f) == WEBSOCKET_OP_BINARY)
-      handle_voice_binary(wm->data);
+      { if (vlither_chat_joined()) handle_voice_binary(wm->data); }
     else
       handle_ws_json(wm->data);
   } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
@@ -794,6 +855,7 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
       S.ws_open = false;
       S.hello_sent = false;
       S.player_count = 0;
+      S.presence_baselined = false;
       S.voice_listener_count = 0;
 #ifdef ANDROID
       /* Do not keep recording or playing a stale queue while relay is down.
@@ -812,31 +874,42 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
 static void send_identity(const char *type) {
   if (!S.ws || !S.ws_open || !S.env || !S.env->usr) return;
   user_settings *us = &S.env->usr->usrs;
+  bool chat_joined = us->vlither_chat_joined;
   game_data *g = &S.env->usr->gdata;
   snake *me = local_snake();
   bool playing = me && g->conn == CONNECTED &&
                  g->curr_screen == PLAYING && !g->preview_active;
-  const char *server_name = playing && us->ipv4[0] ? us->ipv4 : "_GAME_MENU_";
+  const char *server_name = playing && us->server_address[0]
+                                ? us->server_address
+                                : "_GAME_MENU_";
   int snake_id = playing ? me->id : -1;
   float x = playing ? me->xx : 0.0f;
   float y = playing ? me->yy : 0.0f;
   int fps = playing && g->data.fps > 0 ? g->data.fps : -1;
   int ping = playing && g->data.ping > 0 ? g->data.ping : -1;
 
-  char client[32], server[192], nick[96], version[32];
+  char client[32], server[192], nick[96], map_name[96], version[32];
   json_escape(client, sizeof client, us->ntl_client_id);
   json_escape(server, sizeof server, server_name);
   json_escape(nick, sizeof nick, us->nickname[0] ? us->nickname : "Vlither");
+  json_escape(map_name, sizeof map_name,
+              us->minimap_display_name[0] ? us->minimap_display_name
+                                           : (us->nickname[0] ? us->nickname
+                                                               : "Vlither"));
   json_escape(version, sizeof version, APP_VERSION);
-  char json[768];
+  char json[896];
   int n = snprintf(json, sizeof json,
                    "{\"type\":\"%s\",\"clientId\":\"%s\","
                    "\"server\":\"%s\",\"snakeId\":%d,\"nickname\":\"%s\","
+                   "\"mapName\":\"%s\",\"sosUntil\":%lld,"
                    "\"version\":\"%s\",\"x\":%.1f,\"y\":%.1f,"
-                   "\"fps\":%d,\"ping\":%d,\"voiceEnabled\":%s,"
+                   "\"fps\":%d,\"ping\":%d,\"chatJoined\":%s,"
+                   "\"voiceEnabled\":%s,"
                    "\"voiceMuted\":%s,\"voiceDeafened\":%s}",
-                   type, client, server, snake_id, nick, version, x, y, fps, ping,
-                   S.voice_enabled ? "true" : "false",
+                   type, client, server, snake_id, nick, map_name,
+                   S.local_sos_until_ms, version, x, y, fps, ping,
+                   chat_joined ? "true" : "false",
+                   (chat_joined && S.voice_enabled) ? "true" : "false",
                    (S.voice_muted || S.voice_deafened) ? "true" : "false",
                    S.voice_deafened ? "true" : "false");
   if (n > 0 && n < (int)sizeof json) {
@@ -1055,7 +1128,7 @@ void vlither_tags_update(tenv *env) {
      active. Muting/deafening and socket loss still stop capture immediately. */
   voice_apply_audio_state();
 #ifdef ANDROID
-  if (S.voice_enabled && !S.voice_muted && !S.voice_deafened &&
+  if (vlither_chat_joined() && S.voice_enabled && !S.voice_muted && !S.voice_deafened &&
       S.ws && S.ws_open) {
     unsigned char pcm[VLITHER_VOICE_FRAME_MAX];
     size_t pcm_len = 0;
@@ -1105,6 +1178,11 @@ void vlither_tags_update(tenv *env) {
     S.next_connect = 0;
     clear_snake_mappings();
   }
+  /* Keep the backend transport alive even when an older user.dat contains
+     a false chat-toggle value. Tags, atlas updates and presence all share
+     this WebSocket, so gating it here made the entire Vlither service look
+     disconnected after an upgrade. The chat UI can still choose whether to
+     display/send messages independently. */
   if (!S.ws && now >= S.next_connect) {
     S.ws = mg_ws_connect(&S.mgr, S.ws_url, ws_cb, NULL,
                          "Origin: https://vlither.app\r\n");
@@ -1179,11 +1257,12 @@ void vlither_tags_skin_panel(tenv *env) {
 }
 
 bool vlither_chat_connected(void) {
-  return S.ready && S.ws_open;
+  return S.ready && S.ws_open && vlither_chat_joined();
 }
 
 bool vlither_chat_send_text(const char *text) {
-  if (!S.ready || !S.ws || !S.ws_open || !text) return false;
+  if (!vlither_chat_joined() || !S.ready || !S.ws || !S.ws_open || !text)
+    return false;
   while (isspace((unsigned char)*text)) ++text;
   if (!text[0]) return false;
   char clean[241];
@@ -1208,7 +1287,9 @@ static const vlither_chat_message *chat_at(int index) {
   return &S.chat[slot];
 }
 
-int vlither_chat_history_count(void) { return S.chat_count; }
+int vlither_chat_history_count(void) {
+  return vlither_chat_joined() ? S.chat_count : 0;
+}
 const char *vlither_chat_history_nick(int index) {
   const vlither_chat_message *m = chat_at(index); return m ? m->nick : "";
 }
@@ -1218,7 +1299,12 @@ const char *vlither_chat_history_text(int index) {
 const char *vlither_chat_history_server(int index) {
   const vlither_chat_message *m = chat_at(index); return m ? m->server : "";
 }
-int vlither_chat_player_count(void) { return S.player_count; }
+long long vlither_chat_history_time_ms(int index) {
+  const vlither_chat_message *m = chat_at(index); return m ? m->time_ms : 0;
+}
+int vlither_chat_player_count(void) {
+  return vlither_chat_joined() ? S.player_count : 0;
+}
 const char *vlither_chat_player_nick(int index) {
   return index >= 0 && index < S.player_count ? S.players[index].nick : "";
 }
@@ -1230,6 +1316,9 @@ const char *vlither_chat_player_version(int index) {
 }
 const char *vlither_chat_player_client_id(int index) {
   return index >= 0 && index < S.player_count ? S.players[index].client_id : "";
+}
+const char *vlither_chat_player_map_name(int index) {
+  return index >= 0 && index < S.player_count ? S.players[index].map_name : "";
 }
 int vlither_chat_player_snake_id(int index) {
   return index >= 0 && index < S.player_count ? S.players[index].snake_id : -1;
@@ -1245,6 +1334,10 @@ int vlither_chat_player_fps(int index) {
 }
 int vlither_chat_player_ping(int index) {
   return index >= 0 && index < S.player_count ? S.players[index].ping : -1;
+}
+bool vlither_chat_player_sos(int index) {
+  return index >= 0 && index < S.player_count &&
+         S.players[index].sos_until_ms > (long long)time(NULL) * 1000LL;
 }
 bool vlither_chat_player_voice_enabled(int index) {
   return index >= 0 && index < S.player_count && S.players[index].voice_enabled;
@@ -1280,7 +1373,8 @@ static void vlither_normalize_server(char *out, size_t cap, const char *in) {
 }
 
 bool vlither_chat_is_snake_player(int snake_id, const char *server) {
-  if (!S.ready || !S.ws_open || snake_id < 0 || !server || !server[0])
+  if (!vlither_chat_joined() || !S.ready || !S.ws_open || snake_id < 0 ||
+      !server || !server[0])
     return false;
   char wanted[96];
   vlither_normalize_server(wanted, sizeof wanted, server);
@@ -1292,6 +1386,86 @@ bool vlither_chat_is_snake_player(int snake_id, const char *server) {
     if (have[0] && !strcmp(have, wanted)) return true;
   }
   return false;
+}
+
+static bool vlither_nick_equal(const char *a, const char *b) {
+  if (!a || !b) return false;
+  while (*a && *b) {
+    if (tolower((unsigned char)*a++) != tolower((unsigned char)*b++))
+      return false;
+  }
+  return !*a && !*b;
+}
+
+bool vlither_chat_is_nickname_player(const char *nickname, const char *server) {
+  if (!vlither_chat_joined() || !nickname || !nickname[0] || !server ||
+      !server[0]) return false;
+  char wanted[96];
+  vlither_normalize_server(wanted, sizeof wanted, server);
+  for (int i = 0; i < S.player_count; ++i) {
+    char have[96];
+    vlither_normalize_server(have, sizeof have, S.players[i].server);
+    if (have[0] && !strcmp(have, wanted) &&
+        vlither_nick_equal(S.players[i].nick, nickname))
+      return true;
+  }
+  return false;
+}
+
+bool vlither_chat_is_nickname_sos(const char *nickname, const char *server) {
+  if (!vlither_chat_joined() || !nickname || !nickname[0] || !server ||
+      !server[0]) return false;
+  char wanted[96];
+  vlither_normalize_server(wanted, sizeof wanted, server);
+  for (int i = 0; i < S.player_count; ++i) {
+    char have[96];
+    vlither_normalize_server(have, sizeof have, S.players[i].server);
+    if (have[0] && !strcmp(have, wanted) &&
+        vlither_nick_equal(S.players[i].nick, nickname) &&
+        vlither_chat_player_sos(i))
+      return true;
+  }
+  return false;
+}
+
+void vlither_chat_set_joined(bool joined) {
+  if (!S.env || !S.env->usr) return;
+  user_settings *us = &S.env->usr->usrs;
+  us->vlither_chat_joined = joined;
+  save_user_settings(us);
+  if (joined) {
+    S.next_connect = 0.0;
+    S.presence_baselined = false;
+    clear_chat_messages();
+    set_status("Joining Vlither Chat...");
+  } else {
+    S.player_count = 0;
+    S.presence_baselined = false;
+    clear_chat_messages();
+    clear_snake_mappings();
+    S.voice_in_room = false;
+    S.voice_room_id[0] = 0;
+    S.voice_room_name[0] = 0;
+    S.voice_room_count = 0;
+    S.voice_member_count = 0;
+    S.voice_listener_count = 0;
+#ifdef ANDROID
+    android_jni_voice_set_capture(false);
+    S.voice_capture_requested = false;
+    android_jni_voice_stop_playback();
+#endif
+    set_status("Left Vlither Chat.");
+  }
+  if (S.ws_open) send_identity("heartbeat");
+}
+
+bool vlither_chat_joined(void) {
+  return S.env && S.env->usr && S.env->usr->usrs.vlither_chat_joined;
+}
+
+void vlither_chat_set_sos_until(long long until_ms) {
+  S.local_sos_until_ms = until_ms;
+  if (S.ws_open) send_identity("heartbeat");
 }
 
 static const vlither_event *event_at(int index) {
@@ -1400,7 +1574,8 @@ bool vlither_event_set_interested(int index, bool interested) {
 }
 
 static bool send_voice_json(const char *json) {
-  if (!S.ready || !S.ws || !S.ws_open || !json || !json[0]) return false;
+  if (!vlither_chat_joined() || !S.ready || !S.ws || !S.ws_open || !json ||
+      !json[0]) return false;
   /* A room command must never overtake the first identity packet. The backend
      cannot attach voice state to this socket until hello has been sent. */
   if (!S.hello_sent) send_identity("hello");
@@ -1409,8 +1584,12 @@ static bool send_voice_json(const char *json) {
   return true;
 }
 
-bool vlither_voice_enabled(void) { return S.voice_enabled; }
-bool vlither_voice_in_room(void) { return S.voice_in_room; }
+bool vlither_voice_enabled(void) {
+  return vlither_chat_joined() && S.voice_enabled;
+}
+bool vlither_voice_in_room(void) {
+  return vlither_chat_joined() && S.voice_in_room;
+}
 bool vlither_voice_room_host(void) { return S.voice_room_host; }
 bool vlither_voice_muted(void) { return S.voice_muted || S.voice_deafened; }
 bool vlither_voice_deafened(void) { return S.voice_deafened; }
@@ -1501,6 +1680,10 @@ int vlither_voice_audio_state(void) {
 }
 
 bool vlither_voice_set_enabled(bool enabled) {
+  if (!vlither_chat_joined()) {
+    set_voice_status("Join Vlither Chat to use voice.");
+    return false;
+  }
   /* Persist only an explicit player action. Server state packets never write
      this setting, so refreshing or reconnecting cannot silently disable
      Voice Chat. */
@@ -1638,7 +1821,8 @@ static void voice_apply_audio_state(void) {
   /* Keep the Android recorder self-healing while open mic is active.
      A periodic TRUE refresh restarts an OEM AudioRecord that died without
      requiring the player to toggle voice off/on. FALSE stops immediately. */
-  bool should_capture = S.voice_enabled && !vlither_voice_muted() &&
+  bool should_capture = vlither_chat_joined() && S.voice_enabled &&
+                        !vlither_voice_muted() &&
                         !S.voice_deafened && S.ws && S.ws_open;
   double now = mg_millis() / 1000.0;
   if (!should_capture) {

@@ -2,6 +2,74 @@
 
 #include "../user.h"
 
+static void draw_vlither_key_selector(const char *label, int *key) {
+  char preview[2] = {(char)*key, 0};
+  if (!igBeginCombo(label, preview, ImGuiComboFlags_None)) return;
+  for (int c = GLFW_KEY_0; c <= GLFW_KEY_9; ++c) {
+    char item[2] = {(char)c, 0};
+    if (igSelectable_Bool(item, *key == c, ImGuiSelectableFlags_None,
+                          (ImVec2){0, 0}))
+      *key = c;
+  }
+  for (int c = GLFW_KEY_A; c <= GLFW_KEY_Z; ++c) {
+    char item[2] = {(char)c, 0};
+    if (igSelectable_Bool(item, *key == c, ImGuiSelectableFlags_None,
+                          (ImVec2){0, 0}))
+      *key = c;
+  }
+  igEndCombo();
+}
+
+static void apply_mode_graphics_preset(user_settings *us, int mode_index,
+                                       int preset) {
+  if (!us || mode_index < 0 || mode_index > 1 || preset < 1 || preset > 4)
+    return;
+  us->mode_graphics_preset[mode_index] = preset;
+  gameplay_mode *m = &us->modes[mode_index];
+  {
+    if (preset == 1) { /* Competitive */
+      m->show_background = false;
+      m->show_accessories = false;
+      m->show_shadows = false;
+      m->death_effect = false;
+      m->food_flicker = false;
+      m->food_float = false;
+      m->food_type = 1;
+      m->render_mode = 1;
+      us->food_glow[mode_index] = false;
+      us->snake_shadow_strength[mode_index] = 0.0f;
+    } else if (preset == 2) { /* Low */
+      m->show_background = false;
+      m->show_accessories = false;
+      m->show_shadows = false;
+      m->death_effect = false;
+      m->food_flicker = false;
+      m->food_float = false;
+      m->food_type = 0;
+      m->render_mode = 2;
+      us->food_glow[mode_index] = false;
+      us->snake_shadow_strength[mode_index] = 0.0f;
+    } else { /* Normal / High */
+      m->show_background = true;
+      m->show_accessories = true;
+      m->show_shadows = true;
+      m->death_effect = true;
+      m->food_flicker = true;
+      m->food_float = true;
+      m->food_type = 0;
+      m->render_mode = 0;
+      us->food_glow[mode_index] = preset == 4;
+      us->snake_shadow_strength[mode_index] = preset == 4 ? 1.35f : 1.0f;
+    }
+  }
+  us->mode_high_visibility_skins[mode_index] = preset == 1;
+  us->mode_skinless_peek[mode_index] = preset == 1;
+  us->mode_hide_enemy_cosmetics[mode_index] = preset == 1;
+  us->mode_hide_enemy_tags[mode_index] = preset == 1;
+  us->performance_mode = us->mode_graphics_preset[0] <= 2 &&
+                         us->mode_graphics_preset[1] <= 2;
+}
+
 void ui_settings_init(tenv* env) {}
 
 void ui_settings(tenv* env) {
@@ -52,9 +120,25 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Leaderboard font size");
       igAlignTextToFramePadding();
+      igText("Leaderboard title");
+      igAlignTextToFramePadding();
+      igText("Leaderboard style");
+      igAlignTextToFramePadding();
+      igText("Leaderboard colour");
+      igAlignTextToFramePadding();
       igText("Names font size");
       igAlignTextToFramePadding();
       igText("Show snake scores");
+      igAlignTextToFramePadding();
+      igText("Chat timestamps");
+      igAlignTextToFramePadding();
+      igText("Chat alert sound");
+      igAlignTextToFramePadding();
+      igText("Teammate alert sound");
+      igAlignTextToFramePadding();
+      igText("SOS alert sound");
+      igAlignTextToFramePadding();
+      igText("Stealth mode");
       igAlignTextToFramePadding();
       igText("Show tags");
       igAlignTextToFramePadding();
@@ -72,6 +156,16 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Minimap size");
       igAlignTextToFramePadding();
+      igText("Clock map");
+      igAlignTextToFramePadding();
+      igText("Dynamic minimap");
+      igAlignTextToFramePadding();
+      igText("Border-distance indicator");
+      igAlignTextToFramePadding();
+      igText("Show my minimap name");
+      igAlignTextToFramePadding();
+      igText("My minimap name");
+      igAlignTextToFramePadding();
       igText("Custom minimap position");
       igAlignTextToFramePadding();
       igText("Drag/resize minimap");
@@ -87,6 +181,12 @@ void ui_settings(tenv* env) {
       igText("Restart with right click");
       igAlignTextToFramePadding();
       igText("Quit with middle click");
+#ifdef ANDROID
+      igAlignTextToFramePadding();
+      igText("Record gameplay in server");
+      igAlignTextToFramePadding();
+      igText("Screenshot after kill");
+#endif
       igAlignTextToFramePadding();
       igText("Laser color");
       igAlignTextToFramePadding();
@@ -144,10 +244,29 @@ void ui_settings(tenv* env) {
       igCombo_Str_arr("##leaderboard font size", (int*)&usrs->lb_font_size,
                       (const char*[]){"Small", "Regular", "Large"}, 3, -1);
       igSetNextItemWidth(-1);
+      igInputTextWithHint("##leaderboard title", "Vlither Leaderboard",
+                          usrs->leaderboard_title,
+                          sizeof usrs->leaderboard_title,
+                          ImGuiInputTextFlags_None, NULL, NULL);
+      igSetNextItemWidth(-1);
+      igCombo_Str_arr("##leaderboard style", &usrs->ntl_leaderboard_style,
+                      (const char*[]){"Snake colours", "Top-10 gradient",
+                                      "Single colour"}, 3, -1);
+      igBeginDisabled(usrs->ntl_leaderboard_style != 2);
+      igSetNextItemWidth(-1);
+      igColorEdit4("##leaderboard colour", usrs->ntl_leaderboard_color,
+                   ImGuiColorEditFlags_AlphaBar);
+      igEndDisabled();
+      igSetNextItemWidth(-1);
       igCombo_Str_arr("##snake name font size",
                       (int*)&usrs->snake_names_font_size,
                       (const char*[]){"Small", "Regular", "Large"}, 3, -1);
       igCheckbox("##snake scores", &usrs->snake_scores);
+      igCheckbox("##chat timestamps", &usrs->ntl_chat_timestamps);
+      igCheckbox("##chat alert sound", &usrs->ntl_alert_chat);
+      igCheckbox("##teammate alert sound", &usrs->ntl_alert_new_player);
+      igCheckbox("##sos alert sound", &usrs->ntl_alert_sos);
+      igCheckbox("##stealth mode", &usrs->ntl_stealth_mode);
       igCheckbox("##show all tags", &usrs->show_tags);
       igBeginDisabled(!usrs->show_tags);
       igCheckbox("##show NTL tags", &usrs->show_ntl_tags);
@@ -170,6 +289,15 @@ void ui_settings(tenv* env) {
       igSetNextItemWidth(-1);
       igSliderInt("##minimap size", &usrs->minimap_size, 96, 512, "%d px",
                   ImGuiSliderFlags_AlwaysClamp);
+      igCheckbox("##clock map", &usrs->minimap_clock);
+      igCheckbox("##dynamic minimap", &usrs->ntl_dynamic_minimap);
+      igCheckbox("##border indicator", &usrs->ntl_border_indicator);
+      igCheckbox("##show own minimap name", &usrs->minimap_show_own_name);
+      igSetNextItemWidth(-1);
+      igInputTextWithHint("##own minimap name", "Use nickname",
+                          usrs->minimap_display_name,
+                          sizeof usrs->minimap_display_name,
+                          ImGuiInputTextFlags_None, NULL, NULL);
       igCheckbox("##minimap custom", &usrs->minimap_pos_custom);
       igCheckbox("##minimap drag", &usrs->minimap_drag_enabled);
       igBeginDisabled(!usrs->minimap_pos_custom);
@@ -188,6 +316,14 @@ void ui_settings(tenv* env) {
       igCheckbox("##instant restart", &usrs->instant_restart);
       igCheckbox("##restart rc", &usrs->restart_rc);
       igCheckbox("##quit mc", &usrs->quit_mc);
+#ifdef ANDROID
+      igCheckbox("##record gameplay", &usrs->record_gameplay);
+      if (igIsItemHovered(0))
+        igSetTooltip("Starts after joining a real server and stops on the homepage. Android asks for screen-capture permission for each session.");
+      igCheckbox("##screenshot on kill", &usrs->screenshot_on_kill);
+      if (igIsItemHovered(0))
+        igSetTooltip("Saves a local PNG about 150 ms after the server confirms your kill.");
+#endif
       igSetNextItemWidth(-1);
       igColorEdit4("##laser color", usrs->laser_color,
                    ImGuiColorEditFlags_AlphaBar);
@@ -222,11 +358,31 @@ void ui_settings(tenv* env) {
         igTableSetColumnIndex(0);
         igIndent(style->WindowPadding.x);
         igAlignTextToFramePadding();
+        igText("Graphics preset");
+        igAlignTextToFramePadding();
+        igText("Hide enemy tags");
+        igAlignTextToFramePadding();
+        igText("Hide enemy cosmetics");
+        igAlignTextToFramePadding();
+        igText("High-visibility skins");
+        igAlignTextToFramePadding();
+        igText("Snake Nicks+");
+        igAlignTextToFramePadding();
+        igText("Names above body");
+        igAlignTextToFramePadding();
+        igText("Skinless Peek (hold W)");
+        igAlignTextToFramePadding();
+        igText("Own true skin");
+        igAlignTextToFramePadding();
+        igText("Team true skins");
+        igAlignTextToFramePadding();
         igText("Show background");
         igAlignTextToFramePadding();
         igText("Show accessories");
         igAlignTextToFramePadding();
-        igText("Show shadows");
+        igText("Snake shadow");
+        igAlignTextToFramePadding();
+        igText("Shadow strength");
         igAlignTextToFramePadding();
         igText("Death effect");
         igAlignTextToFramePadding();
@@ -244,6 +400,8 @@ void ui_settings(tenv* env) {
         igAlignTextToFramePadding();
         igText("Center line (your snake)");
         igAlignTextToFramePadding();
+        igText("Center line (other snakes)");
+        igAlignTextToFramePadding();
         igText("Head dot");
         igAlignTextToFramePadding();
         igText("Boost effect");
@@ -258,12 +416,41 @@ void ui_settings(tenv* env) {
         igAlignTextToFramePadding();
         igText("Food flicker");
         igAlignTextToFramePadding();
+        igText("Food glow");
+        igAlignTextToFramePadding();
         igText("Uniform food color");
 
         igTableSetColumnIndex(1);
+        igSetNextItemWidth(-1);
+        int selected_preset = usrs->mode_graphics_preset[i];
+        if (igCombo_Str_arr("##graphics preset", &selected_preset,
+                            (const char*[]){"Custom", "Competitive",
+                                            "Low quality", "Normal",
+                                            "High quality"}, 5, -1)) {
+          if (selected_preset > 0)
+            apply_mode_graphics_preset(usrs, i, selected_preset);
+          else
+            usrs->mode_graphics_preset[i] = 0;
+        }
+        igCheckbox("##hide enemy tags", &usrs->mode_hide_enemy_tags[i]);
+        igCheckbox("##hide enemy cosmetics",
+                   &usrs->mode_hide_enemy_cosmetics[i]);
+        igCheckbox("##high visibility skins",
+                   &usrs->mode_high_visibility_skins[i]);
+        igCheckbox("##nicks plus", &usrs->mode_nicks_plus[i]);
+        igCheckbox("##names above", &usrs->mode_names_on_top[i]);
+        igCheckbox("##skinless peek", &usrs->mode_skinless_peek[i]);
+        igCheckbox("##own true skin", &usrs->mode_own_true_skin[i]);
+        igCheckbox("##team true skins", &usrs->mode_team_true_skin[i]);
         igCheckbox("##bg", &mode->show_background);
         igCheckbox("##acc", &mode->show_accessories);
         igCheckbox("##shad", &mode->show_shadows);
+        igBeginDisabled(!mode->show_shadows);
+        igSetNextItemWidth(-1);
+        igSliderFloat("##shadow strength", &usrs->snake_shadow_strength[i],
+                      0.0f, 3.0f, "%.2fx",
+                      ImGuiSliderFlags_AlwaysClamp);
+        igEndDisabled();
         igCheckbox("##death effect", &mode->death_effect);
         igCheckbox("##player names outline", &mode->player_names_outline);
         igSetNextItemWidth(-1);
@@ -286,6 +473,7 @@ void ui_settings(tenv* env) {
           usrs->transparent_skin_opacity[i] = opacity_percent / 100.0f;
         igEndDisabled();
         igCheckbox("##center line", &mode->center_line);
+        igCheckbox("##center line others", &usrs->center_line_others[i]);
         /* Keep the existing persisted show_crosshair field for settings-file
            compatibility, but use it as a local-player head-dot toggle. */
         igCheckbox("##head dot", &mode->show_crosshair);
@@ -308,6 +496,7 @@ void ui_settings(tenv* env) {
                       ImGuiSliderFlags_AlwaysClamp);
         igCheckbox("##food float", &mode->food_float);
         igCheckbox("##food flicker", &mode->food_flicker);
+        igCheckbox("##food glow", &usrs->food_glow[i]);
         igCheckbox("##uniform food color", &mode->uniform_food_color);
         igSameLine(0, -1);
         igBeginDisabled(!mode->uniform_food_color);
@@ -340,6 +529,9 @@ void ui_settings(tenv* env) {
         igAlignTextToFramePadding();
         igText(hk->description);
       }
+      igText("Cycle snake shader");
+      igText("Toggle invisible own skin");
+      igTextDisabled("SOS help (fixed S)");
       igTableSetColumnIndex(1);
 
       for (int i = 0; i < NUM_HOTKEYS; i++) {
@@ -398,6 +590,12 @@ void ui_settings(tenv* env) {
         }
         igPopID();
       }
+      igSetNextItemWidth(frame_height * 2.2f);
+      draw_vlither_key_selector("##shader cycle key", &usrs->shader_cycle_key);
+      igSetNextItemWidth(frame_height * 2.2f);
+      draw_vlither_key_selector("##invisible skin key",
+                                &usrs->invisible_skin_key);
+      igTextDisabled("S = 4 min + Help me!");
       igIndent(-style->WindowPadding.x);
 
       igEndTable();

@@ -63,6 +63,10 @@ bool  g_overlay_was_active    = false;
 float g_boost_cx = -9999, g_boost_cy = -9999, g_boost_r = 0;
 float g_joy_cx   = -9999, g_joy_cy   = -9999, g_joy_r   = 0;
 bool  g_is_trackpad_mode = true;
+/* Slither joystick mode accepts a movement finger anywhere on its selected
+   side of the screen, not only inside the artwork's circular base. */
+bool  g_joystick_uses_side = false;
+bool  g_joystick_left_side = true;
 bool  g_panel_open       = false;
 
 /* Implemented by app/src/ui/key_buttons.c. Custom gameplay buttons get a
@@ -578,8 +582,11 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                 float djx = x - g_joy_cx, djy = y - g_joy_cy;
                 bool in_joy_ring = g_joy_r > 0 &&
                                    (djx*djx + djy*djy) <= (g_joy_r * g_joy_r);
+                bool on_joy_side = g_joystick_uses_side &&
+                    (g_joystick_left_side ? x < wnd->size[0] * 0.5f
+                                          : x >= wnd->size[0] * 0.5f);
                 bool can_move = !g_panel_open &&
-                                (g_is_trackpad_mode || in_joy_ring);
+                                (g_is_trackpad_mode || on_joy_side || in_joy_ring);
 
                 if (in_zslider && wnd->touch.zslider_ptr_id == -1) {
                     wnd->touch.zslider_ptr_id = pid;
@@ -641,7 +648,10 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                         wnd->touch.boost_ptr_id    = pid;
                     } else if (!wnd->touch.down) {
                         float djx2 = x - g_joy_cx, djy2 = y - g_joy_cy;
-                        bool joy_ok = g_is_trackpad_mode ||
+                        bool on_joy_side2 = g_joystick_uses_side &&
+                            (g_joystick_left_side ? x < wnd->size[0] * 0.5f
+                                                  : x >= wnd->size[0] * 0.5f);
+                        bool joy_ok = g_is_trackpad_mode || on_joy_side2 ||
                                       (g_joy_r > 0 && (djx2*djx2+djy2*djy2) <= g_joy_r*g_joy_r);
                         if (joy_ok) {
                             wnd->touch.x           = x;

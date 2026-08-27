@@ -22,6 +22,8 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
@@ -53,6 +55,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.io.FileOutputStream
 
 class GameActivity : NativeActivity() {
 
@@ -82,6 +85,7 @@ class GameActivity : NativeActivity() {
 
         private const val VOICE_PERMISSION_REQUEST = 4401
         private const val EVENT_NOTIFICATION_PERMISSION_REQUEST = 4402
+        private const val CUSTOM_ARROW_REQUEST = 4403
         private const val EVENT_ALARM_ACTION = "com.vlither.EVENT_START"
         private const val VOICE_SAMPLE_RATE = 16_000
         private const val VOICE_FRAME_BYTES = 640 // 20 ms, PCM16 mono @ 16 kHz
@@ -180,6 +184,31 @@ class GameActivity : NativeActivity() {
             packet[offset + 3] = (value ushr 24).toByte()
         }
 
+        private fun bitmapToRgbaPacket(bitmap: android.graphics.Bitmap): ByteArray? {
+            val width = bitmap.width
+            val height = bitmap.height
+            if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
+                bitmap.recycle()
+                return null
+            }
+            val count = width * height
+            val argb = IntArray(count)
+            bitmap.getPixels(argb, 0, width, 0, 0, width, height)
+            bitmap.recycle()
+
+            val packet = ByteArray(8 + count * 4)
+            putIntLe(packet, 0, width)
+            putIntLe(packet, 4, height)
+            var out = 8
+            for (pixel in argb) {
+                packet[out++] = (pixel ushr 16).toByte()
+                packet[out++] = (pixel ushr 8).toByte()
+                packet[out++] = pixel.toByte()
+                packet[out++] = (pixel ushr 24).toByte()
+            }
+            return packet
+        }
+
         /** Decode packaged image assets for native Vulkan textures. Android's
          * BitmapFactory supplies WebP support that stb_image does not have. */
         @JvmStatic
@@ -188,32 +217,41 @@ class GameActivity : NativeActivity() {
             return try {
                 activity.assets.open(path).use { input ->
                     val bitmap = BitmapFactory.decodeStream(input) ?: return null
-                    val width = bitmap.width
-                    val height = bitmap.height
-                    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
-                        bitmap.recycle()
-                        return null
-                    }
-                    val count = width * height
-                    val argb = IntArray(count)
-                    bitmap.getPixels(argb, 0, width, 0, 0, width, height)
-                    bitmap.recycle()
-
-                    val packet = ByteArray(8 + count * 4)
-                    putIntLe(packet, 0, width)
-                    putIntLe(packet, 4, height)
-                    var out = 8
-                    for (pixel in argb) {
-                        packet[out++] = (pixel ushr 16).toByte()
-                        packet[out++] = (pixel ushr 8).toByte()
-                        packet[out++] = pixel.toByte()
-                        packet[out++] = (pixel ushr 24).toByte()
-                    }
-                    packet
+                    bitmapToRgbaPacket(bitmap)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Could not decode asset $path", e)
                 null
+            }
+        }
+
+        /** Decode downloaded tag images (including WebP) for native Vulkan. */
+        @JvmStatic
+        fun decodeImageRgba(activity: Activity, encoded: ByteArray): ByteArray? {
+            return try {
+                val bitmap = BitmapFactory.decodeByteArray(encoded, 0, encoded.size)
+                    ?: return null
+                bitmapToRgbaPacket(bitmap)
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not decode downloaded image", e)
+                null
+            }
+        }
+
+        @JvmStatic
+        fun requestCustomArrow(activity: Activity): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                    }
+                    activity.startActivityForResult(intent, CUSTOM_ARROW_REQUEST)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open custom-arrow picker", e)
+                false
             }
         }
 
@@ -332,6 +370,34 @@ class GameActivity : NativeActivity() {
                 activity.startActivity(intent)
             } catch (e: Exception) {
                 Log.e(TAG, "requestAdFromC error: ${e.message}")
+            }
+        }
+
+        /** Native game state owns the policy; Android owns permission,
+         *  capture and local MediaStore output. This callback may originate
+         *  on the native render thread, so all Activity work is posted to the
+         *  UI thread. */
+        @JvmStatic
+        fun syncGameplayCapture(
+            activity: Activity,
+            recordingEnabled: Boolean,
+            screenshotsEnabled: Boolean,
+            sessionActive: Boolean
+        ) {
+            val game = activity as? GameActivity ?: return
+            game.runOnUiThread {
+                GameplayCaptureController.sync(
+                    game, recordingEnabled, screenshotsEnabled, sessionActive
+                )
+            }
+        }
+
+        /** Called only for the local player's confirmed server `k` packet. */
+        @JvmStatic
+        fun onConfirmedKill(activity: Activity) {
+            val game = activity as? GameActivity ?: return
+            game.runOnUiThread {
+                GameplayCaptureController.onConfirmedKill(game)
             }
         }
 
@@ -974,6 +1040,24 @@ class GameActivity : NativeActivity() {
                     .start()
             }
         }
+
+        /** Lightweight NTL-style gameplay alert. kind 2 is the longer SOS
+         * tone; chat and teammate arrivals intentionally stay subtle. */
+        @JvmStatic
+        fun playNotificationBeep(activity: Activity, kind: Int) {
+            activity.runOnUiThread {
+                try {
+                    val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION,
+                                             if (kind == 2) 90 else 68)
+                    tone.startTone(ToneGenerator.TONE_PROP_BEEP,
+                                   if (kind == 2) 260 else 120)
+                    activity.window.decorView.postDelayed({ tone.release() },
+                                                           if (kind == 2) 360L else 220L)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notification beep failed: ${e.message}")
+                }
+            }
+        }
     }
 
 
@@ -1320,6 +1404,38 @@ class GameActivity : NativeActivity() {
         Log.d(TAG, "GameActivity created – loading overlay shown")
     }
 
+    @Deprecated("Activity result compatibility for NativeActivity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == GameplayCaptureController.CAPTURE_REQUEST_CODE) {
+            GameplayCaptureController.handleActivityResult(this, resultCode, data)
+            return
+        }
+        if (requestCode != CUSTOM_ARROW_REQUEST || resultCode != Activity.RESULT_OK)
+            return
+        val uri = data?.data ?: return
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(filesDir.resolve("custom_arrow_image")).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        total += read
+                        if (total > 12 * 1024 * 1024)
+                            throw IllegalArgumentException("Image exceeds 12 MB")
+                        output.write(buffer, 0, read)
+                    }
+                    output.flush()
+                }
+            }
+        } catch (e: Exception) {
+            filesDir.resolve("custom_arrow_image").delete()
+            Log.e(TAG, "Could not save custom arrow", e)
+        }
+    }
+
     private fun enableHighPerformanceDisplay() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -1404,6 +1520,7 @@ class GameActivity : NativeActivity() {
     }
 
     override fun onDestroy() {
+        GameplayCaptureController.onActivityDestroyed(this)
         setVoiceCapture(this, false)
         stopVoicePlayback(this)
         setTextInputActiveOnUi(false)

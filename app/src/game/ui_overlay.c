@@ -53,6 +53,56 @@ static void draw_world_center_marker(tenv* env, float half_width,
                        IM_COL32(255, 42, 52, ring_alpha), 32, 2.0f);
 }
 
+static void draw_clock_minimap(tenv* env, float x, float y, float size) {
+  if (!env || !env->usr || size <= 0.0f) return;
+  tuser_data* usr = env->usr;
+  ImDrawList* dl = igGetWindowDrawList();
+  if (!dl) return;
+
+  float cx = x + size * 0.5f;
+  float cy = y + size * 0.5f;
+  float radius = size * 0.475f;
+  ImU32 ring = IM_COL32(255, 255, 255, 145);
+  ImU32 cross = IM_COL32(255, 255, 255, 105);
+  ImVec2 center = {cx, cy};
+
+  ImDrawList_AddCircle(dl, center, radius, ring, 64,
+                       fmaxf(1.0f, size * 0.006f));
+  ImDrawList_AddLine(dl, (ImVec2){cx - radius, cy},
+                     (ImVec2){cx + radius, cy}, cross,
+                     fmaxf(1.0f, size * 0.004f));
+  ImDrawList_AddLine(dl, (ImVec2){cx, cy - radius},
+                     (ImVec2){cx, cy + radius}, cross,
+                     fmaxf(1.0f, size * 0.004f));
+
+  igPushFont(usr->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
+             usr->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize);
+  const char* labels[4] = {"12", "3", "6", "9"};
+  ImVec2 positions[4];
+  ImVec2 ts[4];
+  for (int i = 0; i < 4; ++i)
+    igCalcTextSize(&ts[i], labels[i], NULL, false, -1.0f);
+  float inset = fmaxf(4.0f, size * 0.025f);
+  positions[0] = (ImVec2){cx - ts[0].x * 0.5f, y + inset};
+  positions[1] = (ImVec2){x + size - ts[1].x - inset,
+                           cy - ts[1].y * 0.5f};
+  positions[2] = (ImVec2){cx - ts[2].x * 0.5f,
+                           y + size - ts[2].y - inset};
+  positions[3] = (ImVec2){x + inset, cy - ts[3].y * 0.5f};
+  ImU32 outline = IM_COL32(0, 0, 0, 225);
+  ImU32 number = IM_COL32(245, 235, 80, 245);
+  for (int i = 0; i < 4; ++i) {
+    for (int ox = -1; ox <= 1; ++ox)
+      for (int oy = -1; oy <= 1; ++oy)
+        if (ox || oy)
+          ImDrawList_AddText_Vec2(
+              dl, (ImVec2){positions[i].x + ox, positions[i].y + oy},
+              outline, labels[i], NULL);
+    ImDrawList_AddText_Vec2(dl, positions[i], number, labels[i], NULL);
+  }
+  igPopFont();
+}
+
 void ui_overlay(tenv* env) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -119,7 +169,7 @@ void ui_overlay(tenv* env) {
   }
 
   usr->r->global.minimap_opacity = 0;
-  if (usrs->hotkeys[HOTKEY_HUD].active) {
+  if (usrs->hotkeys[HOTKEY_HUD].active && !usrs->ntl_stealth_mode) {
     ImGuiStyle* style = igGetStyle();
     float frame_height = igGetFrameHeight();
 
@@ -137,7 +187,7 @@ void ui_overlay(tenv* env) {
 
     igTextColored((ImVec4){1, 1, 1, 0.3}, "\ueaec");
     igSameLine(0, -1);
-    igTextColored((ImVec4){1, 1, 1, 0.5}, usrs->ipv4);
+    igTextColored((ImVec4){1, 1, 1, 0.5}, usrs->server_address);
 
     float ping_norm =
         (gdata->data.ping_follow - GOOD_PING) / (BAD_PING - GOOD_PING);
@@ -223,8 +273,25 @@ void ui_overlay(tenv* env) {
 
       float tb_width =
           psize.x + nksize.x + scsize.x + (style->CellPadding.x * 2 * 3);
-      igSetCursorPosX(ctx->size[0] - tb_width - style->WindowPadding.x);
+      float table_x = ctx->size[0] - tb_width - style->WindowPadding.x;
       igSetCursorPosY(style->WindowPadding.y);
+      igPushFont(usr->imgui_data.mono_font_bold[usrs->lb_font_size],
+                 usr->imgui_data.mono_font_bold[usrs->lb_font_size]->LegacySize);
+      const char* lb_title = usrs->leaderboard_title[0]
+                                 ? usrs->leaderboard_title
+                                 : "Vlither Leaderboard";
+      ImVec2 lb_title_size;
+      igCalcTextSize(&lb_title_size, lb_title, NULL, false, -1.0f);
+      igSetCursorPosX(table_x + (tb_width - lb_title_size.x) * 0.5f);
+      ImVec4 title_color = usrs->ntl_leaderboard_style == 2
+                               ? (ImVec4){usrs->ntl_leaderboard_color[0],
+                                          usrs->ntl_leaderboard_color[1],
+                                          usrs->ntl_leaderboard_color[2],
+                                          usrs->ntl_leaderboard_color[3]}
+                               : (ImVec4){1.0f, 0.88f, 0.30f, 0.96f};
+      igTextColored(title_color, "%s", lb_title);
+      igPopFont();
+      igSetCursorPosX(table_x);
 
       if (igBeginTable("leaderboard_table", 3, ImGuiTableFlags_NoHostExtendX,
                        (ImVec2){}, 0)) {
@@ -237,11 +304,29 @@ void ui_overlay(tenv* env) {
 
         for (int row = 0; row < NUM_LEADERBOARD_ENTRIES; row++) {
           bool is_my_snake = gdata->data.lb_pos == (row + 1);
+          int team_status = ntl_team_leaderboard_status(
+              gdata->data.lb.entries[row].nickname, usrs->server_address);
+          bool is_team_snake = team_status > 0;
           vec3s* scolor = gdata->cg_colors + gdata->data.lb.entries[row].cv;
           vec3 tcolor;
           glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, 0.4f, tcolor);
           ImVec4 itcolor = {tcolor[0], tcolor[1], tcolor[2], 1};
-          if (is_my_snake) {
+          if (usrs->ntl_leaderboard_style == 1) {
+            /* Gold -> cyan rank gradient: rank remains readable even when
+               several snakes share nearly identical skin colours. */
+            float t = (float)row / (float)(NUM_LEADERBOARD_ENTRIES - 1);
+            itcolor.x = 1.00f + (0.25f - 1.00f) * t;
+            itcolor.y = 0.82f + (0.90f - 0.82f) * t;
+            itcolor.z = 0.20f + (1.00f - 0.20f) * t;
+          } else if (usrs->ntl_leaderboard_style == 2) {
+            itcolor = (ImVec4){usrs->ntl_leaderboard_color[0],
+                               usrs->ntl_leaderboard_color[1],
+                               usrs->ntl_leaderboard_color[2],
+                               usrs->ntl_leaderboard_color[3]};
+          }
+          /* Teammates use the same fully opaque bold treatment as the local
+             player's own leaderboard name, without a boxed row background. */
+          if (is_my_snake || is_team_snake) {
             igPushFont(
                 usr->imgui_data.mono_font_bold[usrs->lb_font_size],
                 usr->imgui_data.mono_font_bold[usrs->lb_font_size]->LegacySize);
@@ -273,6 +358,11 @@ void ui_overlay(tenv* env) {
     float mm_min = fminf(72.0f, mm_max);
     float mm_size = fminf((float)usrs->minimap_size, mm_max);
     if (mm_size < mm_min) mm_size = mm_min;
+    if (usrs->ntl_dynamic_minimap && gdata->data.grd > 1.0f) {
+      float arena_scale = gdata->data.flux_grd / gdata->data.grd;
+      arena_scale = fmaxf(0.72f, fminf(arena_scale, 1.0f));
+      mm_size = fmaxf(mm_min, mm_size * (0.78f + arena_scale * 0.22f));
+    }
 
     float mm_x;
     float mm_y;
@@ -376,12 +466,28 @@ void ui_overlay(tenv* env) {
     usr->r->global.minimap_circ[2] = mm_size;
     usr->r->global.minimap_opacity = 1;
 
+    if (usrs->minimap_clock)
+      draw_clock_minimap(env, mm_x, mm_y, mm_size);
     ntl_team_draw_minimap(env, mm_x, mm_y, mm_size);
+
+    int edge_remaining = GLM_MAX(0, 100 - dst);
+    if (usrs->ntl_border_indicator) {
+      ImVec4 edge_color = edge_remaining <= 12
+                              ? (ImVec4){1.0f, 0.18f, 0.18f, 0.95f}
+                              : edge_remaining <= 28
+                                    ? (ImVec4){1.0f, 0.72f, 0.16f, 0.90f}
+                                    : (ImVec4){0.30f, 1.0f, 0.52f, 0.78f};
+      ImDrawList_AddCircle(igGetWindowDrawList(),
+                           (ImVec2){mm_x + mm_size * 0.5f,
+                                    mm_y + mm_size * 0.5f},
+                           mm_size * 0.485f,
+                           igColorConvertFloat4ToU32(edge_color), 64, 2.0f);
+    }
 
     igPushFont(usr->imgui_data.mono_font[usrs->stats_font_size],
                usr->imgui_data.mono_font[usrs->stats_font_size]->LegacySize);
     ImVec2 lctxtsz;
-    igCalcTextSize(&lctxtsz, "--360° 100%", NULL, false, -1);
+    igCalcTextSize(&lctxtsz, "--360° 100% EDGE 100%", NULL, false, -1);
 
     float label_x = mm_x + mm_size * 0.5f - lctxtsz.x * 0.5f;
     float label_y = mm_y + mm_size + 2.0f;
@@ -395,7 +501,15 @@ void ui_overlay(tenv* env) {
 
     igTextColored((ImVec4){1, 1, 1, 0.3f}, "\ue947");
     igSameLine(0, -1);
-    igTextColored((ImVec4){1, 1, 1, 0.7f}, "%d° %d%%", pang, dst);
+    if (usrs->ntl_border_indicator)
+      igTextColored(edge_remaining <= 12
+                        ? (ImVec4){1.0f, 0.28f, 0.28f, 0.95f}
+                        : edge_remaining <= 28
+                              ? (ImVec4){1.0f, 0.78f, 0.22f, 0.92f}
+                              : (ImVec4){0.45f, 1.0f, 0.62f, 0.84f},
+                    "%d° %d%%  EDGE %d%%", pang, dst, edge_remaining);
+    else
+      igTextColored((ImVec4){1, 1, 1, 0.7f}, "%d° %d%%", pang, dst);
     igPopFont();
   }
 
@@ -444,67 +558,52 @@ void ui_overlay(tenv* env) {
 
     float jr, jcx, jcy;
     if (usrs->joy_pos_custom) {
-        jr  = sh * usrs->joy_rel_size;
+        /* SWF joystick background: 168px artwork scaled to 0.7. The old
+           Vlither ring was much larger, so retain saved slider values while
+           mapping them to the original Slither visual scale. */
+        jr  = sh * usrs->joy_rel_size * 0.47f;
         jcx = sw * usrs->joy_rel_x;
         jcy = sh * usrs->joy_rel_y;
     } else {
-        jr  = sh * 0.175f;
+        jr  = sh * 0.082f;
         jcx = swapped ? (sw - jr - margin) : (jr + margin);
         jcy = sh - jr - margin;
     }
 
     { extern float g_boost_cx,g_boost_cy,g_boost_r,g_joy_cx,g_joy_cy,g_joy_r;
       extern bool  g_is_trackpad_mode, g_panel_open;
+      extern bool  g_joystick_uses_side, g_joystick_left_side;
       g_boost_cx = bcx; g_boost_cy = bcy;
       g_boost_r  = mouse_controls_active ? 0.0f : br;
       g_joy_cx   = jcx; g_joy_cy   = jcy; g_joy_r   = jr;
       g_is_trackpad_mode = usrs->ctrl_mode_trackpad;
+      g_joystick_uses_side = !usrs->ctrl_mode_trackpad && !mouse_controls_active;
+      g_joystick_left_side = jcx < sw * 0.5f;
       (void)g_panel_open;  }
 
     if (!usrs->ctrl_mode_trackpad) {
       bool  joy_on = gdata->touch_ctrl.joy_tracking;
 
+      /* Direct port of the SWF artwork: a 35%-alpha grey 168px base and a
+         35%-alpha white 128px thumb, each with its soft black drop shadow.
+         It intentionally replaces Vlither's ring, crosshair and MOVE label. */
       float jo = usrs->joy_opacity;
-      ImDrawList_AddCircle(dl,
-        (ImVec2){jcx, jcy}, jr,
-        IM_COL32(255,255,255,(int)((joy_on?70:38)*jo)), 64, 3.0f);
-      ImDrawList_AddCircle(dl,
-        (ImVec2){jcx, jcy}, jr * 0.32f,
-        IM_COL32(255,255,255,(int)(18*jo)), 32, 1.5f);
+      ImDrawList_AddCircleFilled(dl, (ImVec2){jcx, jcy + jr * 0.06f}, jr * 0.77f,
+                               IM_COL32(0, 0, 0, (int)(64 * jo)), 64);
+      ImDrawList_AddCircleFilled(dl, (ImVec2){jcx, jcy}, jr * 0.77f,
+                               IM_COL32(128, 128, 128, (int)(89 * jo)), 64);
 
-      ImU32 cross = IM_COL32(255,255,255,(int)(18*jo));
-      ImDrawList_AddLine(dl,
-        (ImVec2){jcx - jr * 0.78f, jcy}, (ImVec2){jcx + jr * 0.78f, jcy}, cross, 1.5f);
-      ImDrawList_AddLine(dl,
-        (ImVec2){jcx, jcy - jr * 0.78f}, (ImVec2){jcx, jcy + jr * 0.78f}, cross, 1.5f);
-
+      float thumb_r = jr * 0.408f;
+      float thumb_offset = jr * 0.408f;
       float jtx = jcx, jty = jcy;
-      static float s_joy_last_dx = 0.0f, s_joy_last_dy = 0.0f;
-      if (joy_on) {
-        float dx   = env->wnd->touch.x - gdata->touch_ctrl.joy_anchor_x;
-        float dy   = env->wnd->touch.y - gdata->touch_ctrl.joy_anchor_y;
-        float dist = sqrtf(dx * dx + dy * dy);
-        float cap  = jr * 0.68f;
-        float sc   = (dist > cap && dist > 0.001f) ? cap / dist : 1.0f;
-        jtx = jcx + dx * sc;
-        jty = jcy + dy * sc;
-        s_joy_last_dx = jtx - jcx;
-        s_joy_last_dy = jty - jcy;
-      } else {
-
-        jtx = jcx + s_joy_last_dx;
-        jty = jcy + s_joy_last_dy;
+      if (gdata->touch_ctrl.joy_has_direction) {
+        jtx += cosf(gdata->touch_ctrl.joy_angle) * thumb_offset;
+        jty += sinf(gdata->touch_ctrl.joy_angle) * thumb_offset;
       }
-      ImDrawList_AddCircleFilled(dl,
-        (ImVec2){jtx, jty}, jr * 0.29f,
-        joy_on ? IM_COL32(255, 255, 255, 210) : IM_COL32(255, 255, 255, 60), 32);
-
-      float hint_sz = jr * 0.22f;
-      ImVec2 mv_sz; igCalcTextSize(&mv_sz, "MOVE", NULL, false, -1.0f);
-      float mv_scale = hint_sz / igGetFontSize();
-      ImDrawList_AddText_FontPtr(dl, igGetFont(), hint_sz,
-        (ImVec2){jcx - mv_sz.x * mv_scale * 0.5f, jcy + jr + 4},
-        IM_COL32(255, 255, 255, 65), "MOVE", NULL, 0.0f, NULL);
+      ImDrawList_AddCircleFilled(dl, (ImVec2){jtx, jty + thumb_r * 0.09f}, thumb_r,
+                               IM_COL32(0, 0, 0, (int)(64 * jo)), 48);
+      ImDrawList_AddCircleFilled(dl, (ImVec2){jtx, jty}, thumb_r,
+                               IM_COL32(255, 255, 255, (int)(89 * jo)), 48);
 
     } else {
 
@@ -536,12 +635,25 @@ void ui_overlay(tenv* env) {
         int arrow_style = usrs->arrow_style;
         if (arrow_style < 0 || arrow_style >= ARROW_STYLE_COUNT)
           arrow_style = 0;
-        VkDescriptorSet arrow_ds = usr->r ? usr->r->arrow_atlas_ds
-                                           : VK_NULL_HANDLE;
-        float aspect = arrow_style_aspect(arrow_style);
+        bool use_custom_arrow = usrs->custom_arrow_enabled && usr->r &&
+                                usr->r->custom_arrow_ds &&
+                                usr->r->custom_arrow_tex;
+        VkDescriptorSet arrow_ds = usr->r
+            ? (use_custom_arrow ? usr->r->custom_arrow_ds
+                                : usr->r->arrow_atlas_ds)
+            : VK_NULL_HANDLE;
+        float aspect = use_custom_arrow
+            ? (float)usr->r->custom_arrow_tex->size[0] /
+                  fmaxf(1.0f, (float)usr->r->custom_arrow_tex->size[1])
+            : arrow_style_aspect(arrow_style);
         float arrow_u0, arrow_v0, arrow_u1, arrow_v1;
-        arrow_style_uv_bounds(arrow_style, &arrow_u0, &arrow_v0,
-                              &arrow_u1, &arrow_v1);
+        if (use_custom_arrow) {
+          arrow_u0 = arrow_v0 = 0.0f;
+          arrow_u1 = arrow_v1 = 1.0f;
+        } else {
+          arrow_style_uv_bounds(arrow_style, &arrow_u0, &arrow_v0,
+                                &arrow_u1, &arrow_v1);
+        }
         float ah = sh * 0.085f * usrs->arrow_size * arrow_zoom_scale;
         float aw = ah * aspect;
 
@@ -614,7 +726,7 @@ void ui_overlay(tenv* env) {
     float sh2 = (float)ctx->size[1];
 
     float zs_half_h = sh2 * usrs->zslider_rel_h;
-    float zs_half_w = sh2 * 0.022f;
+    float zs_half_w = sh2 * 0.022f * usrs->zslider_thickness;
     float zs_cx     = sw2 * usrs->zslider_rel_x;
     float zs_cy     = sh2 * usrs->zslider_rel_y;
 
@@ -689,8 +801,8 @@ void ui_overlay(tenv* env) {
           IM_COL32(255,255,255,(int)(120*zopa)), "+", NULL, 0, NULL);
 
         float thumb_x = zs_cx + s_thumb_vis_offset;
-        float thumb_hw = half_t * 1.4f;
-        float thumb_hh = half_t * 1.1f;
+        float thumb_hw = half_t * 1.4f * usrs->zslider_thumb_scale;
+        float thumb_hh = half_t * 1.1f * usrs->zslider_thumb_scale;
         ImDrawList_AddRectFilled(zdl,
           (ImVec2){thumb_x - thumb_hw, zs_cy - thumb_hh},
           (ImVec2){thumb_x + thumb_hw, zs_cy + thumb_hh},
@@ -725,8 +837,8 @@ void ui_overlay(tenv* env) {
           IM_COL32(255,255,255,(int)(120*zopa)), "-", NULL, 0, NULL);
 
         float thumb_y = zs_cy + s_thumb_vis_offset;
-        float thumb_h = zs_half_w * 1.4f;
-        float thumb_w = zs_half_w * 1.1f;
+        float thumb_h = zs_half_w * 1.4f * usrs->zslider_thumb_scale;
+        float thumb_w = zs_half_w * 1.1f * usrs->zslider_thumb_scale;
         ImDrawList_AddRectFilled(zdl,
           (ImVec2){zs_cx - thumb_w, thumb_y - thumb_h},
           (ImVec2){zs_cx + thumb_w, thumb_y + thumb_h},

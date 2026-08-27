@@ -52,6 +52,7 @@ void tlaunch(tenv* env) {
 
   memset(usrs, 0, sizeof(user_settings));
   strcpy(usrs->ipv4, "148.113.20.151:444");
+  strcpy(usrs->server_address, "148.113.20.151:444");
   strcpy(usrs->nickname, "");
 
   usrs->custom_skin = false;
@@ -291,6 +292,16 @@ void trender(tenv* env) {
         ui_controls(env);
         break;
     }
+
+#ifdef ANDROID
+    /* A hidden settings/controls preview is not the player's gameplay and
+       must never start a recording. Sync after the screen/game loop so a
+       transition back to the homepage stops and finalizes in this frame. */
+    android_jni_capture_sync(
+        usr->usrs.record_gameplay, usr->usrs.screenshot_on_kill,
+        gdata->curr_screen == PLAYING && gdata->conn == CONNECTED &&
+            !gdata->preview_active);
+#endif
 
     /* S.zip exposes the NTL HUD while Settings is open as normal ImGui
        windows (title bar/background enabled), which gives the player a safe

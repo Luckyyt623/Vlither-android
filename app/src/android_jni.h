@@ -13,9 +13,15 @@ void android_jni_request_ad(void);
 void android_jni_notify_game_ready(void);
 
 void android_jni_open_url(const char* url);
+bool android_jni_request_custom_arrow(void);
+void android_jni_notification_beep(int kind);
 
 /* Decode an Android asset (including WebP) to malloc-owned RGBA bytes. */
 unsigned char* android_jni_decode_asset_rgba(const char* asset_path,
+                                             int* width, int* height);
+/* Decode PNG/JPEG/WebP bytes to malloc-owned RGBA pixels. */
+unsigned char* android_jni_decode_image_rgba(const unsigned char* encoded,
+                                             size_t encoded_size,
                                              int* width, int* height);
 
 /* Event reminders survive the game activity and are delivered by Android at
@@ -63,6 +69,14 @@ void android_jni_voice_set_capture(bool active);
 void android_jni_voice_play_pcm(const char* speaker_id, const unsigned char* pcm,
                                 size_t len, float gain);
 void android_jni_voice_stop_playback(void);
+
+/* Local gameplay capture. The native client supplies persisted choices and
+   whether a real (non-preview) server session is active. Android handles the
+   MediaProjection consent/foreground service and MediaStore output. */
+void android_jni_capture_sync(bool recording_enabled,
+                              bool screenshots_enabled,
+                              bool session_active);
+void android_jni_capture_confirmed_kill(void);
 
 #endif
 #endif

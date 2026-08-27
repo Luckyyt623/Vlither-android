@@ -6,6 +6,22 @@
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <arpa/inet.h>
+
+static void normalize_server_authority(const char *input, char *out,
+                                       size_t out_size) {
+  if (!input || !out || out_size == 0) return;
+  out[0] = 0;
+  if (input[0] == '[' || !strchr(input, ':') ||
+      strchr(input, ':') == strrchr(input, ':')) {
+    snprintf(out, out_size, "%s", input);
+    return;
+  }
+  const char *last_colon = strrchr(input, ':');
+  if (last_colon && last_colon[1])
+    snprintf(out, out_size, "[%.*s]:%s", (int)(last_colon - input), input,
+             last_colon + 1);
+}
 
 void server_init(tenv* env) {
   tuser_data* usr = env->usr;
@@ -22,11 +38,16 @@ void server_connect(tenv* env) {
 
   char url[256] = {};
 
-  bool is_local = (strncmp(usrs->ipv4, "127.", 4) == 0 ||
-                   strncmp(usrs->ipv4, "localhost", 9) == 0 ||
-                   strncmp(usrs->ipv4, "192.168.", 8) == 0 ||
-                   strncmp(usrs->ipv4, "10.", 3) == 0);
-  sprintf(url, "%s://%s/slither", is_local ? "ws" : "wss", usrs->ipv4);
+  bool is_local = (strncmp(usrs->server_address, "127.", 4) == 0 ||
+                   strncmp(usrs->server_address, "[::1]", 5) == 0 ||
+                   strncmp(usrs->server_address, "localhost", 9) == 0 ||
+                   strncmp(usrs->server_address, "192.168.", 8) == 0 ||
+                   strncmp(usrs->server_address, "10.", 3) == 0);
+  char authority[MAX_SERVER_IP_LEN + 8] = {};
+  normalize_server_authority(usrs->server_address, authority,
+                             sizeof authority);
+  snprintf(url, sizeof url, "%s://%s/slither", is_local ? "ws" : "wss",
+           authority);
   gdata->connection =
     mg_ws_connect(&gdata->network_manager, url, server_callback, env,
                   "%s:%s\r\n%s:%s\r\n",
@@ -89,13 +110,16 @@ static void server_list_seed_custom(game_data* gdata) {
   for (int i = 0; i < CUSTOM_SERVER_COUNT; i++) {
     strncpy(gdata->server_list.ips[i], CUSTOM_SERVER_IPS[i], MAX_SERVER_IP_LEN);
     gdata->server_list.ips[i][MAX_SERVER_IP_LEN] = '\0';
+    gdata->server_list.families[i] = 4;
+    gdata->server_list.sids[i] = 0;
     gdata->server_list.count++;
   }
   gdata->server_list.custom_count = gdata->server_list.count;
 }
 
 static void server_list_parse(const char* data, int len,
-                               char ips[][MAX_SERVER_IP_LEN + 1], int* count) {
+                               char ips[][MAX_SERVER_IP_LEN + 1],
+                               uint8_t families[], uint16_t sids[], int* count) {
 
   enum { MAX_HB = MAX_SERVER_LIST * 28 + 28 };
   static int hb[MAX_SERVER_LIST * 28 + 28];
@@ -127,6 +151,8 @@ static void server_list_parse(const char* data, int len,
         snprintf(ips[*count], MAX_SERVER_IP_LEN + 1,
                  "%d.%d.%d.%d:%d",
                  hb[i+1], hb[i+2], hb[i+3], hb[i+4], port);
+        families[*count] = 4;
+        sids[*count] = (uint16_t)((hb[i + 26] << 8) | hb[i + 27]);
         (*count)++;
       }
     }
@@ -137,6 +163,8 @@ static void server_list_parse(const char* data, int len,
       snprintf(ips[*count], MAX_SERVER_IP_LEN + 1,
                "%d.%d.%d.%d:%d",
                hb[i+0], hb[i+1], hb[i+2], hb[i+3], port);
+      families[*count] = 4;
+      sids[*count] = 0;
       (*count)++;
     }
   }
@@ -162,7 +190,9 @@ static void sl_http_cb(struct mg_connection* c, int ev, void* ev_data) {
     int status = mg_http_status(hm);
     if (status == 200 && hm->body.len > 0) {
       server_list_parse(hm->body.buf, (int)hm->body.len,
-                        gdata->server_list.ips, &gdata->server_list.count);
+                        gdata->server_list.ips, gdata->server_list.families,
+                        gdata->server_list.sids,
+                        &gdata->server_list.count);
       gdata->server_list.fetching   = false;
       gdata->server_list.fetched    = true;
       gdata->server_list.fetch_error = false;
@@ -214,6 +244,7 @@ void server_list_init(tenv* env) {
   for (int i = 0; i < MAX_SERVER_LIST; i++) {
     gdata->server_list.pings[i]        = -1;
     gdata->server_list.sorted_order[i] = i;
+    gdata->server_list.sids[i]         = 0;
   }
   server_list_seed_custom(gdata);
 }
@@ -230,9 +261,26 @@ void server_list_fetch(tenv* env) {
   for (int i = 0; i < MAX_SERVER_LIST; i++) {
     gdata->server_list.pings[i]        = -1;
     gdata->server_list.sorted_order[i] = i;
+    gdata->server_list.sids[i]         = 0;
   }
   server_list_seed_custom(gdata);
   mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTP, sl_http_cb, gdata);
+}
+
+bool server_list_resolve_sid(tenv* env, int sid, char* address,
+                             size_t address_size) {
+  if (!env || !address || address_size == 0 || sid < 0 || sid > 9999)
+    return false;
+  game_data* gdata = &env->usr->gdata;
+  for (int i = gdata->server_list.custom_count;
+       i < gdata->server_list.count; ++i) {
+    if (gdata->server_list.families[i] == 4 &&
+        gdata->server_list.sids[i] == (uint16_t)sid) {
+      snprintf(address, address_size, "%s", gdata->server_list.ips[i]);
+      return true;
+    }
+  }
+  return false;
 }
 
 void server_list_poll(tenv* env) {
@@ -262,7 +310,7 @@ void server_list_destroy(tenv* env) {
  * ------------------------------------------------------------------ */
 
 #define PING_BATCH    64
-#define PING_TIMEOUT  7000   /* ms, matches the web client's ipv4 probe timeout */
+#define PING_TIMEOUT  7000   /* ms, used for IPv4 probes */
 #define PING_SAMPLES  4      /* number of ping/pong round trips sampled */
 #define PING_BYTE     0x70   /* 'p' - single-byte ping payload used by /ptc */
 
@@ -337,6 +385,28 @@ static void sl_ping_ws_cb(struct mg_connection* c, int ev, void* ev_data) {
   }
 }
 
+static bool split_server_endpoint(const char *endpoint, char *host,
+                                  size_t host_size, int *port) {
+  if (!endpoint || !host || host_size == 0 || !port) return false;
+  host[0] = 0;
+  if (endpoint[0] == '[') {
+    const char *end = strchr(endpoint, ']');
+    if (!end || end[1] != ':' || !end[2]) return false;
+    size_t n = (size_t)(end - endpoint - 1);
+    if (n >= host_size) n = host_size - 1;
+    memcpy(host, endpoint + 1, n);
+    host[n] = 0;
+    return sscanf(end + 2, "%d", port) == 1;
+  }
+  const char *colon = strrchr(endpoint, ':');
+  if (!colon || !colon[1]) return false;
+  size_t n = (size_t)(colon - endpoint);
+  if (n >= host_size) n = host_size - 1;
+  memcpy(host, endpoint, n);
+  host[n] = 0;
+  return sscanf(colon + 1, "%d", port) == 1;
+}
+
 static void* sl_ping_thread(void* arg) {
   game_data* gdata = (game_data*)arg;
   int n = gdata->server_list.count;
@@ -355,9 +425,10 @@ static void* sl_ping_thread(void* arg) {
 
     for (int j = 0; j < bsz; j++) {
       int idx = bs + j;
-      char ip_buf[32] = {0};
+      char ip_buf[INET6_ADDRSTRLEN] = {0};
       int  port = 0;
-      if (sscanf(gdata->server_list.ips[idx], "%31[^:]:%d", ip_buf, &port) != 2) {
+      if (!split_server_endpoint(gdata->server_list.ips[idx], ip_buf,
+                                 sizeof ip_buf, &port)) {
         probes[j].done   = true;
         probes[j].result = 9999;
         continue;
@@ -366,12 +437,16 @@ static void* sl_ping_thread(void* arg) {
       struct mg_connection* c = NULL;
       probes[j].start_ms = mg_millis();
       if (idx < gdata->server_list.custom_count) {
-        char url[64];
-        snprintf(url, sizeof(url), "tcp://%s:%d", ip_buf, port);
+        char url[128];
+        snprintf(url, sizeof(url), strchr(ip_buf, ':') ? "tcp://[%s]:%d"
+                                                       : "tcp://%s:%d",
+                 ip_buf, port);
         c = mg_connect(&ping_mgr, url, sl_ping_tcp_cb, &probes[j]);
       } else {
-        char url[64];
-        snprintf(url, sizeof(url), "ws://%s:80/ptc", ip_buf);
+        char url[128];
+        snprintf(url, sizeof(url), strchr(ip_buf, ':') ? "ws://[%s]:80/ptc"
+                                                       : "ws://%s:80/ptc",
+                 ip_buf);
         c = mg_ws_connect(
           &ping_mgr, url, sl_ping_ws_cb, &probes[j],
           "%s:%s\r\n%s:%s\r\n",

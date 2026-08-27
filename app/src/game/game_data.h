@@ -64,6 +64,12 @@ typedef struct game_data {
     int   joy_last_xm;
     int   joy_last_ym;
 
+    /* Slither mobile joystick state. The original control keeps its base
+       fixed and moves the white thumb a fixed distance in the selected
+       direction; it does not drag the base under the finger. */
+    float joy_angle;
+    bool  joy_has_direction;
+
     float tp_cursor_x;
     float tp_cursor_y;
     float tp_anchor_x;
@@ -92,6 +98,8 @@ typedef struct game_data {
     int pings[MAX_SERVER_LIST];
     int sorted_order[MAX_SERVER_LIST];
     char ips[MAX_SERVER_LIST][MAX_SERVER_IP_LEN + 1];
+    uint16_t sids[MAX_SERVER_LIST]; /* official 4-digit server IDs */
+    uint8_t families[MAX_SERVER_LIST]; /* retained for saved/custom IPv4 data */
     int count;
     int custom_count;
     struct mg_mgr mgr;

@@ -16,9 +16,21 @@
 
 #define NTL_TAG_WS_URL "ws://ws.ntl-slither.com:9000"
 #define NTL_TAG_HOST "ntl-slither.com"
-#define NTL_TAG_AUTH_PATH "/tags/authorizetags.php"
+#define NTL_TAG_AUTH_PATH "/tags/tag"
+#define NTL_TAG_CATALOG_PATH "/tags/cstags"
+#define NTL_TAG_FIXED_CATALOG_PATH "/tags/fstags"
 #define NTL_TAG_RECONNECT_SECONDS 3.0
 #define NTL_TAG_POSITION_SECONDS 1.0
+#define NTL_TAG_CATALOG_RETRY_SECONDS 60.0
+#define NTL_TAG_CATALOG_REFRESH_SECONDS 3600.0
+#define NTL_TAG_CATALOG_TIMEOUT_SECONDS 45.0
+#define NTL_DYNAMIC_TAG_MAX 277
+#define NTL_FIXED_TAG_MAX 96
+#define NTL_DYNAMIC_ATLAS_SIZE 1024
+#define NTL_DYNAMIC_ATLAS_COLUMNS 17
+#define NTL_DYNAMIC_ATLAS_CELL 60
+#define NTL_DYNAMIC_ATLAS_PADDING 3
+#define NTL_TAG_CATALOG_MAX_BYTES (12u * 1024u * 1024u)
 
 #ifndef IM_COL32
 #define IM_COL32(R,G,B,A) \
@@ -31,17 +43,37 @@ typedef struct ntl_tags_state {
   struct mg_mgr mgr;
   struct mg_connection *ws;
   struct mg_connection *auth;
+  struct mg_connection *catalog;
+  struct mg_connection *fixed_catalog;
   bool ws_open;
   bool handshake_sent;
   double next_connect;
   double last_position_send;
-  char active_server[MAX_IPV4_LEN + 1];
+  char active_server[MAX_SERVER_IP_LEN + 1];
   uint16_t active_ntl_id;
 
   int pending_tag_id;
   int preview_tag_id;
   char pending_hash[33];
   double auth_started;
+  double catalog_started;
+  double next_catalog_sync;
+  long catalog_version;
+  double fixed_catalog_started;
+  double next_fixed_catalog_sync;
+  long fixed_catalog_version;
+  int public_tag_max;
+  int private_tag_min;
+  int dynamic_tag_count;
+  ntl_tag_meta dynamic_meta[NTL_DYNAMIC_TAG_MAX];
+  ntl_tag_atlas_entry dynamic_atlas[NTL_DYNAMIC_TAG_MAX];
+  texture *dynamic_atlas_tex;
+  VkDescriptorSet dynamic_atlas_ds;
+  int fixed_tag_count;
+  ntl_tag_meta fixed_meta[NTL_FIXED_TAG_MAX];
+  ntl_tag_atlas_entry fixed_atlas[NTL_FIXED_TAG_MAX];
+  texture *fixed_atlas_tex;
+  VkDescriptorSet fixed_atlas_ds;
   int mapped_tag_count;
   double last_mapping_received;
   char status[192];
@@ -65,15 +97,37 @@ static snake *local_snake(void) {
 }
 
 static const ntl_tag_meta *find_meta(int id) {
+  for (int i = 0; i < S.fixed_tag_count; ++i)
+    if (S.fixed_meta[i].id == id) return &S.fixed_meta[i];
+  for (int i = 0; i < S.dynamic_tag_count; ++i)
+    if (S.dynamic_meta[i].id == id) return &S.dynamic_meta[i];
   for (int i = 0; i < NTL_TAG_METADATA_COUNT; ++i)
     if (NTL_TAG_METADATA[i].id == id) return &NTL_TAG_METADATA[i];
   return NULL;
 }
 
 static const ntl_tag_atlas_entry *find_atlas_entry(int id) {
+  for (int i = 0; i < S.fixed_tag_count; ++i)
+    if (S.fixed_atlas[i].id == id) return &S.fixed_atlas[i];
+  for (int i = 0; i < S.dynamic_tag_count; ++i)
+    if (S.dynamic_atlas[i].id == id) return &S.dynamic_atlas[i];
   for (int i = 0; i < NTL_TAG_ATLAS_ENTRY_COUNT; ++i)
     if (NTL_TAG_ATLAS_ENTRIES[i].id == id) return &NTL_TAG_ATLAS_ENTRIES[i];
   return NULL;
+}
+
+static bool is_dynamic_atlas_entry(const ntl_tag_atlas_entry *entry) {
+  if (!entry) return false;
+  for (int i = 0; i < S.dynamic_tag_count; ++i)
+    if (entry == &S.dynamic_atlas[i]) return true;
+  return false;
+}
+
+static bool is_fixed_atlas_entry(const ntl_tag_atlas_entry *entry) {
+  if (!entry) return false;
+  for (int i = 0; i < S.fixed_tag_count; ++i)
+    if (entry == &S.fixed_atlas[i]) return true;
+  return false;
 }
 
 static bool ensure_atlas_loaded(tenv *env) {
@@ -98,23 +152,33 @@ static bool ensure_atlas_loaded(tenv *env) {
   return true;
 }
 
+static VkDescriptorSet atlas_descriptor(tenv *env,
+                                        const ntl_tag_atlas_entry *entry) {
+  if (is_fixed_atlas_entry(entry)) return S.fixed_atlas_ds;
+  if (is_dynamic_atlas_entry(entry)) return S.dynamic_atlas_ds;
+  return ensure_atlas_loaded(env) ? S.atlas_ds : VK_NULL_HANDLE;
+}
+
 bool ntl_tags_is_packet_tag(int id) {
   if (id >= 0 && id <= 59) return true;
-  return id >= 200 && id <= 303;
+  int public_max = S.public_tag_max >= 303 ? S.public_tag_max : 367;
+  return id >= 200 && id <= public_max;
 }
 
 bool ntl_tags_is_protected_tag(int id) {
-  /* Official NTL private ranges present in the bundled catalog. ID 666 is
-     NTL's temporary/test slot and is intentionally not selectable. */
-  return (id >= 60 && id <= 199) || (id >= 582 && id <= 665);
+  /* Public fixed tags grow upward from 304, while private/custom tags grow
+     downward from 580. Their live catalogues update these two boundaries. */
+  int private_min = S.private_tag_min > 0 ? S.private_tag_min : 374;
+  return (id >= 60 && id <= 199) || (id >= private_min && id <= 665);
 }
 
 bool ntl_tags_exists(int id) {
   if (id == -1) return true;
-  if (ntl_tags_is_packet_tag(id)) return find_meta(id) != NULL;
-  /* The NTL service can contain newer protected images than the bundled NTL
-     source. Accept the protocol range and use a small ID fallback if that
-     exact image is not present in this build. */
+  /* Remember packet IDs immediately. If its live image is still downloading,
+     the snake switches from the temporary fallback to the image automatically
+     as soon as the fixed catalogue atlas is installed. */
+  if (ntl_tags_is_packet_tag(id)) return true;
+  /* Future protected IDs are accepted and then verified by NTL itself. */
   return ntl_tags_is_protected_tag(id);
 }
 
@@ -126,6 +190,335 @@ static void md5_hex(const char *text, char out[33]) {
   mg_md5_final(&ctx, digest);
   for (int i = 0; i < 16; ++i) sprintf(out + i * 2, "%02x", digest[i]);
   out[32] = 0;
+}
+
+static long json_long_flexible(struct mg_str json, const char *path,
+                               long fallback) {
+  double value = 0.0;
+  if (mg_json_get_num(json, path, &value)) return (long)value;
+  char *text = mg_json_get_str(json, path);
+  if (!text) return fallback;
+  char *end = NULL;
+  long result = strtol(text, &end, 10);
+  if (!end || *end) result = fallback;
+  mg_free(text);
+  return result;
+}
+
+static bool parse_hex_color(const char *text, uint8_t out[3]) {
+  if (!text || !out) return false;
+  while (*text == '#' && text[1] == '#') ++text;
+  if (*text != '#') return false;
+  ++text;
+  size_t len = strlen(text);
+  unsigned value = 0;
+  if (len == 3) {
+    if (sscanf(text, "%3x", &value) != 1) return false;
+    out[0] = (uint8_t)(((value >> 8) & 15u) * 17u);
+    out[1] = (uint8_t)(((value >> 4) & 15u) * 17u);
+    out[2] = (uint8_t)((value & 15u) * 17u);
+    return true;
+  }
+  if ((len != 6 && len != 8) || sscanf(text, "%8x", &value) != 1)
+    return false;
+  if (len == 8) value >>= 8;
+  out[0] = (uint8_t)((value >> 16) & 255u);
+  out[1] = (uint8_t)((value >> 8) & 255u);
+  out[2] = (uint8_t)(value & 255u);
+  return true;
+}
+
+static void parse_css_color(const char *text, uint8_t out[3],
+                            uint8_t fallback_r, uint8_t fallback_g,
+                            uint8_t fallback_b) {
+  out[0] = fallback_r;
+  out[1] = fallback_g;
+  out[2] = fallback_b;
+  if (!text || !text[0] || parse_hex_color(text, out)) return;
+
+  char name[32];
+  size_t n = strlen(text);
+  if (n >= sizeof name) n = sizeof name - 1;
+  for (size_t i = 0; i < n; ++i)
+    name[i] = (char)tolower((unsigned char)text[i]);
+  name[n] = 0;
+  struct named_color { const char *name; uint8_t r, g, b; };
+  static const struct named_color colors[] = {
+      {"black", 0, 0, 0}, {"white", 255, 255, 255},
+      {"red", 255, 0, 0}, {"blue", 0, 0, 255},
+      {"green", 0, 128, 0}, {"lime", 0, 255, 0},
+      {"cyan", 0, 255, 255}, {"aqua", 0, 255, 255},
+      {"yellow", 255, 255, 0}, {"orange", 255, 165, 0},
+      {"pink", 255, 192, 203}, {"hotpink", 255, 105, 180},
+      {"purple", 128, 0, 128}, {"violet", 238, 130, 238},
+      {"brown", 165, 42, 42}, {"gold", 255, 215, 0},
+      {"silver", 192, 192, 192}, {"grey", 128, 128, 128},
+      {"gray", 128, 128, 128}, {"lightblue", 173, 216, 230},
+      {"darkblue", 0, 0, 139}, {"midnightblue", 25, 25, 112},
+      {"slateblue", 106, 90, 205}, {"darkslategray", 47, 79, 79},
+      {"darkslategrey", 47, 79, 79}, {"thistle", 216, 191, 216},
+      {"cornflowerblue", 100, 149, 237}, {"turquoise", 64, 224, 208},
+      {"khaki", 240, 230, 140}, {"wheat", 245, 222, 179},
+      {"tan", 210, 180, 140}, {"beige", 245, 245, 220},
+      {"aliceblue", 240, 248, 255}, {"gainsboro", 220, 220, 220},
+      {"seashell", 255, 245, 238}, {"transparent", 0, 0, 0}};
+  for (size_t i = 0; i < sizeof colors / sizeof colors[0]; ++i) {
+    if (!strcmp(name, colors[i].name)) {
+      out[0] = colors[i].r;
+      out[1] = colors[i].g;
+      out[2] = colors[i].b;
+      return;
+    }
+  }
+}
+
+static unsigned char *decode_data_uri_rgba(const char *src,
+                                            int *width, int *height) {
+  if (!src || !width || !height) return NULL;
+  const char *comma = strchr(src, ',');
+  if (!comma || !strstr(src, ";base64")) return NULL;
+  const char *base64 = comma + 1;
+  size_t base64_len = strlen(base64);
+  if (!base64_len || base64_len > NTL_TAG_CATALOG_MAX_BYTES) return NULL;
+  size_t cap = base64_len * 3u / 4u + 4u;
+  unsigned char *encoded = (unsigned char *)malloc(cap);
+  if (!encoded) return NULL;
+  size_t encoded_len = mg_base64_decode(base64, base64_len,
+                                        (char *)encoded, cap);
+  unsigned char *rgba = encoded_len
+      ? decode_texture_rgba_from_memory(encoded, encoded_len, width, height)
+      : NULL;
+  free(encoded);
+  return rgba;
+}
+
+static void blit_tag_to_atlas(unsigned char *atlas,
+                              const unsigned char *src,
+                              int src_w, int src_h,
+                              int canvas_w, int canvas_h, int slot,
+                              ntl_tag_atlas_entry *entry) {
+  if (canvas_w < 1) canvas_w = src_w;
+  if (canvas_h < 1) canvas_h = src_h;
+  int col = slot % NTL_DYNAMIC_ATLAS_COLUMNS;
+  int row = slot / NTL_DYNAMIC_ATLAS_COLUMNS;
+  int cell_x = col * NTL_DYNAMIC_ATLAS_CELL;
+  int cell_y = row * NTL_DYNAMIC_ATLAS_CELL;
+  int max_side = NTL_DYNAMIC_ATLAS_CELL - NTL_DYNAMIC_ATLAS_PADDING * 2;
+  float scale = GLM_MIN((float)max_side / (float)canvas_w,
+                        (float)max_side / (float)canvas_h);
+  int dst_w = GLM_MAX(1, (int)lroundf(canvas_w * scale));
+  int dst_h = GLM_MAX(1, (int)lroundf(canvas_h * scale));
+  int dst_x = cell_x + (NTL_DYNAMIC_ATLAS_CELL - dst_w) / 2;
+  int dst_y = cell_y + (NTL_DYNAMIC_ATLAS_CELL - dst_h) / 2;
+
+  for (int y = 0; y < dst_h; ++y) {
+    int canvas_y = GLM_MIN(canvas_h - 1, y * canvas_h / dst_h);
+    int sy = canvas_y - 21;
+    if (sy < 0 || sy >= src_h) continue;
+    for (int x = 0; x < dst_w; ++x) {
+      int canvas_x = GLM_MIN(canvas_w - 1, x * canvas_w / dst_w);
+      int sx = canvas_x - 21;
+      if (sx < 0 || sx >= src_w) continue;
+      size_t src_off = ((size_t)sy * (size_t)src_w + (size_t)sx) * 4u;
+      size_t dst_off = ((size_t)(dst_y + y) * NTL_DYNAMIC_ATLAS_SIZE +
+                        (size_t)(dst_x + x)) * 4u;
+      memcpy(atlas + dst_off, src + src_off, 4u);
+    }
+  }
+
+  entry->u0 = (float)dst_x / NTL_DYNAMIC_ATLAS_SIZE;
+  entry->v0 = (float)dst_y / NTL_DYNAMIC_ATLAS_SIZE;
+  entry->u1 = (float)(dst_x + dst_w) / NTL_DYNAMIC_ATLAS_SIZE;
+  entry->v1 = (float)(dst_y + dst_h) / NTL_DYNAMIC_ATLAS_SIZE;
+}
+
+static bool install_dynamic_catalog(struct mg_str json) {
+  if (!S.env || !S.env->ctx || !S.env->usr || !S.env->usr->r ||
+      json.len == 0 || json.len > NTL_TAG_CATALOG_MAX_BYTES)
+    return false;
+
+  size_t atlas_bytes = (size_t)NTL_DYNAMIC_ATLAS_SIZE *
+                       NTL_DYNAMIC_ATLAS_SIZE * 4u;
+  unsigned char *pixels = (unsigned char *)calloc(1, atlas_bytes);
+  if (!pixels) return false;
+  ntl_tag_meta parsed_meta[NTL_DYNAMIC_TAG_MAX];
+  ntl_tag_atlas_entry parsed_atlas[NTL_DYNAMIC_TAG_MAX];
+  int parsed_count = 0;
+  int source_count = 0;
+
+  for (int source_index = 0; source_index < NTL_DYNAMIC_TAG_MAX;
+       ++source_index) {
+    char path[80];
+    snprintf(path, sizeof path, "$.d[%d].src", source_index);
+    char *src = mg_json_get_str(json, path);
+    if (!src) break;
+    ++source_count;
+
+    int image_w = 0, image_h = 0;
+    unsigned char *rgba = decode_data_uri_rgba(src, &image_w, &image_h);
+    mg_free(src);
+    if (!rgba || image_w <= 0 || image_h <= 0) {
+      free_texture_rgba(rgba);
+      continue;
+    }
+
+    int id = 580 - source_index;
+    ntl_tag_meta meta;
+    memset(&meta, 0, sizeof meta);
+    meta.id = id;
+    snprintf(path, sizeof path, "$.d[%d].w", source_index);
+    long display_w = json_long_flexible(json, path, image_w);
+    snprintf(path, sizeof path, "$.d[%d].h", source_index);
+    long display_h = json_long_flexible(json, path, image_h);
+    snprintf(path, sizeof path, "$.d[%d].bx", source_index);
+    long bx = json_long_flexible(json, path, -32);
+    snprintf(path, sizeof path, "$.d[%d].by", source_index);
+    long by = json_long_flexible(json, path, -70);
+    meta.width = (int16_t)GLM_MAX(1, GLM_MIN(32767, display_w));
+    meta.height = (int16_t)GLM_MAX(1, GLM_MIN(32767, display_h));
+    meta.offset_x = (float)bx;
+    meta.offset_y = (float)by;
+    snprintf(path, sizeof path, "$.d[%d].c1", source_index);
+    char *c1 = mg_json_get_str(json, path);
+    snprintf(path, sizeof path, "$.d[%d].c2", source_index);
+    char *c2 = mg_json_get_str(json, path);
+    parse_css_color(c1, meta.c1, 0, 180, 210);
+    parse_css_color(c2, meta.c2, 120, 225, 255);
+    if (c1) mg_free(c1);
+    if (c2) mg_free(c2);
+
+    ntl_tag_atlas_entry atlas_entry;
+    memset(&atlas_entry, 0, sizeof atlas_entry);
+    atlas_entry.id = id;
+    blit_tag_to_atlas(pixels, rgba, image_w, image_h,
+                      meta.width, meta.height, parsed_count, &atlas_entry);
+    free_texture_rgba(rgba);
+    parsed_meta[parsed_count] = meta;
+    parsed_atlas[parsed_count] = atlas_entry;
+    ++parsed_count;
+  }
+
+  if (parsed_count == 0) {
+    free(pixels);
+    return false;
+  }
+  texture *new_tex = create_mipmap_texture_from_rgba(
+      S.env->ctx, pixels, NTL_DYNAMIC_ATLAS_SIZE, NTL_DYNAMIC_ATLAS_SIZE);
+  free(pixels);
+  if (!new_tex) return false;
+  VkDescriptorSet new_ds = igImplVulkan_AddTexture(
+      S.env->usr->r->linear_sampler, new_tex->view,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  if (!new_ds) {
+    destroy_texture(S.env->ctx, new_tex);
+    return false;
+  }
+
+  if (S.dynamic_atlas_ds) igImplVulkan_RemoveTexture(S.dynamic_atlas_ds);
+  if (S.dynamic_atlas_tex) destroy_texture(S.env->ctx, S.dynamic_atlas_tex);
+  memcpy(S.dynamic_meta, parsed_meta,
+         sizeof parsed_meta[0] * (size_t)parsed_count);
+  memcpy(S.dynamic_atlas, parsed_atlas,
+         sizeof parsed_atlas[0] * (size_t)parsed_count);
+  S.dynamic_tag_count = parsed_count;
+  S.private_tag_min = GLM_MAX(304, 581 - source_count);
+  S.dynamic_atlas_tex = new_tex;
+  S.dynamic_atlas_ds = new_ds;
+  return true;
+}
+
+static bool install_fixed_catalog(struct mg_str json) {
+  if (!S.env || !S.env->ctx || !S.env->usr || !S.env->usr->r ||
+      json.len == 0 || json.len > NTL_TAG_CATALOG_MAX_BYTES)
+    return false;
+
+  size_t atlas_bytes = (size_t)NTL_DYNAMIC_ATLAS_SIZE *
+                       NTL_DYNAMIC_ATLAS_SIZE * 4u;
+  unsigned char *pixels = (unsigned char *)calloc(1, atlas_bytes);
+  if (!pixels) return false;
+  ntl_tag_meta parsed_meta[NTL_FIXED_TAG_MAX];
+  ntl_tag_atlas_entry parsed_atlas[NTL_FIXED_TAG_MAX];
+  int parsed_count = 0;
+  int source_count = 0;
+
+  for (int source_index = 0; source_index < NTL_FIXED_TAG_MAX;
+       ++source_index) {
+    char path[96];
+    snprintf(path, sizeof path, "$.d[%d].fst_src", source_index);
+    char *src = mg_json_get_str(json, path);
+    if (!src) break;
+    ++source_count;
+
+    int image_w = 0, image_h = 0;
+    unsigned char *rgba = decode_data_uri_rgba(src, &image_w, &image_h);
+    mg_free(src);
+    if (!rgba || image_w <= 0 || image_h <= 0) {
+      free_texture_rgba(rgba);
+      continue;
+    }
+
+    ntl_tag_meta meta;
+    memset(&meta, 0, sizeof meta);
+    meta.id = 304 + source_index;
+    snprintf(path, sizeof path, "$.d[%d].fst_blbw", source_index);
+    long display_w = json_long_flexible(json, path, image_w);
+    snprintf(path, sizeof path, "$.d[%d].fst_blbh", source_index);
+    long display_h = json_long_flexible(json, path, image_h);
+    snprintf(path, sizeof path, "$.d[%d].fst_blbx", source_index);
+    long bx = json_long_flexible(json, path, -32);
+    snprintf(path, sizeof path, "$.d[%d].fst_blby", source_index);
+    long by = json_long_flexible(json, path, -70);
+    meta.width = (int16_t)GLM_MAX(1, GLM_MIN(32767, display_w));
+    meta.height = (int16_t)GLM_MAX(1, GLM_MIN(32767, display_h));
+    meta.offset_x = (float)bx;
+    meta.offset_y = (float)by;
+    snprintf(path, sizeof path, "$.d[%d].fst_atc1", source_index);
+    char *c1 = mg_json_get_str(json, path);
+    snprintf(path, sizeof path, "$.d[%d].fst_atc2", source_index);
+    char *c2 = mg_json_get_str(json, path);
+    parse_css_color(c1, meta.c1, 0, 180, 210);
+    parse_css_color(c2, meta.c2, 120, 225, 255);
+    if (c1) mg_free(c1);
+    if (c2) mg_free(c2);
+
+    ntl_tag_atlas_entry atlas_entry;
+    memset(&atlas_entry, 0, sizeof atlas_entry);
+    atlas_entry.id = meta.id;
+    blit_tag_to_atlas(pixels, rgba, image_w, image_h,
+                      meta.width, meta.height, parsed_count, &atlas_entry);
+    free_texture_rgba(rgba);
+    parsed_meta[parsed_count] = meta;
+    parsed_atlas[parsed_count] = atlas_entry;
+    ++parsed_count;
+  }
+
+  if (parsed_count == 0) {
+    free(pixels);
+    return false;
+  }
+  texture *new_tex = create_mipmap_texture_from_rgba(
+      S.env->ctx, pixels, NTL_DYNAMIC_ATLAS_SIZE, NTL_DYNAMIC_ATLAS_SIZE);
+  free(pixels);
+  if (!new_tex) return false;
+  VkDescriptorSet new_ds = igImplVulkan_AddTexture(
+      S.env->usr->r->linear_sampler, new_tex->view,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  if (!new_ds) {
+    destroy_texture(S.env->ctx, new_tex);
+    return false;
+  }
+
+  if (S.fixed_atlas_ds) igImplVulkan_RemoveTexture(S.fixed_atlas_ds);
+  if (S.fixed_atlas_tex) destroy_texture(S.env->ctx, S.fixed_atlas_tex);
+  memcpy(S.fixed_meta, parsed_meta,
+         sizeof parsed_meta[0] * (size_t)parsed_count);
+  memcpy(S.fixed_atlas, parsed_atlas,
+         sizeof parsed_atlas[0] * (size_t)parsed_count);
+  S.fixed_tag_count = parsed_count;
+  S.public_tag_max = 303 + source_count;
+  S.fixed_atlas_tex = new_tex;
+  S.fixed_atlas_ds = new_ds;
+  return true;
 }
 
 static void set_local_visual_tag(int id) {
@@ -181,48 +574,35 @@ static void trim_copy(char *dst, size_t dst_size, const char *src, size_t len) {
 static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
   if (c != S.auth) return;
   if (ev == MG_EV_CONNECT) {
-    struct mg_tls_opts tls = {.skip_verification = 1};
+    struct mg_tls_opts tls = {
+        .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
     mg_tls_init(c, &tls);
 
-    /* NTL itself uses this JSON batch endpoint to validate saved private
-       tags. It avoids the single-tag endpoint's 403/WAF behavior on native
-       Android clients while preserving NTL's server-side password check. */
-    char payload[96];
-    int payload_len = snprintf(payload, sizeof payload, "[[%d,\"%s\"]]",
-                               S.pending_tag_id, S.pending_hash);
-    if (payload_len <= 0 || payload_len >= (int)sizeof payload) {
-      c->is_closing = 1;
-      return;
-    }
+    /* Match NTL's interactive `!tag id pass` command exactly. The batch
+       endpoint is only used by NTL to re-check its saved tag list. */
     mg_printf(c,
-              "POST " NTL_TAG_AUTH_PATH " HTTP/1.1\r\n"
+              "GET " NTL_TAG_AUTH_PATH "?id=%d&pass=%s HTTP/1.1\r\n"
               "Host: " NTL_TAG_HOST "\r\n"
               "User-Agent: Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 "
               "Chrome/131.0 Mobile Safari/537.36\r\n"
               "Origin: https://slither.io\r\n"
               "Referer: https://slither.io/\r\n"
               "Accept: */*\r\n"
-              "Content-Type: application/json\r\n"
-              "Content-Length: %d\r\n"
-              "Connection: close\r\n\r\n%s",
-              payload_len, payload);
+              "Connection: close\r\n\r\n",
+              S.pending_tag_id, S.pending_hash);
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     char body[128];
     trim_copy(body, sizeof body, hm->body.buf, hm->body.len);
     int status = mg_http_status(hm);
-    bool ok = status >= 200 && status < 300 &&
-              (!strcmp(body, "[1]") || !strcmp(body, "[true]") ||
-               !strcmp(body, "1") || !strcmp(body, "true"));
-    bool rejected = status >= 200 && status < 300 &&
-                    (!strcmp(body, "[0]") || !strcmp(body, "[false]") ||
-                     !strcmp(body, "0") || !strcmp(body, "false"));
+    bool ok = status >= 200 && status < 300 && !strcmp(body, "ok");
+    bool rejected = status >= 200 && status < 300 && !ok;
     if (ok) {
       int id = S.pending_tag_id;
       commit_tag(id, S.pending_hash);
       char msg[176];
       snprintf(msg, sizeof msg,
-               "Private NTL tag %d authorized. Respawn if other NTL players do not see it yet.",
+               "Private NTL tag %d authorized and published.",
                id);
       set_status(msg);
       ntl_team_system_message(msg);
@@ -254,6 +634,148 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
       set_status("NTL private-tag server connection failed.");
       ntl_team_system_message(S.status);
     }
+  }
+}
+
+static void catalog_cb(struct mg_connection *c, int ev, void *ev_data) {
+  if (c != S.catalog) return;
+  if (ev == MG_EV_CONNECT) {
+    struct mg_tls_opts tls = {
+        .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
+    mg_tls_init(c, &tls);
+    mg_printf(c,
+              "GET " NTL_TAG_CATALOG_PATH "?v=1 HTTP/1.1\r\n"
+              "Host: " NTL_TAG_HOST "\r\n"
+              "User-Agent: Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 "
+              "Chrome/131.0 Mobile Safari/537.36\r\n"
+              "Origin: https://slither.io\r\n"
+              "Referer: https://slither.io/\r\n"
+              "Accept: application/json,*/*\r\n"
+              "Connection: close\r\n\r\n");
+  } else if (ev == MG_EV_HTTP_MSG) {
+    struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+    int status = mg_http_status(hm);
+    double now = mg_millis() / 1000.0;
+    if (status >= 200 && status < 300 && hm->body.len == 0) {
+      S.next_catalog_sync = now + NTL_TAG_CATALOG_REFRESH_SECONDS;
+    } else if (status >= 200 && status < 300 &&
+               hm->body.len <= NTL_TAG_CATALOG_MAX_BYTES &&
+               install_dynamic_catalog(hm->body)) {
+      long version = mg_json_get_long(hm->body, "$.v", S.catalog_version);
+      if (version > 0) S.catalog_version = version;
+      S.next_catalog_sync = now + NTL_TAG_CATALOG_REFRESH_SECONDS;
+      char msg[192];
+      snprintf(msg, sizeof msg,
+               "Latest NTL private tags synced: %d tags (version %ld).",
+               S.dynamic_tag_count, S.catalog_version);
+      set_status(msg);
+      ntl_team_system_message(msg);
+    } else {
+      S.next_catalog_sync = now + NTL_TAG_CATALOG_RETRY_SECONDS;
+      char msg[176];
+      snprintf(msg, sizeof msg,
+               "NTL private-tag catalog sync failed (HTTP %d). Retrying.",
+               status);
+      set_status(msg);
+    }
+    S.catalog = NULL;
+    S.catalog_started = 0.0;
+    c->is_draining = 1;
+  } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+    if (S.catalog == c) {
+      S.catalog = NULL;
+      S.catalog_started = 0.0;
+      S.next_catalog_sync = mg_millis() / 1000.0 +
+                            NTL_TAG_CATALOG_RETRY_SECONDS;
+      if (S.dynamic_tag_count == 0)
+        set_status("NTL private-tag catalog connection failed. Retrying.");
+    }
+  }
+}
+
+static void fixed_catalog_cb(struct mg_connection *c, int ev,
+                             void *ev_data) {
+  if (c != S.fixed_catalog) return;
+  if (ev == MG_EV_CONNECT) {
+    struct mg_tls_opts tls = {
+        .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
+    mg_tls_init(c, &tls);
+    /* Vlither does not persist downloaded image bytes, so request the complete
+       update set on every refresh instead of an incremental delta. */
+    mg_printf(c,
+              "GET " NTL_TAG_FIXED_CATALOG_PATH "?v=1 HTTP/1.1\r\n"
+              "Host: " NTL_TAG_HOST "\r\n"
+              "User-Agent: Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 "
+              "Chrome/131.0 Mobile Safari/537.36\r\n"
+              "Origin: https://slither.io\r\n"
+              "Referer: https://slither.io/\r\n"
+              "Accept: application/json,*/*\r\n"
+              "Connection: close\r\n\r\n");
+  } else if (ev == MG_EV_HTTP_MSG) {
+    struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+    int status = mg_http_status(hm);
+    double now = mg_millis() / 1000.0;
+    if (status >= 200 && status < 300 && hm->body.len == 0) {
+      S.next_fixed_catalog_sync = now + NTL_TAG_CATALOG_REFRESH_SECONDS;
+    } else if (status >= 200 && status < 300 &&
+               hm->body.len <= NTL_TAG_CATALOG_MAX_BYTES &&
+               install_fixed_catalog(hm->body)) {
+      long version = mg_json_get_long(
+          hm->body, "$.v", S.fixed_catalog_version);
+      if (version > 0) S.fixed_catalog_version = version;
+      S.next_fixed_catalog_sync = now + NTL_TAG_CATALOG_REFRESH_SECONDS;
+      char msg[192];
+      snprintf(msg, sizeof msg,
+               "Latest NTL public tags synced: %d tags (version %ld).",
+               S.fixed_tag_count, S.fixed_catalog_version);
+      set_status(msg);
+    } else {
+      S.next_fixed_catalog_sync = now + NTL_TAG_CATALOG_RETRY_SECONDS;
+      char msg[176];
+      snprintf(msg, sizeof msg,
+               "NTL public-tag catalogue sync failed (HTTP %d). Retrying.",
+               status);
+      set_status(msg);
+    }
+    S.fixed_catalog = NULL;
+    S.fixed_catalog_started = 0.0;
+    c->is_draining = 1;
+  } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+    if (S.fixed_catalog == c) {
+      S.fixed_catalog = NULL;
+      S.fixed_catalog_started = 0.0;
+      S.next_fixed_catalog_sync = mg_millis() / 1000.0 +
+                                  NTL_TAG_CATALOG_RETRY_SECONDS;
+      if (S.fixed_tag_count == 0)
+        set_status("NTL public-tag catalogue connection failed. Retrying.");
+    }
+  }
+}
+
+static void begin_catalog_sync(void) {
+  if (S.catalog || !S.env || !S.env->ctx || !S.env->usr || !S.env->usr->r)
+    return;
+  S.catalog = mg_http_connect(&S.mgr, "https://ntl-slither.com",
+                              catalog_cb, NULL);
+  S.catalog_started = mg_millis() / 1000.0;
+  if (!S.catalog) {
+    S.catalog_started = 0.0;
+    S.next_catalog_sync = mg_millis() / 1000.0 +
+                          NTL_TAG_CATALOG_RETRY_SECONDS;
+  }
+}
+
+static void begin_fixed_catalog_sync(void) {
+  if (S.fixed_catalog || !S.env || !S.env->ctx || !S.env->usr ||
+      !S.env->usr->r)
+    return;
+  S.fixed_catalog = mg_http_connect(&S.mgr, "https://ntl-slither.com",
+                                    fixed_catalog_cb, NULL);
+  S.fixed_catalog_started = mg_millis() / 1000.0;
+  if (!S.fixed_catalog) {
+    S.fixed_catalog_started = 0.0;
+    S.next_fixed_catalog_sync = mg_millis() / 1000.0 +
+                                NTL_TAG_CATALOG_RETRY_SECONDS;
   }
 }
 
@@ -338,9 +860,9 @@ static void send_tag_handshake(snake *me) {
   snprintf(raw_nick, sizeof raw_nick, "%s%s", us->ntl_client_id,
            us->nickname[0] ? us->nickname : "Vlither");
   char nick[sizeof raw_nick * 2];
-  char server[(MAX_IPV4_LEN + 1) * 2];
+  char server[(MAX_SERVER_IP_LEN + 1) * 2];
   json_escape(nick, sizeof nick, raw_nick);
-  json_escape(server, sizeof server, us->ipv4);
+  json_escape(server, sizeof server, us->server_address);
 
   int custom_id = -1;
   const char *hash = "";
@@ -379,7 +901,13 @@ void ntl_tags_init(tenv *env) {
   S.env = env;
   S.pending_tag_id = -1;
   S.preview_tag_id = (env && env->usr) ? env->usr->usrs.ntl_tag_id : -1;
-  set_status("Choose a public tag or authorize a private tag.");
+  S.catalog_version = 1;
+  S.fixed_catalog_version = 1;
+  S.public_tag_max = 367;
+  S.private_tag_min = 374;
+  S.next_catalog_sync = 0.0;
+  S.next_fixed_catalog_sync = 0.0;
+  set_status("Syncing the latest NTL public and private tags...");
   mg_mgr_init(&S.mgr);
   S.ready = true;
 }
@@ -397,6 +925,27 @@ void ntl_tags_update(tenv *env) {
     set_status("NTL private-tag authorization timed out.");
     ntl_team_system_message(S.status);
   }
+  if (S.catalog && S.catalog_started > 0.0 &&
+      now - S.catalog_started > NTL_TAG_CATALOG_TIMEOUT_SECONDS) {
+    S.catalog->is_closing = 1;
+    S.catalog = NULL;
+    S.catalog_started = 0.0;
+    S.next_catalog_sync = now + NTL_TAG_CATALOG_RETRY_SECONDS;
+    if (S.dynamic_tag_count == 0)
+      set_status("NTL private-tag catalog timed out. Retrying.");
+  }
+  if (!S.catalog && now >= S.next_catalog_sync) begin_catalog_sync();
+  if (S.fixed_catalog && S.fixed_catalog_started > 0.0 &&
+      now - S.fixed_catalog_started > NTL_TAG_CATALOG_TIMEOUT_SECONDS) {
+    S.fixed_catalog->is_closing = 1;
+    S.fixed_catalog = NULL;
+    S.fixed_catalog_started = 0.0;
+    S.next_fixed_catalog_sync = now + NTL_TAG_CATALOG_RETRY_SECONDS;
+    if (S.fixed_tag_count == 0)
+      set_status("NTL public-tag catalogue timed out. Retrying.");
+  }
+  if (!S.fixed_catalog && now >= S.next_fixed_catalog_sync)
+    begin_fixed_catalog_sync();
 
   if (!S.env || !S.env->usr) return;
   game_data *g = &S.env->usr->gdata;
@@ -413,7 +962,7 @@ void ntl_tags_update(tenv *env) {
     int snake_count = tdarray_length(g->data.snakes);
     for (int i = 0; i < snake_count; ++i) {
       snake *o = &g->data.snakes[i];
-      int team_tag = ntl_team_tag_for_snake(o->ntl_id, us->ipv4);
+      int team_tag = ntl_team_tag_for_snake(o->ntl_id, us->server_address);
       if (team_tag >= 0 && ntl_tags_exists(team_tag))
         o->ntl_tag_id = team_tag;
     }
@@ -426,9 +975,9 @@ void ntl_tags_update(tenv *env) {
     return;
   }
 
-  if (strcmp(S.active_server, us->ipv4) != 0 ||
+  if (strcmp(S.active_server, us->server_address) != 0 ||
       S.active_ntl_id != me->ntl_id) {
-    strncpy(S.active_server, us->ipv4, sizeof S.active_server - 1);
+    strncpy(S.active_server, us->server_address, sizeof S.active_server - 1);
     S.active_server[sizeof S.active_server - 1] = 0;
     S.active_ntl_id = me->ntl_id;
     if (S.ws) S.ws->is_closing = 1;
@@ -460,7 +1009,11 @@ void ntl_tags_destroy(tenv *env) {
   if (!S.ready) return;
   tcontext *ctx = env ? env->ctx : (S.env ? S.env->ctx : NULL);
   if (S.atlas_ds) igImplVulkan_RemoveTexture(S.atlas_ds);
+  if (S.dynamic_atlas_ds) igImplVulkan_RemoveTexture(S.dynamic_atlas_ds);
+  if (S.fixed_atlas_ds) igImplVulkan_RemoveTexture(S.fixed_atlas_ds);
   if (S.atlas_tex && ctx) destroy_texture(ctx, S.atlas_tex);
+  if (S.dynamic_atlas_tex && ctx) destroy_texture(ctx, S.dynamic_atlas_tex);
+  if (S.fixed_atlas_tex && ctx) destroy_texture(ctx, S.fixed_atlas_tex);
   mg_mgr_free(&S.mgr);
   memset(&S, 0, sizeof S);
 }
@@ -627,7 +1180,13 @@ void ntl_tags_skin_panel(tenv *env) {
   igSpacing();
   igSeparatorText("Private tag");
   igTextWrapped(
-      "NTL private tags only visible to NTL and Vlither android players");
+      "Enter the same tag ID and password used by NTL. Latest private-tag "
+      "images sync automatically from NTL.");
+  if (S.dynamic_tag_count > 0 || S.fixed_tag_count > 0)
+    igTextDisabled("Live catalogues: %d public + %d private tags",
+                   S.fixed_tag_count, S.dynamic_tag_count);
+  else
+    igTextDisabled("Live tag catalogues: syncing...");
   igSetNextItemWidth(150.0f);
   if (igInputInt("Tag ID", &private_id, 1, 10,
                  ImGuiInputTextFlags_None)) {
@@ -666,17 +1225,28 @@ void ntl_tags_skin_panel(tenv *env) {
     int columns = (int)((avail.x + style->ItemSpacing.x) /
                         (cell_w + style->ItemSpacing.x));
     if (columns < 3) columns = 3;
-    ImTextureRef tex = {NULL, (ImTextureID)S.atlas_ds};
-
     /* A table gives every lower-row image its own clipped hit rectangle. This
        avoids the long SameLine layout losing taps after a large mobile scroll. */
     if (igBeginTable("##ntl_tag_image_grid", columns,
                      ImGuiTableFlags_SizingFixedFit, (ImVec2){0, 0}, 0)) {
-      for (int i = 0; i < NTL_TAG_ATLAS_ENTRY_COUNT; ++i) {
-        const ntl_tag_atlas_entry *a = &NTL_TAG_ATLAS_ENTRIES[i];
+      int gallery_count = NTL_TAG_ATLAS_ENTRY_COUNT + S.fixed_tag_count +
+                          S.dynamic_tag_count;
+      for (int i = 0; i < gallery_count; ++i) {
+        const ntl_tag_atlas_entry *a;
+        if (i < NTL_TAG_ATLAS_ENTRY_COUNT) {
+          a = &NTL_TAG_ATLAS_ENTRIES[i];
+        } else if (i < NTL_TAG_ATLAS_ENTRY_COUNT + S.fixed_tag_count) {
+          a = &S.fixed_atlas[i - NTL_TAG_ATLAS_ENTRY_COUNT];
+        } else {
+          a = &S.dynamic_atlas[
+              i - NTL_TAG_ATLAS_ENTRY_COUNT - S.fixed_tag_count];
+        }
         bool is_public = ntl_tags_is_packet_tag(a->id);
         bool is_private = ntl_tags_is_protected_tag(a->id);
         if (!is_public && !is_private) continue;
+        VkDescriptorSet entry_ds = atlas_descriptor(env, a);
+        if (!entry_ds) continue;
+        ImTextureRef tex = {NULL, (ImTextureID)entry_ds};
 
         igTableNextColumn();
         bool selected = S.preview_tag_id == a->id;
@@ -747,9 +1317,11 @@ static void tag_image_dimensions(const ntl_tag_meta *meta,
 
 void ntl_tags_draw_preview(tenv *env, int id, float head_x, float head_y,
                            float angle, float preview_snake_scale) {
-  if (!env || !env->usr || id < 0 || !ensure_atlas_loaded(env)) return;
+  if (!env || !env->usr || id < 0) return;
   const ntl_tag_atlas_entry *atlas = find_atlas_entry(id);
   if (!atlas) return;
+  VkDescriptorSet atlas_ds = atlas_descriptor(env, atlas);
+  if (!atlas_ds) return;
   const ntl_tag_meta *meta = find_meta(id);
   float custom = env->usr->usrs.tag_size_scale;
   if (!isfinite(custom) || custom < 0.50f || custom > 2.00f) custom = 1.0f;
@@ -800,7 +1372,7 @@ void ntl_tags_draw_preview(tenv *env, int id, float head_x, float head_y,
                center.y + uy * hw + vy * hh};
   ImVec2 q4 = {center.x - ux * hw + vx * hh,
                center.y - uy * hw + vy * hh};
-  ImTextureRef tex = {NULL, (ImTextureID)S.atlas_ds};
+  ImTextureRef tex = {NULL, (ImTextureID)atlas_ds};
   ImDrawList_AddImageQuad(dl, tex, q1, q2, q3, q4,
                           (ImVec2){atlas->u0, atlas->v0},
                           (ImVec2){atlas->u1, atlas->v0},
@@ -891,7 +1463,8 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
                             2.5f * body_scale, 14);
 
   const ntl_tag_atlas_entry *atlas = find_atlas_entry(o->ntl_tag_id);
-  if (!atlas || !ensure_atlas_loaded(env)) {
+  VkDescriptorSet atlas_ds = atlas_descriptor(env, atlas);
+  if (!atlas || !atlas_ds) {
     draw_fallback(dl, center, o->ntl_tag_id, alpha, body_scale);
     return;
   }
@@ -910,7 +1483,7 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
                center.y + uy * hw + vy * hh};
   ImVec2 q4 = {center.x - ux * hw + vx * hh,
                center.y - uy * hw + vy * hh};
-  ImTextureRef tex = {NULL, (ImTextureID)S.atlas_ds};
+  ImTextureRef tex = {NULL, (ImTextureID)atlas_ds};
   ImDrawList_AddImageQuad(dl, tex, q1, q2, q3, q4,
                           (ImVec2){atlas->u0, atlas->v0},
                           (ImVec2){atlas->u1, atlas->v0},

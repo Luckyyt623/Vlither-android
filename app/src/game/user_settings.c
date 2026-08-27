@@ -224,6 +224,70 @@ void user_settings_default(user_settings* usr_settings) {
   /* Normal Vlither is 0; Galaxy is the requested first-run default. */
   usr_settings->homepage_background = 5;
   usr_settings->homepage_blur = 0.0f;
+  memset(usr_settings->vlither_feature_settings_reserved, 0,
+         sizeof usr_settings->vlither_feature_settings_reserved);
+  strcpy(usr_settings->leaderboard_title, "Vlither Leaderboard");
+  usr_settings->food_glow[0] = false;
+  usr_settings->food_glow[1] = false;
+  usr_settings->center_line_others[0] = false;
+  usr_settings->center_line_others[1] = false;
+  usr_settings->snake_shadow_strength[0] = 1.0f;
+  usr_settings->snake_shadow_strength[1] = 1.0f;
+  usr_settings->minimap_display_name[0] = '\0';
+  usr_settings->minimap_show_own_name = false;
+  usr_settings->vlither_chat_joined = true;
+  usr_settings->shader_cycle_key = GLFW_KEY_G;
+  usr_settings->invisible_skin_key = GLFW_KEY_I;
+  usr_settings->shader_cycle_index = -1;
+  usr_settings->own_skin_invisible = false;
+  usr_settings->zslider_thickness = 1.0f;
+  usr_settings->zslider_thumb_scale = 1.0f;
+  usr_settings->custom_arrow_enabled = false;
+  usr_settings->server_address_filter = 0;
+  strcpy(usr_settings->server_address, "148.113.20.151:444");
+  memset(usr_settings->clock_map_settings_reserved, 0,
+         sizeof usr_settings->clock_map_settings_reserved);
+  usr_settings->minimap_clock = false;
+  memset(usr_settings->ntl_competitive_settings_reserved, 0,
+         sizeof usr_settings->ntl_competitive_settings_reserved);
+  usr_settings->ntl_hide_enemy_tags = false;
+  usr_settings->ntl_hide_enemy_cosmetics = false;
+  usr_settings->ntl_high_visibility_skins = false;
+  usr_settings->ntl_nicks_plus = true;
+  usr_settings->ntl_names_on_top = true;
+  usr_settings->ntl_alert_sos = true;
+  usr_settings->ntl_alert_new_player = true;
+  usr_settings->ntl_alert_chat = true;
+  usr_settings->ntl_chat_timestamps = true;
+  usr_settings->ntl_dynamic_minimap = true;
+  usr_settings->ntl_border_indicator = true;
+  usr_settings->ntl_skinless_peek = false;
+  usr_settings->ntl_own_true_skin = true;
+  usr_settings->ntl_team_true_skin = true;
+  usr_settings->ntl_graphics_preset = 3;
+  usr_settings->ntl_leaderboard_style = 1;
+  usr_settings->ntl_leaderboard_color[0] = 1.0f;
+  usr_settings->ntl_leaderboard_color[1] = 0.82f;
+  usr_settings->ntl_leaderboard_color[2] = 0.22f;
+  usr_settings->ntl_leaderboard_color[3] = 1.0f;
+  usr_settings->ntl_stealth_mode = false;
+  memset(usr_settings->integrated_mode_settings_reserved, 0,
+         sizeof usr_settings->integrated_mode_settings_reserved);
+  for (int i = 0; i < 2; ++i) {
+    usr_settings->mode_hide_enemy_tags[i] = false;
+    usr_settings->mode_hide_enemy_cosmetics[i] = false;
+    usr_settings->mode_high_visibility_skins[i] = false;
+    usr_settings->mode_nicks_plus[i] = true;
+    usr_settings->mode_names_on_top[i] = true;
+    usr_settings->mode_skinless_peek[i] = false;
+    usr_settings->mode_own_true_skin[i] = true;
+    usr_settings->mode_team_true_skin[i] = true;
+    usr_settings->mode_graphics_preset[i] = 3;
+  }
+  memset(usr_settings->capture_settings_reserved, 0,
+         sizeof usr_settings->capture_settings_reserved);
+  usr_settings->record_gameplay = false;
+  usr_settings->screenshot_on_kill = false;
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -295,9 +359,44 @@ void read_user_settings(user_settings* usr_settings) {
   size_t v31_prefix = offsetof(user_settings, arrow_head_settings_reserved);
   size_t v32_prefix = offsetof(user_settings, arrow_style_settings_reserved);
   size_t v33_prefix = offsetof(user_settings, homepage_settings_reserved);
+  size_t v34_prefix = offsetof(user_settings, vlither_feature_settings_reserved);
+  size_t v35_prefix = offsetof(user_settings, clock_map_settings_reserved);
+  size_t v36_prefix = offsetof(user_settings, ntl_competitive_settings_reserved);
+  size_t v37_prefix = offsetof(user_settings, integrated_mode_settings_reserved);
+  size_t v38_prefix = offsetof(user_settings, capture_settings_reserved);
+  bool migrate_single_mode_features =
+      (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v38_prefix)
+    /* Preserve every independent Normal/Assist preference from v3.8 while
+       initializing local capture controls to disabled. */
+    bytes_to_read = v38_prefix;
+  else if ((size_t)file_size >= v37_prefix)
+    /* Preserve the complete first feature-pack build while initializing the
+       new independent Normal/Assist values from safe defaults. */
+    bytes_to_read = v37_prefix;
+  else if ((size_t)file_size >= v36_prefix)
+    /* Preserve the full clock-map build while keeping all NTL competitive
+       controls on their deterministic defaults. */
+    bytes_to_read = v36_prefix;
+  else if ((size_t)file_size >= v35_prefix)
+    /* Preserve the complete crash-fixed v4.7.1 settings while leaving the
+       new clock-map option disabled by default. */
+    bytes_to_read = v35_prefix;
+  else if ((size_t)file_size > v34_prefix) {
+    /* The first v4.7 preview enlarged MAX_IPV4_LEN inside the persisted
+       prefix. Loading that shifted layout corrupts later settings and can
+       crash while opening the game, so replace it with safe defaults. */
+    fclose(f);
+    write_default_settings(usr_settings);
+    return;
+  }
+  else if ((size_t)file_size >= v34_prefix)
+    /* v3.3 contains the complete homepage selection. Ignore its compiler tail
+       padding so every new v3.4 option receives a deterministic default. */
+    bytes_to_read = v34_prefix;
   else if ((size_t)file_size >= v33_prefix)
     /* Preserve the selected v3.2 arrow while keeping Galaxy and zero blur as
        the new homepage defaults. */
@@ -495,12 +594,104 @@ void read_user_settings(user_settings* usr_settings) {
   if (!isfinite(loaded.homepage_blur) || loaded.homepage_blur < 0.0f ||
       loaded.homepage_blur > 100.0f)
     loaded.homepage_blur = 0.0f;
+  loaded.leaderboard_title[sizeof loaded.leaderboard_title - 1] = 0;
+  if (!loaded.leaderboard_title[0])
+    strcpy(loaded.leaderboard_title, "Vlither Leaderboard");
+  loaded.minimap_display_name[sizeof loaded.minimap_display_name - 1] = 0;
+  loaded.minimap_show_own_name = !!loaded.minimap_show_own_name;
+  loaded.vlither_chat_joined = !!loaded.vlither_chat_joined;
+  loaded.own_skin_invisible = !!loaded.own_skin_invisible;
+  loaded.custom_arrow_enabled = !!loaded.custom_arrow_enabled;
+  for (int i = 0; i < 2; ++i) {
+    loaded.food_glow[i] = !!loaded.food_glow[i];
+    loaded.center_line_others[i] = !!loaded.center_line_others[i];
+    if (!isfinite(loaded.snake_shadow_strength[i]) ||
+        loaded.snake_shadow_strength[i] < 0.0f ||
+        loaded.snake_shadow_strength[i] > 3.0f)
+      loaded.snake_shadow_strength[i] = 1.0f;
+  }
+  if (loaded.shader_cycle_key < GLFW_KEY_0 ||
+      loaded.shader_cycle_key > GLFW_KEY_Z)
+    loaded.shader_cycle_key = GLFW_KEY_G;
+  if (loaded.invisible_skin_key < GLFW_KEY_0 ||
+      loaded.invisible_skin_key > GLFW_KEY_Z)
+    loaded.invisible_skin_key = GLFW_KEY_I;
+  if (loaded.shader_cycle_index < -1 || loaded.shader_cycle_index > 2)
+    loaded.shader_cycle_index = -1;
+  if (!isfinite(loaded.zslider_thickness) ||
+      loaded.zslider_thickness < 0.35f || loaded.zslider_thickness > 3.0f)
+    loaded.zslider_thickness = 1.0f;
+  if (!isfinite(loaded.zslider_thumb_scale) ||
+      loaded.zslider_thumb_scale < 0.50f || loaded.zslider_thumb_scale > 3.0f)
+    loaded.zslider_thumb_scale = 1.0f;
+  if (loaded.server_address_filter < 0 || loaded.server_address_filter > 2)
+    loaded.server_address_filter = 0;
+  loaded.server_address[sizeof loaded.server_address - 1] = 0;
+  if (!loaded.server_address[0])
+    snprintf(loaded.server_address, sizeof loaded.server_address, "%s",
+             loaded.ipv4[0] ? loaded.ipv4 : "148.113.20.151:444");
+  loaded.minimap_clock = !!loaded.minimap_clock;
+  loaded.ntl_hide_enemy_tags = !!loaded.ntl_hide_enemy_tags;
+  loaded.ntl_hide_enemy_cosmetics = !!loaded.ntl_hide_enemy_cosmetics;
+  loaded.ntl_high_visibility_skins = !!loaded.ntl_high_visibility_skins;
+  loaded.ntl_nicks_plus = !!loaded.ntl_nicks_plus;
+  loaded.ntl_names_on_top = !!loaded.ntl_names_on_top;
+  loaded.ntl_alert_sos = !!loaded.ntl_alert_sos;
+  loaded.ntl_alert_new_player = !!loaded.ntl_alert_new_player;
+  loaded.ntl_alert_chat = !!loaded.ntl_alert_chat;
+  loaded.ntl_chat_timestamps = !!loaded.ntl_chat_timestamps;
+  loaded.ntl_dynamic_minimap = !!loaded.ntl_dynamic_minimap;
+  loaded.ntl_border_indicator = !!loaded.ntl_border_indicator;
+  loaded.ntl_skinless_peek = !!loaded.ntl_skinless_peek;
+  loaded.ntl_own_true_skin = !!loaded.ntl_own_true_skin;
+  loaded.ntl_team_true_skin = !!loaded.ntl_team_true_skin;
+  loaded.ntl_stealth_mode = !!loaded.ntl_stealth_mode;
+  if (loaded.ntl_graphics_preset < 0 || loaded.ntl_graphics_preset > 4)
+    loaded.ntl_graphics_preset = 3;
+  if (loaded.ntl_leaderboard_style < 0 || loaded.ntl_leaderboard_style > 2)
+    loaded.ntl_leaderboard_style = 1;
+  for (int c = 0; c < 4; ++c) {
+    if (!isfinite(loaded.ntl_leaderboard_color[c]) ||
+        loaded.ntl_leaderboard_color[c] < 0.0f ||
+        loaded.ntl_leaderboard_color[c] > 1.0f)
+      loaded.ntl_leaderboard_color[c] =
+          (const float[]){1.0f, 0.82f, 0.22f, 1.0f}[c];
+  }
+  for (int i = 0; i < 2; ++i) {
+    if (migrate_single_mode_features) {
+      loaded.mode_hide_enemy_tags[i] = loaded.ntl_hide_enemy_tags;
+      loaded.mode_hide_enemy_cosmetics[i] = loaded.ntl_hide_enemy_cosmetics;
+      loaded.mode_high_visibility_skins[i] =
+          loaded.ntl_high_visibility_skins;
+      loaded.mode_nicks_plus[i] = loaded.ntl_nicks_plus;
+      loaded.mode_names_on_top[i] = loaded.ntl_names_on_top;
+      loaded.mode_skinless_peek[i] = loaded.ntl_skinless_peek;
+      loaded.mode_own_true_skin[i] = loaded.ntl_own_true_skin;
+      loaded.mode_team_true_skin[i] = loaded.ntl_team_true_skin;
+      loaded.mode_graphics_preset[i] = loaded.ntl_graphics_preset;
+    }
+    loaded.mode_hide_enemy_tags[i] = !!loaded.mode_hide_enemy_tags[i];
+    loaded.mode_hide_enemy_cosmetics[i] =
+        !!loaded.mode_hide_enemy_cosmetics[i];
+    loaded.mode_high_visibility_skins[i] =
+        !!loaded.mode_high_visibility_skins[i];
+    loaded.mode_nicks_plus[i] = !!loaded.mode_nicks_plus[i];
+    loaded.mode_names_on_top[i] = !!loaded.mode_names_on_top[i];
+    loaded.mode_skinless_peek[i] = !!loaded.mode_skinless_peek[i];
+    loaded.mode_own_true_skin[i] = !!loaded.mode_own_true_skin[i];
+    loaded.mode_team_true_skin[i] = !!loaded.mode_team_true_skin[i];
+    if (loaded.mode_graphics_preset[i] < 0 ||
+        loaded.mode_graphics_preset[i] > 4)
+      loaded.mode_graphics_preset[i] = 3;
+  }
   for (int c = 0; c < 3; ++c) {
     if (!isfinite(loaded.head_dot_color[c]) ||
         loaded.head_dot_color[c] < 0.0f ||
         loaded.head_dot_color[c] > 1.0f)
       loaded.head_dot_color[c] = 1.0f;
   }
+  loaded.record_gameplay = !!loaded.record_gameplay;
+  loaded.screenshot_on_kill = !!loaded.screenshot_on_kill;
 
   *usr_settings = loaded;
 }

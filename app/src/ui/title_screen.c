@@ -7,9 +7,11 @@
 #include "../network/server.h"
 #include "../user.h"
 #include "../game/vlither_tags.h"
+#include "../imgui_setup.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -108,6 +110,13 @@ static void apply_homepage_background(tenv* env) {
   r->global.bg_opacity = 1.0f;
 }
 
+static float homepage_px(float value) {
+  return value * imgui_get_ui_scale();
+}
+
+static float homepage_min(float a, float b) { return a < b ? a : b; }
+static float homepage_max(float a, float b) { return a > b ? a : b; }
+
 static void draw_homepage_background_picker(tenv* env, float frame_height) {
   tuser_data* usr = env->usr;
   user_settings* usrs = &usr->usrs;
@@ -115,17 +124,26 @@ static void draw_homepage_background_picker(tenv* env, float frame_height) {
   int selected = usrs->homepage_background;
   if (selected < 0 || selected > 6) selected = 5;
 
-  const float button_w = 210.0f;
   char button_label[80];
   snprintf(button_label, sizeof button_label,
            "Background: %s##homepage_background_button",
            HOMEPAGE_BACKGROUND_NAMES[selected]);
-  igSetCursorPos((ImVec2){env->ctx->size[0] - button_w - 16.0f,
-                          16.0f + frame_height + 8.0f});
+  ImVec2 label_size;
+  igCalcTextSize(&label_size, button_label,
+                 strstr(button_label, "##"), true, -1.0f);
+  float button_w = homepage_max(homepage_px(210.0f),
+                                label_size.x + style->FramePadding.x * 2.0f);
+  button_w = homepage_min(button_w,
+                          env->ctx->size[0] - homepage_px(32.0f));
+  const float edge = homepage_px(16.0f);
+  igSetCursorPos((ImVec2){env->ctx->size[0] - button_w - edge,
+                          edge + frame_height + homepage_px(8.0f)});
   if (igButton(button_label, (ImVec2){button_w, frame_height * 1.15f}))
     igOpenPopup_Str("Homepage Background", 0);
 
-  igSetNextWindowSize((ImVec2){350.0f, 0.0f}, ImGuiCond_Appearing);
+  float popup_w = homepage_min(homepage_px(350.0f),
+                               env->ctx->size[0] - homepage_px(24.0f));
+  igSetNextWindowSize((ImVec2){popup_w, 0.0f}, ImGuiCond_Appearing);
   if (!igBeginPopup("Homepage Background", ImGuiWindowFlags_NoSavedSettings))
     return;
 
@@ -200,8 +218,8 @@ static void join_event(tenv *env, int index) {
   const char *server_ip = vlither_event_server_at(index);
   if (!server_ip || !server_ip[0]) return;
   tuser_data *usr = env->usr;
-  strncpy(usr->usrs.ipv4, server_ip, MAX_IPV4_LEN);
-  usr->usrs.ipv4[MAX_IPV4_LEN] = 0;
+  strncpy(usr->usrs.server_address, server_ip, MAX_SERVER_IP_LEN);
+  usr->usrs.server_address[MAX_SERVER_IP_LEN] = 0;
   save_user_settings(&usr->usrs);
   usr->gdata.conn = CONNECTING;
   usr->gdata.curr_screen = PLAYING;
@@ -278,13 +296,13 @@ void ui_events_panel(tenv *env) {
       igPushStyleColor_Vec4(ImGuiCol_Button,
                             (ImVec4){0.12f, 0.58f, 0.38f, 0.95f});
     if (igButton(interested ? "Interested - ON" : "Interested",
-                 (ImVec2){180.0f, 0}))
+                 (ImVec2){homepage_px(180.0f), 0}))
       vlither_event_set_interested(i, !interested);
     if (interested) igPopStyleColor(1);
 
     if (interested) {
       igSameLine(0, -1);
-      if (igButton("Join Event", (ImVec2){180.0f, 0}))
+      if (igButton("Join Event", (ImVec2){homepage_px(180.0f), 0}))
         join_event(env, i);
     } else {
       igTextDisabled("Turn on Interested to unlock one-tap joining and reminders.");
@@ -304,10 +322,12 @@ static void draw_privacy_policy_popup(tenv *env) {
 
   float popup_w = vp->WorkSize.x * 0.82f;
   float popup_h = vp->WorkSize.y * 0.78f;
-  if (popup_w < 330.0f) popup_w = vp->WorkSize.x - 20.0f;
-  if (popup_w > 760.0f) popup_w = 760.0f;
-  if (popup_h < 360.0f) popup_h = vp->WorkSize.y - 20.0f;
-  if (popup_h > 680.0f) popup_h = 680.0f;
+  if (popup_w < homepage_px(330.0f))
+    popup_w = vp->WorkSize.x - homepage_px(20.0f);
+  if (popup_w > homepage_px(760.0f)) popup_w = homepage_px(760.0f);
+  if (popup_h < homepage_px(360.0f))
+    popup_h = vp->WorkSize.y - homepage_px(20.0f);
+  if (popup_h > homepage_px(680.0f)) popup_h = homepage_px(680.0f);
   igSetNextWindowSize((ImVec2){popup_w, popup_h}, ImGuiCond_Appearing);
 
   if (!igBeginPopupModal("Privacy & Policy", NULL,
@@ -343,7 +363,7 @@ static void draw_privacy_policy_popup(tenv *env) {
     igTextWrapped("Questions? Contact Lucky, a Staff member, or another authorized team member before submitting or purchasing a tag.");
 #ifdef ANDROID
     igSpacing();
-    if (igButton("Discord Support", (ImVec2){180, 0}))
+    if (igButton("Discord Support", (ImVec2){homepage_px(180.0f), 0}))
       android_jni_open_url("https://discord.gg/CJEeSScTJs");
 #endif
   } else {
@@ -382,10 +402,10 @@ void ui_title_screen(tenv* env) {
 
   char version_str[16] = {0};
   sprintf(version_str, "v%s", APP_VERSION);
-  ImVec2 vtxtsz; igCalcTextSize(&vtxtsz, version_str, NULL, false, -1);
-  igSetCursorPosX(ctx->size[0] - vtxtsz.x - style->WindowPadding.x);
   igPushFont(usr->imgui_data.regular_font[FONT_SIZE_SMALL],
              usr->imgui_data.regular_font[FONT_SIZE_SMALL]->LegacySize);
+  ImVec2 vtxtsz; igCalcTextSize(&vtxtsz, version_str, NULL, false, -1);
+  igSetCursorPosX(ctx->size[0] - vtxtsz.x - homepage_px(8.0f));
   igTextColored((ImVec4){0.168f, 0.668f, 0.375f, 1}, version_str);
   igPopFont();
 
@@ -399,15 +419,20 @@ void ui_title_screen(tenv* env) {
 #ifdef ANDROID
   /* Homepage policy entry point and the supplied Discord artwork. The image is
      intentionally used as the Discord link instead of a second text button. */
-  igSetCursorPos((ImVec2){16.0f, 16.0f});
-  if (igButton("Privacy & Policy", (ImVec2){170.0f, frame_height * 1.15f})) {
+  const float home_edge = homepage_px(16.0f);
+  const float home_gap = homepage_px(8.0f);
+  const float side_button_w = homepage_px(170.0f);
+  const float discord_size = homepage_px(82.0f);
+  igSetCursorPos((ImVec2){home_edge, home_edge});
+  if (igButton("Privacy & Policy",
+               (ImVec2){side_button_w, frame_height * 1.15f})) {
     g_privacy_section = 0;
     igOpenPopup_Str("Privacy & Policy", 0);
   }
 
   if (usr->r && usr->r->discord_ds) {
-    float discord_size = 82.0f;
-    igSetCursorPos((ImVec2){16.0f, 16.0f + frame_height * 1.15f + 8.0f});
+    igSetCursorPos((ImVec2){home_edge,
+                            home_edge + frame_height * 1.15f + home_gap});
     ImTextureRef discord_tex = {NULL, (ImTextureID)usr->r->discord_ds};
     if (igImageButton("##discord_home", discord_tex,
                       (ImVec2){discord_size, discord_size},
@@ -420,9 +445,9 @@ void ui_title_screen(tenv* env) {
   /* Event access stays directly below Discord as requested. The compact
      countdown is shown only for this player's interested event. */
   const float event_button_y =
-      16.0f + frame_height * 1.15f + 8.0f + 82.0f + 8.0f;
-  igSetCursorPos((ImVec2){16.0f, event_button_y});
-  if (igButton("Events", (ImVec2){170.0f, frame_height * 1.15f})) {
+      home_edge + frame_height * 1.15f + home_gap + discord_size + home_gap;
+  igSetCursorPos((ImVec2){home_edge, event_button_y});
+  if (igButton("Events", (ImVec2){side_button_w, frame_height * 1.15f})) {
     vlither_event_refresh();
     usr->gdata.curr_screen = EVENTS_PANEL;
   }
@@ -431,11 +456,11 @@ void ui_title_screen(tenv* env) {
     long long start_ms = vlither_event_start_at_ms(next_event);
     long long now_ms = event_now_ms();
     char countdown[64];
-    igSetCursorPos((ImVec2){16.0f,
-        event_button_y + frame_height * 1.15f + 5.0f});
+    igSetCursorPos((ImVec2){home_edge,
+        event_button_y + frame_height * 1.15f + homepage_px(5.0f)});
     igPushFont(usr->imgui_data.regular_font[FONT_SIZE_SMALL],
                usr->imgui_data.regular_font[FONT_SIZE_SMALL]->LegacySize);
-    igPushTextWrapPos(186.0f);
+    igPushTextWrapPos(home_edge + side_button_w);
     if (start_ms <= now_ms) {
       igTextColored((ImVec4){0.20f, 0.95f, 0.56f, 1.0f},
                     "LIVE: %s", vlither_event_name_at(next_event));
@@ -450,8 +475,10 @@ void ui_title_screen(tenv* env) {
   }
 #endif
 
-  float logo_size = 400;
-  float logo_gap = 5;
+  /* Every homepage element uses the same 720p baseline. This keeps the menu
+     at the same apparent size on 720p, 1080p and 1440p phones instead of
+     shrinking as framebuffer resolution increases. */
+  float logo_size = homepage_px(400.0f);
 
   igPushFont(usr->imgui_data.mono_font[usrs->ui_font_size],
              usr->imgui_data.mono_font[usrs->ui_font_size]->LegacySize);
@@ -492,7 +519,8 @@ void ui_title_screen(tenv* env) {
                   frame_height);
   float sl_btn_w = frame_height;
   igPushItemWidth(logo_size - sl_btn_w - style->ItemSpacing.x);
-  igInputTextWithHint("##ipv4_input", "IPv4:Port", usrs->ipv4, MAX_IPV4_LEN + 1,
+  igInputTextWithHint("##ipv4_input", "IPv4:Port or 4-digit SID",
+                      usrs->server_address, MAX_SERVER_IP_LEN + 1,
                       ImGuiInputTextFlags_None, NULL, NULL);
   igPopItemWidth();
   igPopItemWidth();
@@ -507,6 +535,11 @@ void ui_title_screen(tenv* env) {
   }
   igPopFont();
 
+  /* Fetch and ping IPv4 servers as soon as the homepage opens; the popup
+     only displays the already-running background work. */
+  if (!gdata->server_list.fetching && !gdata->server_list.fetched &&
+      !gdata->server_list.fetch_error)
+    server_list_fetch(env);
   server_list_poll(env);
 
   if (gdata->server_list.fetched && gdata->server_list.count > 0 &&
@@ -542,7 +575,11 @@ void ui_title_screen(tenv* env) {
     igSeparator();
 
     if (gdata->server_list.count > 0) {
-      igBeginChild_Str("##sl_scroll", (ImVec2){340, 320},
+      float server_list_w = homepage_min(homepage_px(440.0f),
+                                         ctx->size[0] - homepage_px(32.0f));
+      float server_list_h = homepage_min(homepage_px(320.0f),
+                                         ctx->size[1] - homepage_px(80.0f));
+      igBeginChild_Str("##sl_scroll", (ImVec2){server_list_w, server_list_h},
                        ImGuiChildFlags_None, 0);
 
       bool sorted = !gdata->server_list.pinging &&
@@ -553,15 +590,21 @@ void ui_title_screen(tenv* env) {
         int ping      = gdata->server_list.pings[i];
         bool is_custom = i < gdata->server_list.custom_count;
 
-        char name_buf[40];
+        char name_buf[96];
         if (is_custom) {
-          snprintf(name_buf, sizeof(name_buf), "\xe2\x98\x85 %s",
-                    CUSTOM_SERVER_NAMES[i]);
+          snprintf(name_buf, sizeof(name_buf), "\xe2\x98\x85 %s [IPv4]",
+                   CUSTOM_SERVER_NAMES[i]);
+        } else if (gdata->server_list.sids[i] > 0 &&
+                   gdata->server_list.sids[i] <= 9999) {
+          snprintf(name_buf, sizeof(name_buf), "SID %04u  %s",
+                   (unsigned)gdata->server_list.sids[i],
+                   gdata->server_list.ips[i]);
         } else {
-          snprintf(name_buf, sizeof(name_buf), "%s", gdata->server_list.ips[i]);
+          snprintf(name_buf, sizeof(name_buf), "[IPv4] %s",
+                   gdata->server_list.ips[i]);
         }
 
-        char label[80];
+        char label[144];
         if (ping < 0) {
           snprintf(label, sizeof(label), "%-26s  --", name_buf);
         } else if (ping >= 9999) {
@@ -587,8 +630,9 @@ void ui_title_screen(tenv* env) {
 
         if (igSelectable_Bool(label, false,
                               ImGuiSelectableFlags_None, (ImVec2){0, 0})) {
-          strncpy(usrs->ipv4, gdata->server_list.ips[i], MAX_IPV4_LEN);
-          usrs->ipv4[MAX_IPV4_LEN] = '\0';
+          strncpy(usrs->server_address, gdata->server_list.ips[i],
+                  MAX_SERVER_IP_LEN);
+          usrs->server_address[MAX_SERVER_IP_LEN] = '\0';
           igCloseCurrentPopup();
         }
         if (is_custom && igIsItemHovered(0)) {
@@ -615,6 +659,19 @@ void ui_title_screen(tenv* env) {
                   frame_height * 2);
 
   if (igButton("\uea1c Play", (ImVec2){logo_size})) {
+    const char* entered = usrs->server_address;
+    bool sid_only = strlen(entered) == 4;
+    for (int i = 0; sid_only && i < 4; ++i)
+      if (entered[i] < '0' || entered[i] > '9') sid_only = false;
+    if (sid_only) {
+      int sid = atoi(entered);
+      if (!server_list_resolve_sid(env, sid, usrs->server_address,
+                                   sizeof(usrs->server_address))) {
+        /* Keep the SID in the same field so the player can refresh the list
+           or correct it; never attempt a connection to an unresolved ID. */
+        return;
+      }
+    }
     usr->gdata.conn = CONNECTING;
     usr->gdata.curr_screen = PLAYING;
     glfwSetTime(0);

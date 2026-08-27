@@ -5,6 +5,7 @@
 #include <android/log.h>
 #include <android_native_app_glue.h>
 #include <jni.h>
+#include <limits.h>
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,131 @@
 
 
 extern struct android_app* g_android_app;
+
+void android_jni_notification_beep(int kind) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        attached = true;
+    } else if (status != JNI_OK || !env) return;
+
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "playNotificationBeep", "(Landroid/app/Activity;I)V");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticVoidMethod(env, cls,
+                mid, g_android_app->activity->clazz, (jint)kind);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+}
+
+void android_jni_capture_sync(bool recording_enabled,
+                              bool screenshots_enabled,
+                              bool session_active) {
+    static bool state_known = false;
+    static bool last_recording = false;
+    static bool last_screenshots = false;
+    static bool last_active = false;
+    if (state_known && last_recording == recording_enabled &&
+        last_screenshots == screenshots_enabled &&
+        last_active == session_active) return;
+
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        attached = true;
+    } else if (status != JNI_OK || !env) return;
+
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "syncGameplayCapture", "(Landroid/app/Activity;ZZZ)V");
+        if (mid && !(*env)->ExceptionCheck(env)) {
+            (*env)->CallStaticVoidMethod(
+                env, cls, mid, g_android_app->activity->clazz,
+                recording_enabled ? JNI_TRUE : JNI_FALSE,
+                screenshots_enabled ? JNI_TRUE : JNI_FALSE,
+                session_active ? JNI_TRUE : JNI_FALSE);
+            if (!(*env)->ExceptionCheck(env)) {
+                last_recording = recording_enabled;
+                last_screenshots = screenshots_enabled;
+                last_active = session_active;
+                state_known = true;
+            }
+        }
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+}
+
+void android_jni_capture_confirmed_kill(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        attached = true;
+    } else if (status != JNI_OK || !env) return;
+
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "onConfirmedKill", "(Landroid/app/Activity;)V");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticVoidMethod(
+                env, cls, mid, g_android_app->activity->clazz);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+}
+
+bool android_jni_request_custom_arrow(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return false;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        attached = true;
+    } else if (status != JNI_OK || !env) return false;
+    bool result = false;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "requestCustomArrow", "(Landroid/app/Activity;)Z");
+        if (mid && !(*env)->ExceptionCheck(env))
+            result = (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz) == JNI_TRUE;
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+    return result;
+}
 
 #define VOICE_CAPTURE_FRAME_MAX 2048
 
@@ -471,6 +597,79 @@ decode_cleanup:
         (*env)->ReleaseByteArrayElements(env, packet, packet_bytes, JNI_ABORT);
     if (packet) (*env)->DeleteLocalRef(env, packet);
     if (path_bytes) (*env)->DeleteLocalRef(env, path_bytes);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+    return rgba;
+}
+
+unsigned char* android_jni_decode_image_rgba(const unsigned char* encoded,
+                                             size_t encoded_size,
+                                             int* width, int* height) {
+    if (width) *width = 0;
+    if (height) *height = 0;
+    if (!encoded || encoded_size == 0 || encoded_size > 16u * 1024u * 1024u ||
+        encoded_size > (size_t)INT_MAX || !width || !height ||
+        !g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return NULL;
+
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    unsigned char* rgba = NULL;
+    jclass cls = NULL;
+    jbyteArray encoded_bytes = NULL;
+    jbyteArray packet = NULL;
+    jbyte* packet_bytes = NULL;
+
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return NULL;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        return NULL;
+    }
+
+    cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (!cls || (*env)->ExceptionCheck(env)) goto decode_image_cleanup;
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "decodeImageRgba", "(Landroid/app/Activity;[B)[B");
+    if (!mid || (*env)->ExceptionCheck(env)) goto decode_image_cleanup;
+
+    encoded_bytes = (*env)->NewByteArray(env, (jsize)encoded_size);
+    if (!encoded_bytes || (*env)->ExceptionCheck(env)) goto decode_image_cleanup;
+    (*env)->SetByteArrayRegion(env, encoded_bytes, 0, (jsize)encoded_size,
+                              (const jbyte*)encoded);
+    if ((*env)->ExceptionCheck(env)) goto decode_image_cleanup;
+
+    packet = (jbyteArray)(*env)->CallStaticObjectMethod(
+        env, cls, mid, g_android_app->activity->clazz, encoded_bytes);
+    if ((*env)->ExceptionCheck(env) || !packet) goto decode_image_cleanup;
+
+    jsize packet_len = (*env)->GetArrayLength(env, packet);
+    if (packet_len < 12) goto decode_image_cleanup;
+    packet_bytes = (*env)->GetByteArrayElements(env, packet, NULL);
+    if (!packet_bytes || (*env)->ExceptionCheck(env)) goto decode_image_cleanup;
+
+    int decoded_w = android_jni_read_i32_le((const unsigned char*)packet_bytes);
+    int decoded_h = android_jni_read_i32_le((const unsigned char*)packet_bytes + 4);
+    if (decoded_w <= 0 || decoded_h <= 0 || decoded_w > 4096 || decoded_h > 4096)
+        goto decode_image_cleanup;
+    size_t pixel_bytes = (size_t)decoded_w * (size_t)decoded_h * 4u;
+    if (pixel_bytes > (size_t)packet_len - 8u) goto decode_image_cleanup;
+
+    rgba = (unsigned char*)malloc(pixel_bytes);
+    if (!rgba) goto decode_image_cleanup;
+    memcpy(rgba, (const unsigned char*)packet_bytes + 8, pixel_bytes);
+    *width = decoded_w;
+    *height = decoded_h;
+
+decode_image_cleanup:
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (packet_bytes)
+        (*env)->ReleaseByteArrayElements(env, packet, packet_bytes, JNI_ABORT);
+    if (packet) (*env)->DeleteLocalRef(env, packet);
+    if (encoded_bytes) (*env)->DeleteLocalRef(env, encoded_bytes);
     if (cls) (*env)->DeleteLocalRef(env, cls);
     if (did_attach) (*vm)->DetachCurrentThread(vm);
     return rgba;

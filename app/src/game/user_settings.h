@@ -233,6 +233,77 @@ typedef struct user_settings {
   uint8_t homepage_settings_reserved[16];
   int homepage_background;
   float homepage_blur;
+
+  /* v3.4 extension: Vlither HUD/render/network customization. Everything is
+     appended so every earlier user.dat remains a compatible prefix. */
+  uint8_t vlither_feature_settings_reserved[16];
+  char leaderboard_title[33];
+  bool food_glow[2];
+  bool center_line_others[2];
+  float snake_shadow_strength[2];
+  char minimap_display_name[MAX_NICKNAME_LEN + 1];
+  bool minimap_show_own_name;
+  bool vlither_chat_joined;
+  int shader_cycle_key;
+  int invisible_skin_key;
+  int shader_cycle_index;
+  bool own_skin_invisible;
+  float zslider_thickness;
+  float zslider_thumb_scale;
+  bool custom_arrow_enabled;
+  int server_address_filter; /* 0 = both, 1 = IPv4, 2 = IPv6 */
+  /* Full IPv4/IPv6 authority. The original ipv4 field stays fixed-size so
+     existing user.dat files keep their binary layout. */
+  char server_address[MAX_SERVER_IP_LEN + 1];
+
+  /* v3.6 extension: optional clock-style minimap overlay. Reserve a new
+     boundary so v4.7.1 tail padding cannot accidentally enable it. */
+  uint8_t clock_map_settings_reserved[16];
+  bool minimap_clock;
+
+  /* v3.7 extension: NTL-inspired competitive visibility and HUD controls.
+     Keep this append-only and behind a reserve boundary so older user.dat
+     files retain every existing preference while these options use defaults. */
+  uint8_t ntl_competitive_settings_reserved[16];
+  bool ntl_hide_enemy_tags;
+  bool ntl_hide_enemy_cosmetics;
+  bool ntl_high_visibility_skins;
+  bool ntl_nicks_plus;
+  bool ntl_names_on_top;
+  bool ntl_alert_sos;
+  bool ntl_alert_new_player;
+  bool ntl_alert_chat;
+  bool ntl_chat_timestamps;
+  bool ntl_dynamic_minimap;
+  bool ntl_border_indicator;
+  bool ntl_skinless_peek;
+  bool ntl_own_true_skin;
+  bool ntl_team_true_skin;
+  int ntl_graphics_preset;    /* 0=custom, 1=competitive, 2=low, 3=normal, 4=high */
+  int ntl_leaderboard_style; /* 0=normal, 1=gradient, 2=single colour */
+  vec4 ntl_leaderboard_color;
+  bool ntl_stealth_mode;
+
+  /* v3.8 extension: rendering controls now belong to Normal and Assist
+     independently. The earlier single-value fields remain above solely for
+     settings-file compatibility with the first feature-pack build. */
+  uint8_t integrated_mode_settings_reserved[16];
+  bool mode_hide_enemy_tags[2];
+  bool mode_hide_enemy_cosmetics[2];
+  bool mode_high_visibility_skins[2];
+  bool mode_nicks_plus[2];
+  bool mode_names_on_top[2];
+  bool mode_skinless_peek[2];
+  bool mode_own_true_skin[2];
+  bool mode_team_true_skin[2];
+  int mode_graphics_preset[2];
+
+  /* v3.9 extension: local-only Android capture preferences. Recording still
+     requires Android's system MediaProjection consent for every new session;
+     neither videos nor screenshots are uploaded to a backend. */
+  uint8_t capture_settings_reserved[16];
+  bool record_gameplay;
+  bool screenshot_on_kill;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

@@ -106,13 +106,13 @@ workspace "vlither"
     objdir "build/bin-int/%{cfg.platform}_%{cfg.architecture}_%{cfg.buildcfg}/%{prj.name}"
     targetdir "build/bin/%{cfg.platform}_%{cfg.architecture}_%{cfg.buildcfg}"
     includedirs { "glfw/include", "thermite/include", "thermite/src", vk_path .. "/include" }
-    defines { "GLFW_INCLUDE_NONE", "GLFW_INCLUDE_VULKAN", "CGLM_FORCE_DEPTH_ZERO_TO_ONE", "CIMGUI_NO_EXPORT" }
+    defines { "GLFW_INCLUDE_NONE", "GLFW_INCLUDE_VULKAN", "CGLM_FORCE_DEPTH_ZERO_TO_ONE", "CIMGUI_NO_EXPORT", "MG_ENABLE_IPV6=1" }
 
     libdirs { vk_path .. "/lib" }
     files { "app/src/**.c", "app/src/**.cpp" }
     defines {
-      "APP_VERSION=\"2.5\"",
-      "SETTINGS_VERSION=\"1.7\""
+      "APP_VERSION=\"4.7.5\"",
+      "SETTINGS_VERSION=\"2.0\""
     }
 
     filter { "platforms:linux" }

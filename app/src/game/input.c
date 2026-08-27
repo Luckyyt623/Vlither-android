@@ -7,6 +7,10 @@
 #include "../user.h"
 #include "ntl_team.h"
 
+/* Read by redraw.c. This is a held state (physical or custom on-screen W),
+   unlike Vlither's toggle hotkeys, so Skinless Peek feels like NTL. */
+bool g_ntl_skin_peek_active = false;
+
 void input(tenv* env) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -185,16 +189,37 @@ void input(tenv* env) {
         } else {
 
         if (env->wnd->touch.down) {
-
-          if (env->wnd->touch.just_down || !gdata->touch_ctrl.joy_tracking) {
-            gdata->touch_ctrl.joy_anchor_x = tx;
-            gdata->touch_ctrl.joy_anchor_y = ty;
-            gdata->touch_ctrl.joy_tracking = true;
+          /* Match Slither mobile's joystick mode: the base is fixed in the
+             selected screen-side and the touch's angle from that base steers
+             the snake. Unlike Vlither's old stick, the base never follows
+             the finger and movement has no distance multiplier. */
+          float sw = (float)ctx->size[0];
+          float sh = (float)ctx->size[1];
+          float margin = sw * 0.025f;
+          float jr, jcx, jcy;
+          if (usrs->joy_pos_custom) {
+            /* Keep the existing slider's scale semantics while converting
+               it to Slither's smaller 168px base artwork. */
+            jr  = sh * usrs->joy_rel_size * 0.47f;
+            jcx = sw * usrs->joy_rel_x;
+            jcy = sh * usrs->joy_rel_y;
+          } else {
+            jr  = sh * 0.082f;
+            jcx = usrs->ctrl_swap_sides ? (sw - jr - margin) : (jr + margin);
+            jcy = sh - jr - margin;
           }
 
-          xm = (int)((tx - gdata->touch_ctrl.joy_anchor_x) * 4.0f);
-          ym = (int)((ty - gdata->touch_ctrl.joy_anchor_y) * 4.0f);
+          float dx = tx - jcx;
+          float dy = ty - jcy;
+          if (dx * dx + dy * dy > 0.0001f) {
+            gdata->touch_ctrl.joy_angle = atan2f(dy, dx);
+            gdata->touch_ctrl.joy_has_direction = true;
+          }
+          gdata->touch_ctrl.joy_tracking = true;
 
+          float steer_len = GLM_MAX(256.0f, jr * 4.0f);
+          xm = (int)(cosf(gdata->touch_ctrl.joy_angle) * steer_len);
+          ym = (int)(sinf(gdata->touch_ctrl.joy_angle) * steer_len);
           gdata->touch_ctrl.joy_last_xm = xm;
           gdata->touch_ctrl.joy_last_ym = ym;
         } else {
@@ -290,6 +315,43 @@ void input(tenv* env) {
        tkeyboard_key_pressed(env->kb, GLFW_KEY_V)) ||
       (GLFW_KEY_V < 512 && gdata->data.fake_key_pressed[GLFW_KEY_V]);
   if (voice_key_pressed) ntl_team_handle_voice_key();
+
+  ImGuiIO *input_io = igGetIO_Nil();
+  bool typing = input_io && input_io->WantTextInput;
+  int active_render_mode = usrs->hotkeys[HOTKEY_ASSIST].active ? 1 : 0;
+  g_ntl_skin_peek_active = usrs->mode_skinless_peek[active_render_mode] &&
+      !typing &&
+      ((physical_keys_enabled && twindow_key_down(env->wnd, GLFW_KEY_W)) ||
+       (GLFW_KEY_W < 512 && gdata->data.fake_key_down[GLFW_KEY_W]));
+  int shader_key = usrs->shader_cycle_key;
+  bool shader_pressed = !typing &&
+      ((physical_keys_enabled &&
+        tkeyboard_key_pressed(env->kb, shader_key)) ||
+       (shader_key >= 0 && shader_key < 512 &&
+        gdata->data.fake_key_pressed[shader_key]));
+  if (shader_pressed) {
+    usrs->shader_cycle_index = (usrs->shader_cycle_index + 1) % 3;
+    usrs->modes[0].render_mode = usrs->shader_cycle_index;
+    usrs->modes[1].render_mode = usrs->shader_cycle_index;
+    save_user_settings(usrs);
+  }
+
+  int invisible_key = usrs->invisible_skin_key;
+  bool invisible_pressed = !typing &&
+      ((physical_keys_enabled &&
+        tkeyboard_key_pressed(env->kb, invisible_key)) ||
+       (invisible_key >= 0 && invisible_key < 512 &&
+        gdata->data.fake_key_pressed[invisible_key]));
+  if (invisible_pressed) {
+    usrs->own_skin_invisible = !usrs->own_skin_invisible;
+    save_user_settings(usrs);
+  }
+
+  bool sos_pressed = !typing &&
+      ((physical_keys_enabled &&
+        tkeyboard_key_pressed(env->kb, GLFW_KEY_S)) ||
+       (GLFW_KEY_S < 512 && gdata->data.fake_key_pressed[GLFW_KEY_S]));
+  if (sos_pressed) ntl_team_trigger_sos();
 
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;

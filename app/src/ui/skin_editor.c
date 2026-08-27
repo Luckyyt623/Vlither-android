@@ -16,6 +16,38 @@ int skin_code_filter(ImGuiInputTextCallbackData* data) {
 
 static int s_skin_panel = 1; /* 0 custom editor, 1 NTL tags, 2 Vlither tags */
 
+static void apply_skin_editor_background(tenv *env) {
+  if (!env || !env->usr || !env->usr->r || !env->ctx) return;
+  tuser_data *usr = env->usr;
+  renderer *r = usr->r;
+  int selected = usr->usrs.homepage_background;
+  if (selected < 0 || selected > 6) selected = 5;
+  r->global.bd_opacity = 0.0f;
+  r->global.minimap_opacity = 0.0f;
+  r->global.bg_color[0] = r->global.bg_color[1] = r->global.bg_color[2] = 1.0f;
+  if (selected == 0) {
+    renderer_set_background_variant(r, env->ctx, 0);
+    r->global.bg_opacity = 0.0f;
+    r->global.bg_blur = 0.0f;
+    return;
+  }
+  int variant = 15 + selected;
+  renderer_set_background_variant(r, env->ctx, variant);
+  if (r->bg_variant != variant || !r->active_bg_tex) {
+    r->global.bg_opacity = 0.0f;
+    return;
+  }
+  float sx = (float)env->ctx->size[0] / r->active_bg_tex->size[0];
+  float sy = (float)env->ctx->size[1] / r->active_bg_tex->size[1];
+  float cover = fmaxf(sx, sy);
+  r->global.zoom = 1.0f;
+  r->global.bg_scale = cover;
+  r->global.view[0] = r->active_bg_tex->size[0] * cover * 0.5f;
+  r->global.view[1] = r->active_bg_tex->size[1] * cover * 0.5f;
+  r->global.bg_blur = usr->usrs.homepage_blur / 100.0f;
+  r->global.bg_opacity = 1.0f;
+}
+
 void ui_skin_editor_init(tenv* env) {}
 
 void ui_skin_editor(tenv* env) {
@@ -28,9 +60,7 @@ void ui_skin_editor(tenv* env) {
   igPushFont(usr->imgui_data.regular_font[usrs->ui_font_size],
              usr->imgui_data.regular_font[usrs->ui_font_size]->LegacySize);
 
-  usr->r->global.bg_opacity = 0;
-  usr->r->global.bd_opacity = 0;
-  usr->r->global.minimap_opacity = 0;
+  apply_skin_editor_background(env);
 
   float frame_height = igGetFrameHeight();
   float resolution_scale = fminf(ctx->size[0] / 1280.0f, ctx->size[1] / 720.0f);
@@ -94,7 +124,8 @@ void ui_skin_editor(tenv* env) {
                                                         i * (8 * (scale / 48)),
                                                     igGetCursorPosY(), scale},
                                                    gdata->cg_uvs[cg_id],
-                                                   {we, we, we, 1}});
+                                                   {we, we, we,
+                                                    usrs->own_skin_invisible ? 0.0f : 1.0f}});
     }
 
     cbp++;
@@ -140,7 +171,8 @@ void ui_skin_editor(tenv* env) {
       bp_renderer_push(usr->r->bpr, &(bp_instance){{last_bp_pos[0],
                                                     last_bp_pos[1], scale, PI},
                                                    gdata->cg_uvs[cg_id],
-                                                   {we, we, we, 1}});
+                                                   {we, we, we,
+                                                    usrs->own_skin_invisible ? 0.0f : 1.0f}});
     }
 
     cbp++;
@@ -288,6 +320,13 @@ void ui_skin_editor(tenv* env) {
         ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_NoMove);
 
     if (child_visible) {
+      if (igButton(usrs->own_skin_invisible
+                       ? "Invisible skin: ON"
+                       : "Invisible skin: OFF",
+                   (ImVec2){-1, 0}))
+        usrs->own_skin_invisible = !usrs->own_skin_invisible;
+      igTextDisabled("Use the configured invisible-skin key to switch back during play.");
+      igSeparator();
       float tab_w = (panel_w - style->WindowPadding.x * 2.0f -
                      style->ItemSpacing.x) / 2.0f;
       if (igButton("NTL Tags", (ImVec2){tab_w, 0})) s_skin_panel = 1;

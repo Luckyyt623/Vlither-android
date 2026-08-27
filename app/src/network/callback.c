@@ -11,6 +11,9 @@
 #include "../game/snake.h"
 #include "../game/ntl_tags.h"
 #include "../user.h"
+#ifdef ANDROID
+#include "../android_jni.h"
+#endif
 
 void snl(game_data* gdata, snake* o) {
   float orl = o->tl;
@@ -1322,6 +1325,10 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     }
   } else if (cmd == 'k') {
     gdata->data.kills++;
+#ifdef ANDROID
+    if (!gdata->preview_active && gdata->curr_screen == PLAYING)
+      android_jni_capture_confirmed_kill();
+#endif
   } else if (cmd == 'v') {
     gdata->data.follow_view = false;
     gdata->data.lview_xx = gdata->data.view_xx;

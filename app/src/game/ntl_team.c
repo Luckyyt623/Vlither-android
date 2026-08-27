@@ -6,10 +6,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <math.h>
+#include <time.h>
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
+#include "../android_jni.h"
 #endif
 
 #ifndef IM_COL32
@@ -50,7 +53,7 @@ typedef struct {
   bool players_open;
   char request_path[NTL_URL_MAX]; int last_http_status; bool last_request_ok;
   int consecutive_failures;
-  struct { char nick[64], text[256]; double time; } history[NTL_CHAT_HISTORY_MAX];
+  struct { char nick[64], text[256]; time_t time; } history[NTL_CHAT_HISTORY_MAX];
   int history_count, history_start;
   char profile_name[MAX_NTL_TEAM_NAME + 1];
   bool chat_restore_size;
@@ -72,7 +75,7 @@ typedef struct {
   char last_sent_text[256];
   double last_sent_time;
   char last_nickname[MAX_NICKNAME_LEN + 1];
-  char last_presence_server[MAX_IPV4_LEN + 1];
+  char last_presence_server[MAX_SERVER_IP_LEN + 1];
   bool last_presence_playing;
   bool vlither_chat_active;
   bool voice_controls_open;
@@ -83,12 +86,37 @@ typedef struct {
   char voice_join_password_input[72];
   int voice_selected_room;
   bool voice_create_pending;
+  double sos_until;
+  bool sos_message_pending;
+  double last_alert_time;
 } ntl_state;
 static ntl_state S;
 
 static float ntl_clampf(float v, float lo, float hi) {
   if (hi < lo) hi = lo;
   return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static ImVec4 ntl_unique_color(const char *name, unsigned int salt) {
+  unsigned int h = 2166136261u ^ salt;
+  const unsigned char *p = (const unsigned char *)(name ? name : "Player");
+  while (*p) { h ^= *p++; h *= 16777619u; }
+  float hue = (float)(h % 360u) / 60.0f;
+  float x = 0.28f + 0.72f * (1.0f - fabsf(fmodf(hue, 2.0f) - 1.0f));
+  float r = 1.0f, g = x, b = 0.28f;
+  switch ((int)hue) {
+    case 0: r = 1.0f; g = x; b = 0.28f; break;
+    case 1: r = x; g = 1.0f; b = 0.28f; break;
+    case 2: r = 0.28f; g = 1.0f; b = x; break;
+    case 3: r = 0.28f; g = x; b = 1.0f; break;
+    case 4: r = x; g = 0.28f; b = 1.0f; break;
+    default: r = 1.0f; g = 0.28f; b = x; break;
+  }
+  return (ImVec4){r, g, b, 1.0f};
+}
+
+static ImU32 ntl_unique_u32(const char *name, unsigned int salt) {
+  return igColorConvertFloat4ToU32(ntl_unique_color(name, salt));
 }
 static bool ntl_feed_is_fresh(void);
 static void ntl_queue_message(const user_settings *us);
@@ -100,6 +128,27 @@ static void ntl_schedule_retry(double now);
 static bool same_server(const char *a, const char *b);
 static size_t ntl_append_utf8(char *out, size_t cap, size_t n,
                               unsigned int cp);
+
+void ntl_team_emit_alert(int kind) {
+  if (!S.env || !S.env->usr) return;
+  user_settings *us = &S.env->usr->usrs;
+  bool enabled = kind == NTL_ALERT_SOS ? us->ntl_alert_sos :
+                 kind == NTL_ALERT_PLAYER ? us->ntl_alert_new_player :
+                 us->ntl_alert_chat;
+  if (!enabled) return;
+  double now = mg_millis() / 1000.0;
+  if (kind != NTL_ALERT_SOS && now - S.last_alert_time < 0.30) return;
+  S.last_alert_time = now;
+#ifdef ANDROID
+  android_jni_notification_beep(kind);
+#endif
+}
+
+static void ntl_history_clock(time_t when, char out[6]) {
+  out[0] = 0;
+  struct tm *local = localtime(&when);
+  if (local) strftime(out, 6, "%H:%M", local);
+}
 
 static void urlenc(char *out,size_t cap,const char *in){size_t n=0;for(;*in&&n+4<cap;in++){unsigned char c=*in;if(isalnum(c)||c=='-'||c=='_'||c=='.'||c=='~')out[n++]=c;else{snprintf(out+n,cap-n,"%%%02X",c);n+=3;}}out[n]=0;}
 static int ntl_hex_value(char c) {
@@ -480,7 +529,7 @@ static void add_history(const char *nick, const char *text) {
   S.history[idx].nick[sizeof S.history[idx].nick - 1] = 0;
   strncpy(S.history[idx].text, clean_text, sizeof S.history[idx].text - 1);
   S.history[idx].text[sizeof S.history[idx].text - 1] = 0;
-  S.history[idx].time = mg_millis() / 1000.0;
+  S.history[idx].time = time(NULL);
   S.scroll_chat_bottom = true;
 }
 
@@ -600,6 +649,7 @@ static size_t ntl_snapshot_overlap(const char *old_msg, const char *new_msg) {
 
 static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
   if (!delta) return;
+  bool added = false;
   while (*delta == '\n' || *delta == ' ') delta++;
 
   const char *p = delta;
@@ -632,6 +682,7 @@ static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
         memcpy(message, segment, part_len);
         message[part_len] = 0;
         add_history(nick, message);
+        added = true;
       }
 
       if (!pipe) break;
@@ -641,6 +692,7 @@ static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
     if (!end) break;
     p = end + 1;
   }
+  if (added) ntl_team_emit_alert(NTL_ALERT_CHAT);
 }
 
 static bool ntl_snapshot_contains_message(const char *snapshot,
@@ -807,6 +859,26 @@ static bool parse_members(const char *s, size_t len) {
       m->is_bot = field_bool(p, e, "bot", false);
       m->is_sos = field_bool(p, e, "sos", false);
 
+      const ntl_member *previous = NULL;
+      for (int old_i = 0; old_i < S.count; ++old_i) {
+        ntl_member *candidate = &S.members[old_i];
+        bool same_client = strlen(m->nick) >= 8 &&
+                           strlen(candidate->nick) >= 8 &&
+                           !strncasecmp(m->nick, candidate->nick, 8);
+        bool same_snake = m->sid >= 0 && candidate->sid == m->sid &&
+                          same_server(m->srv, candidate->srv);
+        if (same_client || same_snake) { previous = candidate; break; }
+      }
+      bool is_local_record = strlen(m->nick) >= 8 &&
+                             strlen(S.request_client_id) == 8 &&
+                             !strncasecmp(m->nick, S.request_client_id, 8);
+      if (!baseline_only && !is_local_record) {
+        if (m->is_sos && (!previous || !previous->is_sos))
+          ntl_team_emit_alert(NTL_ALERT_SOS);
+        else if (!previous)
+          ntl_team_emit_alert(NTL_ALERT_PLAYER);
+      }
+
       if (S.inflight_msg[0] && strlen(m->nick) >= 8 &&
           !strncmp(m->nick, S.request_client_id, 8) &&
           ntl_snapshot_contains_message(m->msg, S.inflight_msg))
@@ -931,7 +1003,7 @@ static void ntl_poll_request(tenv *env) {
 
   bool in_game = g->conn == CONNECTED && g->curr_screen == PLAYING;
   snake *local = in_game ? local_snake(g) : NULL;
-  const char *presence_server = local ? us->ipv4 : "_GAME_MENU_";
+  const char *presence_server = local ? us->server_address : "_GAME_MENU_";
   /* Match the official NTL client: publish the authoritative world
      coordinates, not the short-lived render correction offsets (fx/fy).
      Sending fx/fy can make the team marker jump ahead/behind after packets. */
@@ -945,7 +1017,11 @@ static void ntl_poll_request(tenv *env) {
 
   /* Keep one message in flight until a successful response. A newly typed
      message can wait in pending_msg without overwriting the retrying one. */
-  if (!S.inflight_msg[0] && S.pending_msg[0]) {
+  if (!S.inflight_msg[0] && S.sos_message_pending) {
+    strncpy(S.inflight_msg, "Help me!", sizeof S.inflight_msg - 1);
+    S.inflight_msg[sizeof S.inflight_msg - 1] = 0;
+    S.sos_message_pending = false;
+  } else if (!S.inflight_msg[0] && S.pending_msg[0]) {
     strncpy(S.inflight_msg, S.pending_msg, sizeof S.inflight_msg - 1);
     S.inflight_msg[sizeof S.inflight_msg - 1] = 0;
     S.pending_msg[0] = 0;
@@ -976,9 +1052,10 @@ static void ntl_poll_request(tenv *env) {
   snprintf(
       S.request_path, sizeof S.request_path,
       "/slither/ntlplay-mt.php?auth=%s&tid=%s&nick=%s&score=%d"
-      "&valx=%.0f&valy=%.0f&bot=false&sos=false&food=false&srv=%s"
+      "&valx=%.0f&valy=%.0f&bot=false&sos=%s&food=false&srv=%s"
       "&sid=%d&msg=%s&rank=%d&dt=%s&cs=%d&tg=%d&ver=4.1&tlm=&di=1000",
-      us->ntl_auth_key, us->ntl_team_id, nick, score, x, y, srv, sid,
+      us->ntl_auth_key, us->ntl_team_id, nick, score, x, y,
+      (S.sos_until > mg_millis() / 1000.0) ? "true" : "false", srv, sid,
       msg, rank, dt, local ? local->accessory : 0, us->ntl_tag_id);
 
   S.request_conn =
@@ -1031,7 +1108,7 @@ void ntl_team_update(tenv *env) {
      client prefix lets NTL replace this player's old name instead of creating a
      second entry. */
   bool playing = g->conn == CONNECTED && g->curr_screen == PLAYING;
-  const char *presence_server = playing ? us->ipv4 : "_GAME_MENU_";
+  const char *presence_server = playing ? us->server_address : "_GAME_MENU_";
   if (strcmp(S.last_nickname, us->nickname) != 0 ||
       strcmp(S.last_presence_server, presence_server) != 0 ||
       S.last_presence_playing != playing) {
@@ -1047,6 +1124,14 @@ void ntl_team_update(tenv *env) {
   mg_mgr_poll(&S.mgr, 0);
   double now = mg_millis() / 1000.0;
 
+  snake *me = playing ? local_snake(g) : NULL;
+  if (S.sos_until > 0.0 &&
+      (now >= S.sos_until || !me || me->dead)) {
+    S.sos_until = 0.0;
+    vlither_chat_set_sos_until(0);
+    S.next_poll = 0.0;
+  }
+
   if (S.request_active &&
       now - S.request_started > NTL_REQUEST_TIMEOUT_SECONDS) {
     struct mg_connection *timed_out = S.request_conn;
@@ -1061,6 +1146,26 @@ void ntl_team_update(tenv *env) {
     if (S.request_active && S.next_poll < now + NTL_POLL_SECONDS)
       S.next_poll = now + NTL_POLL_SECONDS;
   }
+}
+
+void ntl_team_trigger_sos(void) {
+  if (!S.env || !S.env->usr) return;
+  game_data *g = &S.env->usr->gdata;
+  user_settings *us = &S.env->usr->usrs;
+  snake *me = (g->conn == CONNECTED && g->curr_screen == PLAYING)
+                  ? local_snake(g) : NULL;
+  if (!me || me->dead) return;
+  S.sos_until = mg_millis() / 1000.0 + 240.0;
+  vlither_chat_set_sos_until((long long)time(NULL) * 1000LL + 240000LL);
+  if (vlither_chat_joined()) vlither_chat_send_text("Help me!");
+  S.sos_message_pending = us->ntl_enabled &&
+                          strlen(us->ntl_auth_key) >= 16 &&
+                          strlen(us->ntl_team_id) >= 16;
+  S.next_poll = 0.0;
+}
+
+bool ntl_team_local_sos_active(void) {
+  return S.sos_until > mg_millis() / 1000.0;
 }
 
 bool ntl_team_voice_controls_open(void) {
@@ -1116,6 +1221,34 @@ static const char *ntl_clean_name(const char *name) {
   return name[0] ? name : "Player";
 }
 
+static bool ntl_name_equal(const char *a, const char *b) {
+  if (!a || !b) return false;
+  while (*a && *b) {
+    if (tolower((unsigned char)*a++) != tolower((unsigned char)*b++))
+      return false;
+  }
+  return !*a && !*b;
+}
+
+int ntl_team_leaderboard_status(const char *nickname, const char *server) {
+  if (!nickname || !nickname[0] || !server || !server[0]) return 0;
+  if (vlither_chat_is_nickname_sos(nickname, server)) return 3;
+  bool ntl_fresh = ntl_feed_is_fresh();
+  for (int i = 0; ntl_fresh && i < S.count; ++i) {
+    if (same_server(S.members[i].srv, server) &&
+        ntl_name_equal(ntl_clean_name(S.members[i].nick), nickname) &&
+        S.members[i].is_sos)
+      return 3;
+  }
+  if (vlither_chat_is_nickname_player(nickname, server)) return 2;
+  for (int i = 0; ntl_fresh && i < S.count; ++i) {
+    if (same_server(S.members[i].srv, server) &&
+        ntl_name_equal(ntl_clean_name(S.members[i].nick), nickname))
+      return 1;
+  }
+  return 0;
+}
+
 static bool ntl_member_same_client(const ntl_member *a,
                                    const ntl_member *b) {
   if (!a || !b || strlen(a->nick) < 8 || strlen(b->nick) < 8) return false;
@@ -1161,7 +1294,7 @@ static bool ntl_member_has_vlither_presence(const ntl_member *m,
   for (int i = 0; i < count; ++i) {
     const char *client_id = vlither_chat_player_client_id(i);
     if (!client_id || strlen(client_id) != 8 ||
-        !same_server(vlither_chat_player_server(i), us->ipv4))
+        !same_server(vlither_chat_player_server(i), us->server_address))
       continue;
     bool same = true;
     for (int j = 0; j < 8; ++j) {
@@ -1284,15 +1417,19 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
     float dist = sqrtf(rx * rx + ry * ry);
     if (dist > 1.0f) { rx /= dist; ry /= dist; }
     ImVec2 p = {center.x + rx * map_radius, center.y + ry * map_radius};
-    ImU32 col = igColorConvertFloat4ToU32((ImVec4){
-        us->own_marker_color[0], us->own_marker_color[1],
-        us->own_marker_color[2], us->own_marker_color[3]});
+    const char *local_color_name = us->minimap_display_name[0]
+                                       ? us->minimap_display_name
+                                       : us->nickname;
+    ImU32 col = ntl_unique_u32(local_color_name, 0x564c4954u);
     ntl_draw_marker(dl, p, us->own_marker_size, us->own_marker_shape, col);
+    if (us->minimap_show_own_name && local_color_name[0]) {
+      ImVec2 ts;
+      igCalcTextSize(&ts, local_color_name, NULL, false, -1.0f);
+      ImDrawList_AddText_Vec2(dl,
+          (ImVec2){p.x - ts.x * 0.5f, p.y + us->own_marker_size + 2.0f},
+          col, local_color_name, NULL);
+    }
   }
-
-  ImU32 team_col = igColorConvertFloat4ToU32((ImVec4){
-      us->ntl_marker_color[0], us->ntl_marker_color[1],
-      us->ntl_marker_color[2], us->ntl_marker_color[3]});
 
   /* Vlither Android presence is independent from NTL. Every Vlither client
      publishes its authoritative world coordinates to the Vlither backend once
@@ -1304,7 +1441,7 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
       const char *server = vlither_chat_player_server(i);
       const char *client_id = vlither_chat_player_client_id(i);
       int snake_id = vlither_chat_player_snake_id(i);
-      if (!same_server(server, us->ipv4) || snake_id < 0) continue;
+      if (!same_server(server, us->server_address) || snake_id < 0) continue;
       if ((local && snake_id == local->id) ||
           (client_id && us->ntl_client_id[0] &&
            !strcmp(client_id, us->ntl_client_id)))
@@ -1326,10 +1463,14 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
       float dist = sqrtf(rx * rx + ry * ry);
       if (dist > 1.0f) { rx /= dist; ry /= dist; }
       ImVec2 p = {center.x + rx * map_radius, center.y + ry * map_radius};
-      ntl_draw_marker(dl, p, us->ntl_marker_size, us->ntl_marker_shape, team_col);
+      const char *color_name = vlither_chat_player_nick(i);
+      ImU32 marker_col = ntl_unique_u32(color_name, 0x564c4954u);
+      ntl_draw_marker(dl, p, us->ntl_marker_size, us->ntl_marker_shape,
+                      marker_col);
 
       if (us->ntl_marker_labels) {
-        const char *name = vlither_chat_player_nick(i);
+        const char *name = vlither_chat_player_map_name(i);
+        if (!name || !name[0]) name = vlither_chat_player_nick(i);
         if (!name || !name[0]) name = "Vlither";
         igPushFont(u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
                    u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize);
@@ -1343,8 +1484,7 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
               ImDrawList_AddText_Vec2(dl,
                   (ImVec2){text_pos.x + ox, text_pos.y + oy},
                   IM_COL32(0, 0, 0, 235), name, NULL);
-        ImDrawList_AddText_Vec2(dl, text_pos, IM_COL32(255, 220, 35, 255),
-                                name, NULL);
+        ImDrawList_AddText_Vec2(dl, text_pos, marker_col, name, NULL);
         igPopFont();
       }
     }
@@ -1356,10 +1496,9 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
   /* NTL teammates use the same visual marker style. If the same Vlither
      Android client is present in both feeds, prefer the Vlither copy to avoid
      drawing duplicate dots/names. */
-  /* team_col already computed above. */
   for (int i = 0; i < S.count; ++i) {
     ntl_member *m = &S.members[i];
-    if (!same_server(m->srv, us->ipv4) ||
+    if (!same_server(m->srv, us->server_address) ||
         ntl_member_is_local(m, us, local) ||
         ntl_member_has_vlither_presence(m, us))
       continue;
@@ -1385,7 +1524,7 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
     bool superseded = false;
     for (int j = i + 1; j < S.count; ++j) {
       ntl_member *other = &S.members[j];
-      if (!same_server(other->srv, us->ipv4) ||
+      if (!same_server(other->srv, us->server_address) ||
           !ntl_member_same_client(m, other))
         continue;
       snake *other_visible =
@@ -1409,10 +1548,13 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
     float dist = sqrtf(rx * rx + ry * ry);
     if (dist > 1.0f) { rx /= dist; ry /= dist; }
     ImVec2 p = {center.x + rx * map_radius, center.y + ry * map_radius};
-    ntl_draw_marker(dl, p, us->ntl_marker_size, us->ntl_marker_shape, team_col);
+    const char *clean_name = ntl_clean_name(m->nick);
+    ImU32 marker_col = ntl_unique_u32(clean_name, 0x4e544c31u);
+    ntl_draw_marker(dl, p, us->ntl_marker_size, us->ntl_marker_shape,
+                    marker_col);
 
     if (us->ntl_marker_labels) {
-      const char *name = ntl_clean_name(m->nick);
+      const char *name = clean_name;
       igPushFont(u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
                  u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize);
       ImVec2 text_size;
@@ -1425,8 +1567,7 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
             ImDrawList_AddText_Vec2(dl,
                 (ImVec2){text_pos.x + ox, text_pos.y + oy},
                 IM_COL32(0, 0, 0, 235), name, NULL);
-      ImDrawList_AddText_Vec2(dl, text_pos, IM_COL32(60, 255, 100, 255),
-                              name, NULL);
+      ImDrawList_AddText_Vec2(dl, text_pos, marker_col, name, NULL);
       igPopFont();
     }
   }
@@ -1461,10 +1602,15 @@ static void draw_chat_network_switch(void) {
   igPopStyleColor(1);
   igSameLine(0, 8);
   if (S.vlither_chat_active) {
-    igTextColored(vlither_chat_connected()
+    bool joined = vlither_chat_joined();
+    igTextColored(!joined
+                      ? (ImVec4){0.65f, 0.65f, 0.68f, 0.9f}
+                      : vlither_chat_connected()
                       ? (ImVec4){0.35f, 1.0f, 0.50f, 0.9f}
                       : (ImVec4){1.0f, 0.72f, 0.25f, 0.9f},
-                  vlither_chat_connected() ? "Connected" : "Reconnecting");
+                  !joined ? "Left"
+                          : vlither_chat_connected() ? "Connected"
+                                                     : "Reconnecting");
   }
 }
 
@@ -1543,6 +1689,7 @@ void ntl_team_draw(tenv *env) {
      online-player list are hidden on Settings; their Android size/position is
      edited from Keyboard Editor instead. */
   bool settings_open = g->curr_screen == SETTINGS;
+  if (us->ntl_stealth_mode && !settings_open) return;
   ImGuiViewport *vp = igGetMainViewport();
   ImGuiStyle *style = igGetStyle();
 
@@ -1660,14 +1807,23 @@ void ntl_team_draw(tenv *env) {
         int vcount = vlither_chat_history_count();
         if (vcount == 0) {
           igTextColored((ImVec4){0.60f, 0.60f, 0.60f, 0.75f},
-                        vlither_chat_connected()
+                        !vlither_chat_joined()
+                            ? "You left Vlither Global Chat."
+                            : vlither_chat_connected()
                             ? "No Vlither messages yet."
                             : "Vlither chat is reconnecting...");
         }
         for (int n = 0; n < vcount; ++n) {
           const char *sender = vlither_chat_history_nick(n);
           const char *text = vlither_chat_history_text(n);
-          igTextColored((ImVec4){1.0f, 0.82f, 0.10f, 1.0f}, "[%s]: ",
+          if (us->ntl_chat_timestamps) {
+            char clock[6];
+            ntl_history_clock(
+                (time_t)(vlither_chat_history_time_ms(n) / 1000LL), clock);
+            igTextColored((ImVec4){0.62f, 0.66f, 0.72f, 0.86f}, "%s ", clock);
+            igSameLine(0, 0);
+          }
+          igTextColored(ntl_unique_color(sender, 0x564c4954u), "[%s]: ",
                         sender && sender[0] ? sender : "Vlither");
           igSameLine(0, 0);
           igTextColored((ImVec4){0.92f, 0.92f, 0.96f, 1.0f}, "%s", text);
@@ -1690,10 +1846,16 @@ void ntl_team_draw(tenv *env) {
           bool system_msg = !strcmp(sender, "System");
           ImVec4 sender_col = system_msg
                                   ? (ImVec4){0.90f, 0.70f, 0.20f, 1.0f}
-                                  : (ImVec4){0.20f, 1.00f, 0.35f, 1.0f};
+                                  : ntl_unique_color(sender, 0x4e544c31u);
           ImVec4 text_col = system_msg
                                 ? (ImVec4){0.90f, 0.85f, 0.60f, 1.0f}
                                 : (ImVec4){0.90f, 0.90f, 0.92f, 1.0f};
+          if (us->ntl_chat_timestamps) {
+            char clock[6];
+            ntl_history_clock(S.history[i].time, clock);
+            igTextColored((ImVec4){0.62f, 0.66f, 0.72f, 0.86f}, "%s ", clock);
+            igSameLine(0, 0);
+          }
           igTextColored(sender_col, "[%s]: ", sender);
           igSameLine(0, 0);
           igTextColored(text_col, "%s", S.history[i].text);
@@ -1708,12 +1870,14 @@ void ntl_team_draw(tenv *env) {
 
       igSetCursorPosY(fmaxf(0.0f, win_sz.y - igGetFrameHeight() - 8.0f));
       igPushItemWidth(fmaxf(40.0f, win_sz.x - 16.0f));
+      igBeginDisabled(S.vlither_chat_active && !vlither_chat_joined());
       bool submitted = igInputTextWithHint(
           "##chat_box_input",
           S.vlither_chat_active ? "Message Vlither chat..." : "Message NTL team...",
           S.input, sizeof S.input, ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
       igPopItemWidth();
       if (submitted) chat_submit_current(us);
+      igEndDisabled();
     }
     igEnd();
   }
@@ -1757,8 +1921,9 @@ void ntl_team_draw(tenv *env) {
                       "Vlither players (nick, srv, ver):");
         int count = vlither_chat_player_count();
         for (int i = 0; i < count; ++i) {
-          igTextColored((ImVec4){1.0f, 0.82f, 0.10f, 1.0f}, "%s",
-                        vlither_chat_player_nick(i));
+          const char *player_name = vlither_chat_player_nick(i);
+          igTextColored(ntl_unique_color(player_name, 0x564c4954u),
+                        "● %s", player_name);
           igSameLine(0, 4);
           igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s",
                         vlither_chat_player_server(i));
@@ -1794,8 +1959,9 @@ void ntl_team_draw(tenv *env) {
           igTextColored((ImVec4){0.85f, 0.2f, 0.2f, 1.0f}, "%s",
                         m->owner[0] ? m->owner : "unknown");
           igSameLine(0, 4);
-          igTextColored((ImVec4){0.20f, 1.00f, 0.35f, 1.0f}, "%s",
-                        ntl_clean_name(m->nick));
+          const char *clean_name = ntl_clean_name(m->nick);
+          igTextColored(ntl_unique_color(clean_name, 0x4e544c31u), "● %s",
+                        clean_name);
           igSameLine(0, 4);
           igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s",
                         m->srv[0] ? m->srv : "_GAME_MENU_");
@@ -2231,13 +2397,26 @@ void ntl_team_panel(tenv *env) {
   igGetContentRegionAvail(&avail);
 
   if (S.vlither_chat_active) {
-    igTextColored(vlither_chat_connected()
+    bool chat_joined = vlither_chat_joined();
+    igTextColored(!chat_joined
+                      ? (ImVec4){0.65f, 0.65f, 0.68f, 1.0f}
+                      : vlither_chat_connected()
                       ? (ImVec4){0.35f, 1.0f, 0.5f, 1.0f}
                       : (ImVec4){1.0f, 0.7f, 0.25f, 1.0f},
-                  vlither_chat_connected()
+                  !chat_joined
+                      ? "Vlither Chat left"
+                      : vlither_chat_connected()
                       ? "Vlither Chat connected"
                       : "Vlither Chat reconnecting...");
+    igSameLine(0, 12);
+    if (igButton(chat_joined ? "Leave Global Chat" : "Join Global Chat",
+                 (ImVec2){180.0f, igGetFrameHeight() * 1.20f})) {
+      vlither_chat_set_joined(!chat_joined);
+      chat_joined = !chat_joined;
+    }
     igTextWrapped("Vlither Chat is the public chat for players currently connected through the Vlither Android backend. The player list below shows online Vlither clients.");
+    if (!chat_joined)
+      igTextDisabled("While left, your presence, minimap marker, player-list entry, chat messages and voice status are hidden from Vlither users.");
     igCheckbox("Show Vlither in-game chat", &S.vlither_chat_open);
     igSameLine(0, 16);
     igCheckbox("Show Vlither players", &S.players_open);
@@ -2288,13 +2467,22 @@ void ntl_team_panel(tenv *env) {
                      ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar);
     int vcount = vlither_chat_history_count();
     if (vcount == 0) {
-      igTextDisabled(vlither_chat_connected()
+      igTextDisabled(!chat_joined
+                         ? "You left Vlither Global Chat."
+                         : vlither_chat_connected()
                          ? "No Vlither messages yet."
                          : "Waiting for the Vlither chat server...");
     } else {
       for (int i = 0; i < vcount; ++i) {
-        igTextColored((ImVec4){1.0f, 0.82f, 0.10f, 1.0f}, "%s",
-                      vlither_chat_history_nick(i));
+        const char *sender = vlither_chat_history_nick(i);
+        if (us->ntl_chat_timestamps) {
+          char clock[6];
+          ntl_history_clock(
+              (time_t)(vlither_chat_history_time_ms(i) / 1000LL), clock);
+          igTextDisabled("%s", clock);
+          igSameLine(0, 6);
+        }
+        igTextColored(ntl_unique_color(sender, 0x564c4954u), "%s", sender);
         igSameLine(0, 6);
         igTextWrapped("%s", vlither_chat_history_text(i));
       }
@@ -2304,6 +2492,7 @@ void ntl_team_panel(tenv *env) {
       S.last_vlither_history_count = vcount;
     }
     igEndChild();
+    igBeginDisabled(!chat_joined);
     igSetNextItemWidth(-76);
     if (S.focus_vlither_input) {
       igSetKeyboardFocusHere(0);
@@ -2315,6 +2504,7 @@ void ntl_team_panel(tenv *env) {
     igSameLine(0, 6);
     if (igButton("Send##vlither", (ImVec2){70, 0}) || v_enter)
       chat_submit_current(us);
+    igEndDisabled();
     igEndChild();
 
     if (wide_v) igSameLine(0, style->ItemSpacing.x);
@@ -2327,8 +2517,9 @@ void ntl_team_panel(tenv *env) {
       igTextDisabled("No Vlither players online.");
     } else {
       for (int i = 0; i < pcount; ++i) {
-        igTextColored((ImVec4){1.0f, 0.82f, 0.10f, 1.0f}, "%s",
-                      vlither_chat_player_nick(i));
+        const char *player_name = vlither_chat_player_nick(i);
+        igTextColored(ntl_unique_color(player_name, 0x564c4954u),
+                      "● %s", player_name);
         igTextDisabled("%s  |  Vlither v%s",
                        vlither_chat_player_server(i),
                        vlither_chat_player_version(i));
@@ -2511,6 +2702,12 @@ void ntl_team_panel(tenv *env) {
       } else {
         for (int n = 0; n < S.history_count; ++n) {
           int i = (S.history_start + n) % NTL_CHAT_HISTORY_MAX;
+          if (us->ntl_chat_timestamps) {
+            char clock[6];
+            ntl_history_clock(S.history[i].time, clock);
+            igTextDisabled("%s", clock);
+            igSameLine(0, 6);
+          }
           igTextColored((ImVec4){0.35f, 0.85f, 1.0f, 1.0f}, "%s",
                         S.history[i].nick);
           igSameLine(0, 6);
@@ -2571,8 +2768,10 @@ void ntl_team_panel(tenv *env) {
       } else {
         for (int i = 0; i < S.count; ++i) {
           ntl_member *m = &S.members[i];
-          bool same = same_server(m->srv, us->ipv4);
-          igText("%s", ntl_clean_name(m->nick));
+          bool same = same_server(m->srv, us->server_address);
+          const char *clean_name = ntl_clean_name(m->nick);
+          igTextColored(ntl_unique_color(clean_name, 0x4e544c31u),
+                        "● %s", clean_name);
           igSameLine(0, 10);
           igTextColored(
               same ? (ImVec4){0.35f, 1.0f, 0.5f, 1.0f}

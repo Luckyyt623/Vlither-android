@@ -47,9 +47,9 @@ static stbi_uc* _load_from_asset(const char* filename, int* w, int* h, int* c) {
 }
 #endif
 
-static texture* create_mipmap_texture_rgba(tcontext* ctx,
-                                             const stbi_uc* data,
-                                             int w, int h) {
+texture* create_mipmap_texture_from_rgba(tcontext* ctx,
+                                         const unsigned char* data,
+                                         int w, int h) {
   if (!ctx || !data || w <= 0 || h <= 0) return NULL;
   texture* r = malloc(sizeof(texture));
   if (!r) return NULL;
@@ -281,12 +281,14 @@ static texture* create_mipmap_texture_rgba(tcontext* ctx,
 texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
   int w = 0, h = 0, c = 0;
 #ifdef ANDROID
-  stbi_uc* data = _load_from_asset(filename, &w, &h, &c);
+  stbi_uc* data = filename && filename[0] == '/'
+                      ? stbi_load(filename, &w, &h, &c, 4)
+                      : _load_from_asset(filename, &w, &h, &c);
 #else
   stbi_uc* data = stbi_load(filename, &w, &h, &c, 4);
 #endif
   if (!data) return NULL;
-  texture* result = create_mipmap_texture_rgba(ctx, data, w, h);
+  texture* result = create_mipmap_texture_from_rgba(ctx, data, w, h);
   stbi_image_free(data);
   return result;
 }
@@ -294,14 +296,37 @@ texture* create_mipmap_texture(tcontext* ctx, const char* filename) {
 texture* create_mipmap_texture_from_memory(tcontext* ctx,
                                             const unsigned char* encoded,
                                             size_t encoded_size) {
-  if (!encoded || encoded_size == 0 || encoded_size > INT_MAX) return NULL;
+  int w = 0, h = 0;
+  unsigned char* data = decode_texture_rgba_from_memory(
+      encoded, encoded_size, &w, &h);
+  if (!data) return NULL;
+  texture* result = create_mipmap_texture_from_rgba(ctx, data, w, h);
+  free_texture_rgba(data);
+  return result;
+}
+
+unsigned char* decode_texture_rgba_from_memory(const unsigned char* encoded,
+                                                size_t encoded_size,
+                                                int* width, int* height) {
+  if (width) *width = 0;
+  if (height) *height = 0;
+  if (!encoded || encoded_size == 0 || encoded_size > INT_MAX ||
+      !width || !height)
+    return NULL;
   int w = 0, h = 0, c = 0;
   stbi_uc* data = stbi_load_from_memory(encoded, (int)encoded_size,
                                         &w, &h, &c, 4);
-  if (!data) return NULL;
-  texture* result = create_mipmap_texture_rgba(ctx, data, w, h);
-  stbi_image_free(data);
-  return result;
+#ifdef ANDROID
+  if (!data) data = android_jni_decode_image_rgba(encoded, encoded_size, &w, &h);
+#endif
+  if (!data || w <= 0 || h <= 0) return NULL;
+  *width = w;
+  *height = h;
+  return data;
+}
+
+void free_texture_rgba(unsigned char* rgba) {
+  stbi_image_free(rgba);
 }
 
 texture* create_minimap_texture(tcontext* ctx, int width) {

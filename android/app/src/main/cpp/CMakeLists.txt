@@ -47,9 +47,10 @@ target_include_directories(vlither PRIVATE
 target_compile_definitions(vlither PRIVATE
     ANDROID
     MG_TLS=3
+    MG_ENABLE_IPV6=1
     CGLM_FORCE_DEPTH_ZERO_TO_ONE
     CIMGUI_NO_EXPORT
-    APP_VERSION="4.6"
+    APP_VERSION="4.7"
     SETTINGS_VERSION="2.0"
     VK_USE_PLATFORM_ANDROID_KHR
 )

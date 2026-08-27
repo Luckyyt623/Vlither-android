@@ -54,6 +54,9 @@ typedef struct renderer {
   VkDescriptorSet boost_button_ds;
   texture* arrow_atlas_tex;
   VkDescriptorSet arrow_atlas_ds;
+  texture* custom_arrow_tex;
+  VkDescriptorSet custom_arrow_ds;
+  long long custom_arrow_signature;
   texture* discord_tex;
   VkDescriptorSet discord_ds;
   /* All four Vlither Voice states share one atlas/descriptor. This keeps the
@@ -91,5 +94,6 @@ void renderer_render_cursor(renderer* r, tcontext* ctx);
 void renderer_destroy(renderer* r, tcontext* ctx);
 void renderer_resize(renderer* r, tcontext* ctx, ivec2 size);
 void renderer_clear_instances(renderer* r);
+bool renderer_reload_custom_arrow(renderer* r, tcontext* ctx);
 
 #endif

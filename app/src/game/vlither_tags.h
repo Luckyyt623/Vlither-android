@@ -21,21 +21,29 @@ int vlither_chat_history_count(void);
 const char *vlither_chat_history_nick(int index);
 const char *vlither_chat_history_text(int index);
 const char *vlither_chat_history_server(int index);
+long long vlither_chat_history_time_ms(int index);
 int vlither_chat_player_count(void);
 const char *vlither_chat_player_nick(int index);
 const char *vlither_chat_player_server(int index);
 const char *vlither_chat_player_version(int index);
 const char *vlither_chat_player_client_id(int index);
+const char *vlither_chat_player_map_name(int index);
 int vlither_chat_player_snake_id(int index);
 float vlither_chat_player_x(int index);
 float vlither_chat_player_y(int index);
 int vlither_chat_player_fps(int index);
 int vlither_chat_player_ping(int index);
+bool vlither_chat_player_sos(int index);
 bool vlither_chat_player_voice_enabled(int index);
 bool vlither_chat_player_voice_muted(int index);
 bool vlither_chat_player_voice_deafened(int index);
 const char *vlither_chat_player_voice_room_id(int index);
 bool vlither_chat_is_snake_player(int snake_id, const char *server);
+bool vlither_chat_is_nickname_player(const char *nickname, const char *server);
+bool vlither_chat_is_nickname_sos(const char *nickname, const char *server);
+void vlither_chat_set_joined(bool joined);
+bool vlither_chat_joined(void);
+void vlither_chat_set_sos_until(long long until_ms);
 
 /* Event ping system. Backend timestamps are UTC epoch milliseconds; the UI
    formats them with the phone's local timezone. Interest is persisted by the

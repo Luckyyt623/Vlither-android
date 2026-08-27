@@ -104,6 +104,16 @@ static inline float dist2(float ax, float ay, float bx, float by) {
   return dx * dx + dy * dy;
 }
 
+static inline float safe_border_radius(const game_data* gdata) {
+  float smoothed = gdata->data.flux_grd;
+  float server = gdata->data.real_flux_grd;
+  /* During a server shrink the renderer eases flux_grd over several frames,
+     but collision authority has already moved to real_flux_grd. The bot must
+     obey whichever boundary is smaller. */
+  if (server > 0.0f && (smoothed <= 0.0f || server < smoothed)) return server;
+  return smoothed;
+}
+
 static inline float ang_between(float a, float b) {
   float r1 = fmodf(a - b, (float)M_PI);
   float r2 = fmodf(b - a, (float)M_PI);
@@ -321,16 +331,21 @@ static void get_collision_points(game_data* gdata) {
     }
   }
 
-  float view_ang = atan2f(gdata->data.view_yy - gdata->data.grd,
-                          gdata->data.view_xx - gdata->data.grd);
+  /* Use the snake head itself, not the interpolated camera position. Follow
+     view and camera lag can otherwise place the sampled wall arc beside the
+     real danger area. */
+  float view_ang = atan2f(B.y - gdata->data.grd,
+                          B.x - gdata->data.grd);
   float dist_to_ctr = sqrtf(dist2(B.x, B.y, gdata->data.grd, gdata->data.grd));
-  bool near_wall = (gdata->data.flux_grd - dist_to_ctr) < 1000.0f;
+  float border_radius = safe_border_radius(gdata);
+  bool near_wall = border_radius > 0.0f &&
+                   (border_radius - dist_to_ctr) < 1000.0f;
 
   if (near_wall) {
     float bpw = BORDER_PT_RADIUS * 2.0f;
-    float brad = gdata->data.flux_grd + BORDER_PT_RADIUS;
-    for (int k = -3; k <= 3; k++) {
-      float wa = view_ang + (k * bpw) / gdata->data.flux_grd;
+    float brad = border_radius + BORDER_PT_RADIUS;
+    for (int k = -12; k <= 12; k++) {
+      float wa = view_ang + (k * bpw) / border_radius;
       float wx = gdata->data.grd + brad * cosf(wa);
       float wy = gdata->data.grd + brad * sinf(wa);
       float wd2 = dist2(B.x, B.y, wx, wy);
@@ -709,21 +724,23 @@ static void follow_circle_self(game_data* gdata) {
   }
 
   float dist_to_ctr = sqrtf(dist2(B.x, B.y, gdata->data.grd, gdata->data.grd));
-  bool near_wall = (gdata->data.flux_grd - dist_to_ctr) < 1000.0f;
+  float border_radius = safe_border_radius(gdata);
+  bool near_wall = border_radius > 0.0f &&
+                   (border_radius - dist_to_ctr) < 1000.0f;
   float wall_od = 0.0f;
 
   if (near_wall) {
-    float view_ang = atan2f(gdata->data.view_yy - gdata->data.grd,
-                            gdata->data.view_xx - gdata->data.grd);
+    float view_ang = atan2f(B.y - gdata->data.grd,
+                            B.x - gdata->data.grd);
     float bpw = BORDER_PT_RADIUS * 2.0f;
-    float brad = gdata->data.flux_grd + BORDER_PT_RADIUS;
+    float brad = border_radius + BORDER_PT_RADIUS;
     float wall_off = 0.5f * (B.width + BORDER_PT_RADIUS);
     bool offset_set = false;
     float offset = 0.0f;
     poly_box cpolbody;
 
     for (int k = -2; k <= 2; k++) {
-      float wa = view_ang + (k * bpw) / gdata->data.flux_grd;
+      float wa = view_ang + (k * bpw) / border_radius;
       v2 wp = {gdata->data.grd + brad * cosf(wa),
                gdata->data.grd + brad * sinf(wa)};
 
@@ -907,6 +924,56 @@ static void every(game_data* gdata) {
                     B.y - (B.x + B.ca * B.width - B.x), B.width * B.speed_mult};
 }
 
+/* Border safety must outrank every behavioural stage. The original port ran
+   check_collision() only outside self-circle stage 2, so a coiling snake could
+   keep following its own body while touching the wall. This predictive guard
+   breaks food/coil state early and turns toward a safe inward point. */
+static bool avoid_border_emergency(game_data* gdata) {
+  const float border_radius = safe_border_radius(gdata);
+  const float center = gdata->data.grd;
+  if (border_radius <= 0.0f || center <= 0.0f) return false;
+
+  float dx = B.x - center;
+  float dy = B.y - center;
+  float dist = sqrtf(dx * dx + dy * dy);
+  if (dist < 1.0f) return false;
+
+  float outward_x = dx / dist;
+  float outward_y = dy / dist;
+  float clearance = border_radius - dist - B.radius;
+  float guard = fmaxf(700.0f,
+                      B.head_circle.r + B.width * (4.0f + B.speed_mult));
+  float lookahead = fmaxf(500.0f,
+                          B.width * (5.0f + 2.0f * B.speed_mult));
+  float predicted_x = B.x + B.ca * lookahead;
+  float predicted_y = B.y + B.sa * lookahead;
+  float predicted_dist =
+      sqrtf(dist2(predicted_x, predicted_y, center, center));
+  float predicted_clearance = border_radius - predicted_dist - B.radius;
+  float outward_heading = B.ca * outward_x + B.sa * outward_y;
+
+  bool imminent = clearance <= guard * 0.45f ||
+                  predicted_clearance <= guard * 0.70f;
+  bool unsafe_course = clearance <= guard &&
+                       (outward_heading > -0.25f || B.stage == 2);
+  if (!imminent && !unsafe_course) return false;
+
+  float retreat = fmaxf(1000.0f, guard * 1.75f);
+  B.goal = (v2){roundf(B.x - outward_x * retreat),
+                roundf(B.y - outward_y * retreat)};
+  B.stage = 0;
+  B.has_food = false;
+  B.delay_frame = -1;
+  gdata->bot.output.accel = false;
+
+  g_bot_dbg.avoid_active = true;
+  g_bot_dbg.avoid_ix = center + outward_x * border_radius;
+  g_bot_dbg.avoid_iy = center + outward_y * border_radius;
+  g_bot_dbg.avoid_fwd_x = predicted_x;
+  g_bot_dbg.avoid_fwd_y = predicted_y;
+  return true;
+}
+
 void sbot_init(tenv* env) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
@@ -940,7 +1007,10 @@ void sbot_go(tenv* env) {
   if (B.snake_len < B.follow_circle_length) B.stage = 0;
   if (B.has_food && B.stage != 0) B.has_food = false;
 
-  if (B.stage == 2) {
+  if (avoid_border_emergency(gdata)) {
+    /* Emergency goal already selected; never let delayed food/circle actions
+       replace it in the same frame. */
+  } else if (B.stage == 2) {
     bot->output.accel = (bool)B.default_accel;
     follow_circle_self(gdata);
   } else if (check_collision(gdata) || check_encircle(gdata)) {

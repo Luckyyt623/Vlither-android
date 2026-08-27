@@ -12,9 +12,16 @@ typedef struct texture {
 } texture;
 
 texture* create_mipmap_texture(tcontext* ctx, const char* filename);
+texture* create_mipmap_texture_from_rgba(tcontext* ctx,
+                                         const unsigned char* rgba,
+                                         int width, int height);
 texture* create_mipmap_texture_from_memory(tcontext* ctx,
                                             const unsigned char* encoded,
                                             size_t encoded_size);
+unsigned char* decode_texture_rgba_from_memory(const unsigned char* encoded,
+                                                size_t encoded_size,
+                                                int* width, int* height);
+void free_texture_rgba(unsigned char* rgba);
 texture* create_minimap_texture(tcontext* ctx, int width);
 void destroy_texture(tcontext* ctx, texture* tex);
 

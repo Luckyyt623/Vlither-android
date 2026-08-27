@@ -7,5 +7,6 @@ void imgui_init(tenv* env);
 void imgui_prerender();
 void imgui_render(VkCommandBuffer cmd);
 void imgui_destroy();
+float imgui_get_ui_scale(void);
 
 #endif

@@ -15,6 +15,10 @@ extern struct android_app* g_android_app;
 
 static float g_android_imgui_scale = 1.0f;
 
+float imgui_get_ui_scale(void) {
+    return g_android_imgui_scale;
+}
+
 static const char* android_imgui_get_clipboard(ImGuiContext* ctx) {
     (void)ctx;
     return android_jni_get_clipboard_text();
@@ -128,14 +132,16 @@ void imgui_init(tenv* env) {
 
     AAssetManager* am = g_android_app->activity->assetManager;
 
-    /* Resolution-aware UI density. Use the shorter edge so ultrawide phones
-       do not receive oversized controls, while low-resolution devices still
-       get a compact layout that fits without clipping. */
+    /* Keep the UI at the same physical proportion on every Android render
+       resolution. The old 1.30 cap made 1080p/1440p phones render smaller
+       controls than a 720p phone, while fixed-size widgets stayed unscaled
+       and clipped their already-scaled labels. 720px on the short edge is the
+       design baseline used by the original Android layout. */
     float short_edge = (float)(env->ctx->size[0] < env->ctx->size[1]
                                    ? env->ctx->size[0] : env->ctx->size[1]);
     float ui_scale = short_edge / 720.0f;
-    if (ui_scale < 0.75f) ui_scale = 0.75f;
-    if (ui_scale > 1.30f) ui_scale = 1.30f;
+    if (ui_scale < 0.70f) ui_scale = 0.70f;
+    if (ui_scale > 3.00f) ui_scale = 3.00f;
     g_android_imgui_scale = ui_scale;
 
     static const ImWchar icon_ranges[] = {0xe900, 0xeaea, 0};

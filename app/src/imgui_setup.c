@@ -8,6 +8,8 @@
 
 #include "user.h"
 
+float imgui_get_ui_scale(void) { return 1.0f; }
+
 void imgui_init(tenv* env) {
   tuser_data* usr = env->usr;
 

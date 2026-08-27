@@ -5,6 +5,9 @@
 #include "../arrow_styles.h"
 #include "../user.h"
 #include "key_buttons.h"
+#ifdef ANDROID
+#include "../android_jni.h"
+#endif
 
 static const char* const ARROW_STYLE_NAMES[ARROW_STYLE_COUNT] = {
     "Red Arrow", "Red 3D", "Blue 3D", "Blue Neon", "Colourful",
@@ -228,7 +231,7 @@ void ui_controls(tenv* env) {
         igSpacing();
         igSpacing();
 
-        igSeparatorText("Joystick Ring");
+        igSeparatorText("Slither Joystick");
         if (igBeginTable("joy_tbl", 2, ImGuiTableFlags_None, (ImVec2){}, 0)) {
           igTableNextRow(ImGuiTableRowFlags_None, 0);
           igTableSetColumnIndex(0);
@@ -263,7 +266,7 @@ void ui_controls(tenv* env) {
           igIndent(-style->WindowPadding.x);
           igEndTable();
         }
-        if (igButton("Reset joystick position", (ImVec2){-1, 0.0f})) {
+        if (igButton("Reset Slither joystick position", (ImVec2){-1, 0.0f})) {
           usrs->joy_pos_custom = false;
           usrs->joy_rel_x      = swapped ? 0.875f : 0.125f;
           usrs->joy_rel_y      = 0.825f;
@@ -359,6 +362,21 @@ void ui_controls(tenv* env) {
           }
           igEndTable();
         }
+#ifdef ANDROID
+        bool custom_arrow_ready = usr->r &&
+            renderer_reload_custom_arrow(usr->r, ctx);
+        if (igButton("Upload arrow image from device", (ImVec2){-1, 0.0f}))
+          android_jni_request_custom_arrow();
+        if (!custom_arrow_ready) igBeginDisabled(true);
+        igCheckbox("Use uploaded arrow", &usrs->custom_arrow_enabled);
+        if (!custom_arrow_ready) {
+          usrs->custom_arrow_enabled = false;
+          igEndDisabled();
+          igTextDisabled("Choose a PNG, JPEG or WebP image (maximum 12 MB).");
+        }
+#else
+        igTextDisabled("Custom arrow upload is available in the Android build.");
+#endif
         if (usrs->arrow_sync_with_zoom)
           igTextDisabled("Arrow size follows game zoom. Head dot size always stays fixed.");
         else
@@ -370,6 +388,7 @@ void ui_controls(tenv* env) {
           usrs->arrow_style       = 0;
           usrs->arrow_invisible   = false;
           usrs->arrow_sync_with_zoom = true;
+          usrs->custom_arrow_enabled = false;
           usrs->head_dot_color[0] = 1.0f;
           usrs->head_dot_color[1] = 1.0f;
           usrs->head_dot_color[2] = 1.0f;
@@ -387,7 +406,11 @@ void ui_controls(tenv* env) {
           igAlignTextToFramePadding();
           igText("Y position");
           igAlignTextToFramePadding();
-          igText("Height");
+          igText("Length");
+          igAlignTextToFramePadding();
+          igText("Thickness / width");
+          igAlignTextToFramePadding();
+          igText("Thumb size");
           igAlignTextToFramePadding();
           igText("Opacity");
           igAlignTextToFramePadding();
@@ -408,6 +431,12 @@ void ui_controls(tenv* env) {
           igSliderFloat("##zoom h", &usrs->zslider_rel_h, 0.08f, 0.48f, "%.2f",
                         ImGuiSliderFlags_AlwaysClamp);
           igSetNextItemWidth(-1);
+          igSliderFloat("##zoom thickness", &usrs->zslider_thickness,
+                        0.35f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          igSetNextItemWidth(-1);
+          igSliderFloat("##zoom thumb", &usrs->zslider_thumb_scale,
+                        0.5f, 3.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+          igSetNextItemWidth(-1);
           igSliderFloat("##zoom opacity", &usrs->zslider_opacity, 0.0f, 1.0f, "%.2f",
                         ImGuiSliderFlags_AlwaysClamp);
           igSetNextItemWidth(-1);
@@ -424,6 +453,8 @@ void ui_controls(tenv* env) {
           usrs->zslider_rel_y      = 0.500f;
           usrs->zslider_rel_h      = 0.280f;
           usrs->zslider_opacity    = 1.0f;
+          usrs->zslider_thickness  = 1.0f;
+          usrs->zslider_thumb_scale = 1.0f;
           usrs->zslider_horizontal = false;
           usrs->zslider_hidden     = false;
         }
@@ -491,6 +522,8 @@ void ui_controls(tenv* env) {
         usrs->zslider_rel_y      = 0.500f;
         usrs->zslider_rel_h      = 0.280f;
         usrs->zslider_opacity    = 1.0f;
+        usrs->zslider_thickness  = 1.0f;
+        usrs->zslider_thumb_scale = 1.0f;
         usrs->zslider_horizontal = false;
         usrs->zslider_hidden     = false;
 

@@ -5,6 +5,16 @@
 #include "ntl_tags.h"
 #include "vlither_tags.h"
 
+extern bool g_ntl_skin_peek_active;
+
+static bool redraw_snake_is_teammate(const snake *o,
+                                     const user_settings *usrs) {
+  if (!o || !usrs) return false;
+  if (vlither_chat_is_snake_player(o->id, usrs->server_address)) return true;
+  if (ntl_team_is_snake_teammate(o->ntl_id, usrs->server_address)) return true;
+  return ntl_team_leaderboard_status(o->nk, usrs->server_address) > 0;
+}
+
 void lerp_minimap_float(float* dst, const uint8_t* src, int mmsz, float alpha) {
   int stride = MAX_MINIMAP_SIZE;
 
@@ -110,6 +120,15 @@ void redraw(tenv* env) {
         float fy =
             mhh2 + gdata->data.gsc * (fo->ry - gdata->data.view_yy) - d * 0.5;
 
+        if (usrs->food_glow[mode_index]) {
+          float gd = d * 1.85f;
+          fd_renderer_push(usr->r->fdr,
+                           &(fd_instance){{fx - (gd - d) * 0.5f,
+                                           fy - (gd - d) * 0.5f, gd},
+                                          (vec4s){c.r, c.g, c.b,
+                                                  fo->fr * 0.20f},
+                                          1.0f});
+        }
         fd_renderer_push(usr->r->fdr,
                          &(fd_instance){{fx, fy, d},
                                         (vec4s){c.r, c.g, c.b, fo->fr},
@@ -134,6 +153,15 @@ void redraw(tenv* env) {
         float fy =
             mhh2 + gdata->data.gsc * (fo->ry - gdata->data.view_yy) - d * 0.5;
 
+        if (usrs->food_glow[mode_index]) {
+          float gd = d * 1.85f;
+          fd_renderer_push(usr->r->fdr,
+                           &(fd_instance){{fx - (gd - d) * 0.5f,
+                                           fy - (gd - d) * 0.5f, gd},
+                                          (vec4s){c.r, c.g, c.b,
+                                                  fo->fr * 0.20f},
+                                          1.0f});
+        }
         fd_renderer_push(usr->r->fdr,
                          &(fd_instance){{fx, fy, d},
                                         (vec4s){c.r, c.g, c.b, fo->fr},
@@ -222,7 +250,9 @@ void redraw(tenv* env) {
         double score_rep = score / 1000.0;
         char nk_label_buff[MAX_NICKNAME_LEN + 1 + 7 + 1] = {0};
         char score_rep_str[9] = {0};
-        sprintf(score_rep_str, " %.1fK", score_rep);
+        sprintf(score_rep_str, usrs->mode_nicks_plus[mode_index]
+                                   ? " @%.1fK" : " %.1fK",
+                score_rep);
         sprintf(nk_label_buff, "%s%s", o->nk, score_rep_str);
 
         if (o->id != gdata->data.snake_id) {
@@ -232,10 +262,15 @@ void redraw(tenv* env) {
           /* Team names intentionally use a larger bold face than ordinary
              names so a teammate remains readable during fast movement. */
           bool vlither_teammate =
-              vlither_chat_is_snake_player(o->id, usrs->ipv4);
+              vlither_chat_is_snake_player(o->id, usrs->server_address);
           bool ntl_teammate = !vlither_teammate &&
-              ntl_team_is_snake_teammate(o->ntl_id, usrs->ipv4);
-          bool team_teammate = vlither_teammate || ntl_teammate;
+              ntl_team_is_snake_teammate(o->ntl_id, usrs->server_address);
+          int team_status = ntl_team_leaderboard_status(
+              o->nk, usrs->server_address);
+          bool sos_teammate = team_status == 3;
+          if (team_status == 2) vlither_teammate = true;
+          if (team_status == 1) ntl_teammate = true;
+          bool team_teammate = vlither_teammate || ntl_teammate || sos_teammate;
           if (team_teammate)
             igPushFont(usr->imgui_data.mono_font_bold[FONT_SIZE_LARGE],
                        usr->imgui_data.mono_font_bold[FONT_SIZE_LARGE]->LegacySize);
@@ -260,7 +295,11 @@ void redraw(tenv* env) {
           /* Team-network name highlighting. Vlither presence has priority so
              a Vlither Android/key teammate is always yellow; otherwise an
              NTL teammate is green. */
-          if (vlither_teammate) {
+          if (sos_teammate) {
+            ncolor[0] = 1.00f;
+            ncolor[1] = 0.08f;
+            ncolor[2] = 0.10f;
+          } else if (vlither_teammate) {
             ncolor[0] = 1.00f;
             ncolor[1] = 0.82f;
             ncolor[2] = 0.10f;
@@ -271,7 +310,10 @@ void redraw(tenv* env) {
           }
 
           ntx = ntx - (usrs->snake_scores ? tsize.x : nsize.x) * 0.5f;
-          nty = nty + 32 + 11 * o->sc * gdata->data.gsc;
+          if (usrs->mode_names_on_top[mode_index])
+            nty = nty - tsize.y - 19 - 8 * o->sc * gdata->data.gsc;
+          else
+            nty = nty + 32 + 11 * o->sc * gdata->data.gsc;
 
           bool strong_name_outline = mode->player_names_outline || team_teammate;
           int name_outline_radius = team_teammate ? 2 : 1;
@@ -673,9 +715,28 @@ void redraw(tenv* env) {
         float skin_alpha = mode->transparent_skin
                                ? usrs->transparent_skin_opacity[mode_index]
                                : 1.0f;
+        if (o->id == gdata->data.snake_id && usrs->own_skin_invisible)
+          skin_alpha = 0.0f;
 
-        if (mode->render_mode == 0) {
-          float shadow_strength = 0.25f;
+        bool is_local_snake = o->id == gdata->data.snake_id;
+        bool is_team_snake = !is_local_snake &&
+                             redraw_snake_is_teammate(o, usrs);
+        int snake_render_mode = mode->render_mode;
+        if (usrs->mode_high_visibility_skins[mode_index] ||
+            usrs->mode_skinless_peek[mode_index]) {
+          if (usrs->mode_skinless_peek[mode_index] &&
+              g_ntl_skin_peek_active)
+            snake_render_mode = 0;
+          else if ((is_local_snake && usrs->mode_own_true_skin[mode_index]) ||
+                   (is_team_snake && usrs->mode_team_true_skin[mode_index]))
+            snake_render_mode = 0;
+          else
+            snake_render_mode = 1;
+        }
+
+        if (snake_render_mode == 0) {
+          float shadow_strength =
+              0.25f * usrs->snake_shadow_strength[mode_index] * skin_alpha;
 
           if (render_shadows) {
 
@@ -789,7 +850,7 @@ void redraw(tenv* env) {
                                                 {se, se, se, a * skin_alpha}});
               }
           }
-        } else if (mode->render_mode == 1) {
+        } else if (snake_render_mode == 1) {
           float skinless_a = skin_alpha;
           if (render_shadows) {
 
@@ -811,7 +872,8 @@ void redraw(tenv* env) {
                                     (lsz * gdata->data.gsc + 1) * 2,
                                     gdata->data.pba[(int)j]},
                                    gdata->cg_uvs[BLANK_UV],
-                                   {0, 0, 0, a * a}});
+                                   {0, 0, 0, a * a * skin_alpha *
+                                                  usrs->snake_shadow_strength[mode_index]}});
               }
             }
           }
@@ -841,7 +903,8 @@ void redraw(tenv* env) {
                                         (lsz * gdata->data.gsc + 1) * 2,
                                         gdata->data.pba[(int)j]},
                                        gdata->cg_uvs[BLANK_UV],
-                                       {0, 0, 0, a * a}});
+                                       {0, 0, 0, a * a * skin_alpha *
+                                                      usrs->snake_shadow_strength[mode_index]}});
                   }
                 }
 
@@ -887,7 +950,8 @@ void redraw(tenv* env) {
                                         (lsz * gdata->data.gsc + 1) * 2,
                                         gdata->data.pba[(int)j]},
                                        gdata->cg_uvs[BLANK_UV],
-                                       {0, 0, 0, a * a}});
+                                       {0, 0, 0, a * a * skin_alpha *
+                                                      usrs->snake_shadow_strength[mode_index]}});
                   }
                 }
 
@@ -912,7 +976,7 @@ void redraw(tenv* env) {
                         {cg_col->r, cg_col->g, cg_col->b, a * skinless_a}});
               }
           }
-        } else if (mode->render_mode == 2) {
+        } else if (snake_render_mode == 2) {
           float skinless_a = skin_alpha;
           if (render_shadows) {
 
@@ -934,7 +998,8 @@ void redraw(tenv* env) {
                                     (lsz * gdata->data.gsc + 1) * 2,
                                     gdata->data.pba[(int)j]},
                                    gdata->cg_uvs[BLANK_UV],
-                                   {0, 0, 0, a * a}});
+                                   {0, 0, 0, a * a * skin_alpha *
+                                                  usrs->snake_shadow_strength[mode_index]}});
               }
             }
           }
@@ -964,7 +1029,8 @@ void redraw(tenv* env) {
                                         (lsz * gdata->data.gsc + 1) * 2,
                                         gdata->data.pba[(int)j]},
                                        gdata->cg_uvs[BLANK_UV],
-                                       {0, 0, 0, a * a}});
+                                       {0, 0, 0, a * a * skin_alpha *
+                                                      usrs->snake_shadow_strength[mode_index]}});
                   }
                 }
 
@@ -1035,10 +1101,18 @@ void redraw(tenv* env) {
           }
         }
 
-        if (mode->center_line && o->id == gdata->data.snake_id && bp >= 2) {
-          // Stroke only the local player's sampled centre path. Other snakes
-          // keep their original skins without a centre line. Rounded capsules
-          // keep the local line continuous and independent from transparency.
+        bool is_local_line = o->id == gdata->data.snake_id;
+        bool draw_center_line =
+            (is_local_line && mode->center_line) ||
+            (!is_local_line && usrs->center_line_others[mode_index]);
+        if (draw_center_line && skin_alpha > 0.001f && bp >= 2) {
+          int line_cg = o->cusk && o->cusk_len > 0
+                            ? o->cusk_data[0]
+                            : gdata->default_skins[o->cv][1];
+          vec3s line_base = gdata->cg_colors[line_cg];
+          float luminance = line_base.r * 0.2126f + line_base.g * 0.7152f +
+                            line_base.b * 0.0722f;
+          float line_rgb = luminance > 0.82f ? 0.0f : 1.0f;
           const float line_thickness = 2.0f;
           for (j = 1; j < bp; j++) {
             float x1 = ((gdata->data.pbx[(int)j - 1] - gdata->data.view_xx) *
@@ -1080,7 +1154,7 @@ void redraw(tenv* env) {
                      center_y - line_thickness * 0.5f, capsule_length,
                      line_angle},
                     gdata->cg_uvs[BLANK_UV],
-                    {1, 1, 1, 0.85f * a},
+                    {line_rgb, line_rgb, line_rgb, 0.85f * a},
                     {line_thickness, 1}});
           }
         }
@@ -1123,7 +1197,7 @@ void redraw(tenv* env) {
         }
 
         if (mode->show_boost) {
-          if (mode->render_mode == 2) {
+          if (snake_render_mode == 2) {
             if (o->tsp > o->fsp) {
               m = a * fmaxf(0, fminf(1, (o->tsp - o->ssp) / (o->msp - o->ssp)));
               om = m * .37;
@@ -1505,7 +1579,14 @@ void redraw(tenv* env) {
                 gdata->cg_uvs[BLANK_UV],
                 {dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, ea}});
 
-        if (mode->show_accessories && o->accessory < NUM_ACCESSORIES) {
+        bool hide_own_cosmetic = usrs->ntl_stealth_mode &&
+                                 o->id == gdata->data.snake_id;
+        bool hide_enemy_cosmetic =
+                                    usrs->mode_hide_enemy_cosmetics[mode_index] &&
+                                    o->id != gdata->data.snake_id &&
+                                    !redraw_snake_is_teammate(o, usrs);
+        if (mode->show_accessories && !hide_own_cosmetic &&
+            !hide_enemy_cosmetic && o->accessory < NUM_ACCESSORIES) {
           accessory_data* acc = gdata->accessories + o->accessory;
           ex = acc->of * cosf(fang) * ed;
           ey = acc->of * sinf(fang) * ed;
@@ -1534,6 +1615,12 @@ void redraw(tenv* env) {
     for (int i = tag_snakes_len - 1; i >= 0; --i) {
       snake* tagged = &gdata->data.snakes[i];
       if (!tagged->iiv) continue;
+      if ((usrs->ntl_stealth_mode &&
+           tagged->id == gdata->data.snake_id) ||
+          (usrs->mode_hide_enemy_tags[mode_index] &&
+           tagged->id != gdata->data.snake_id &&
+           !redraw_snake_is_teammate(tagged, usrs)))
+        continue;
       float tag_alpha = tagged->alive_amt * (1.0f - tagged->dead_amt);
       if (usrs->show_ntl_tags && tagged->ntl_tag_id >= 0)
         ntl_tags_draw(env, tagged, tag_alpha, mww2, mhh2);
