@@ -45,7 +45,10 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->restart_rc = false;
   usr_settings->quit_mc = false;
   usr_settings->smooth_zoom = false;
-  usr_settings->vsync = false;
+  /* Stable display-paced rendering is the safe Android default.  Uncapped
+     rendering remains available in Settings, but starting uncapped needlessly
+     heats the phone and leads to thermal-throttling FPS spikes. */
+  usr_settings->vsync = true;
   usr_settings->instant_restart = false;
   usr_settings->bot_radius_mult = 20;
   usr_settings->bot_follow_circle_score = 2000;
@@ -255,9 +258,9 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->ntl_high_visibility_skins = false;
   usr_settings->ntl_nicks_plus = true;
   usr_settings->ntl_names_on_top = true;
-  usr_settings->ntl_alert_sos = true;
-  usr_settings->ntl_alert_new_player = true;
-  usr_settings->ntl_alert_chat = true;
+  usr_settings->ntl_legacy_option_1 = false;
+  usr_settings->ntl_legacy_option_2 = false;
+  usr_settings->ntl_legacy_option_3 = false;
   usr_settings->ntl_chat_timestamps = true;
   usr_settings->ntl_dynamic_minimap = true;
   usr_settings->ntl_border_indicator = true;
@@ -688,9 +691,9 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.ntl_high_visibility_skins = !!loaded.ntl_high_visibility_skins;
   loaded.ntl_nicks_plus = !!loaded.ntl_nicks_plus;
   loaded.ntl_names_on_top = !!loaded.ntl_names_on_top;
-  loaded.ntl_alert_sos = !!loaded.ntl_alert_sos;
-  loaded.ntl_alert_new_player = !!loaded.ntl_alert_new_player;
-  loaded.ntl_alert_chat = !!loaded.ntl_alert_chat;
+  loaded.ntl_legacy_option_1 = false;
+  loaded.ntl_legacy_option_2 = false;
+  loaded.ntl_legacy_option_3 = false;
   loaded.ntl_chat_timestamps = !!loaded.ntl_chat_timestamps;
   loaded.ntl_dynamic_minimap = !!loaded.ntl_dynamic_minimap;
   loaded.ntl_border_indicator = !!loaded.ntl_border_indicator;

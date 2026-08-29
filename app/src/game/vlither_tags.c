@@ -19,9 +19,10 @@
 #define VLITHER_TAG_BACKEND_URL "http://139.84.170.60:10000"
 #define VLITHER_TAG_MAX_ENTRIES 256
 #define VLITHER_TAG_RECONNECT_SECONDS 4.0
-#define VLITHER_TAG_HEARTBEAT_SECONDS 1.0
+#define VLITHER_TAG_HEARTBEAT_SECONDS 2.0
 #define VLITHER_TAG_HTTP_TIMEOUT_SECONDS 15.0
 #define VLITHER_TAG_MAX_ATLAS_BYTES (16u * 1024u * 1024u)
+#define VLITHER_WS_BACKPRESSURE_BYTES (64u * 1024u)
 #define VLITHER_CHAT_HISTORY_MAX 80
 #define VLITHER_CHAT_PLAYER_MAX 128
 #define VLITHER_VOICE_ROOM_MAX 32
@@ -151,7 +152,6 @@ typedef struct vlither_tags_state {
   long long last_chat_seq;
   vlither_chat_player players[VLITHER_CHAT_PLAYER_MAX];
   int player_count;
-  bool presence_baselined;
 
   vlither_event events[VLITHER_EVENT_MAX];
   int event_count;
@@ -377,12 +377,16 @@ static void copy_json_string(struct mg_str json, const char *path,
                              char *dst, size_t cap, const char *fallback) {
   if (!dst || cap == 0) return;
   dst[0] = 0;
-  char *value = mg_json_get_str(json, path);
-  if (value) {
-    strncpy(dst, value, cap - 1);
-    dst[cap - 1] = 0;
-    mg_free(value);
-  } else if (fallback) {
+  /* Avoid one heap allocation/free pair for every string in every presence
+     snapshot.  The backend already bounds these fields below their matching
+     destination capacities, so they can be unescaped straight into place. */
+  struct mg_str token = mg_json_get_tok(json, path);
+  if (token.buf && token.len >= 2 && token.buf[0] == '"' &&
+      token.buf[token.len - 1] == '"' && token.len - 2 < cap &&
+      mg_json_unescape(mg_str_n(token.buf + 1, token.len - 2), dst, cap)) {
+    return;
+  }
+  if (fallback) {
     strncpy(dst, fallback, cap - 1);
     dst[cap - 1] = 0;
   }
@@ -450,96 +454,49 @@ static void parse_chat_message(struct mg_str json, const char *base_path) {
   copy_json_string(json, path, profile_color, sizeof profile_color, "");
   snprintf(path, sizeof path, "%s.profileEmoji", base_path);
   copy_json_string(json, path, profile_emoji, sizeof profile_emoji, "");
-  if (append_chat_message(seq, time_ms, client_id, nick, text, server,
-                          profile_color, profile_emoji) &&
-      S.env && S.env->usr &&
-      strcmp(client_id, S.env->usr->usrs.ntl_client_id))
-    ntl_team_emit_alert(NTL_ALERT_CHAT);
+  append_chat_message(seq, time_ms, client_id, nick, text, server,
+                      profile_color, profile_emoji);
 }
 
 static void parse_presence(struct mg_str json) {
-  char previous_ids[VLITHER_CHAT_PLAYER_MAX][65];
-  bool previous_sos[VLITHER_CHAT_PLAYER_MAX];
-  int previous_count = S.player_count;
-  bool baseline_only = !S.presence_baselined;
-  bool alert_player = false;
-  bool alert_sos = false;
-  memset(previous_ids, 0, sizeof previous_ids);
-  memset(previous_sos, 0, sizeof previous_sos);
-  for (int i = 0; i < previous_count; ++i) {
-    strncpy(previous_ids[i], S.players[i].client_id,
-            sizeof previous_ids[i] - 1);
-    previous_sos[i] = S.players[i].sos_until_ms >
-                      (long long)time(NULL) * 1000LL;
-  }
   memset(S.players, 0, sizeof S.players);
   S.player_count = 0;
-  for (int i = 0; i < VLITHER_CHAT_PLAYER_MAX; ++i) {
-    char base[64], path[96];
-    snprintf(base, sizeof base, "$.players[%d]", i);
-    snprintf(path, sizeof path, "%s.nickname", base);
-    char *probe = mg_json_get_str(json, path);
-    if (!probe) break;
+  struct mg_str players = mg_json_get_tok(json, "$.players");
+  struct mg_str item = {0};
+  size_t offset = 0;
+  while (S.player_count < VLITHER_CHAT_PLAYER_MAX &&
+         (offset = mg_json_next(players, offset, NULL, &item)) != 0) {
     vlither_chat_player *p = &S.players[S.player_count++];
     memset(p, 0, sizeof *p);
-    strncpy(p->nick, probe[0] ? probe : "Vlither", sizeof p->nick - 1);
-    mg_free(probe);
-    snprintf(path, sizeof path, "%s.clientId", base);
-    copy_json_string(json, path, p->client_id, sizeof p->client_id, "");
-    snprintf(path, sizeof path, "%s.mapName", base);
-    copy_json_string(json, path, p->map_name, sizeof p->map_name, "");
-    snprintf(path, sizeof path, "%s.server", base);
-    copy_json_string(json, path, p->server, sizeof p->server, "_GAME_MENU_");
-    snprintf(path, sizeof path, "%s.version", base);
-    copy_json_string(json, path, p->version, sizeof p->version, "?");
-    snprintf(path, sizeof path, "%s.voiceRoomId", base);
-    copy_json_string(json, path, p->voice_room_id,
+    copy_json_string(item, "$.nickname", p->nick, sizeof p->nick, "Vlither");
+    copy_json_string(item, "$.clientId", p->client_id,
+                     sizeof p->client_id, "");
+    copy_json_string(item, "$.mapName", p->map_name,
+                     sizeof p->map_name, "");
+    copy_json_string(item, "$.server", p->server,
+                     sizeof p->server, "_GAME_MENU_");
+    copy_json_string(item, "$.version", p->version,
+                     sizeof p->version, "?");
+    copy_json_string(item, "$.voiceRoomId", p->voice_room_id,
                      sizeof p->voice_room_id, "");
-    snprintf(path, sizeof path, "%s.profileColor", base);
-    copy_json_string(json, path, p->profile_color,
+    copy_json_string(item, "$.profileColor", p->profile_color,
                      sizeof p->profile_color, "");
-    snprintf(path, sizeof path, "%s.profileEmoji", base);
-    copy_json_string(json, path, p->profile_emoji,
+    copy_json_string(item, "$.profileEmoji", p->profile_emoji,
                      sizeof p->profile_emoji, "");
-    snprintf(path, sizeof path, "%s.voiceEnabled", base);
-    mg_json_get_bool(json, path, &p->voice_enabled);
-    snprintf(path, sizeof path, "%s.voiceMuted", base);
-    mg_json_get_bool(json, path, &p->voice_muted);
-    snprintf(path, sizeof path, "%s.voiceDeafened", base);
-    mg_json_get_bool(json, path, &p->voice_deafened);
+    mg_json_get_bool(item, "$.voiceEnabled", &p->voice_enabled);
+    mg_json_get_bool(item, "$.voiceMuted", &p->voice_muted);
+    mg_json_get_bool(item, "$.voiceDeafened", &p->voice_deafened);
     if (p->voice_deafened) p->voice_muted = true;
-    snprintf(path, sizeof path, "%s.snakeId", base);
-    p->snake_id = (int)mg_json_get_long(json, path, -1);
+    p->snake_id = (int)mg_json_get_long(item, "$.snakeId", -1);
     double number = 0.0;
-    snprintf(path, sizeof path, "%s.x", base);
-    p->x = mg_json_get_num(json, path, &number) ? (float)number : 0.0f;
-    snprintf(path, sizeof path, "%s.y", base);
-    p->y = mg_json_get_num(json, path, &number) ? (float)number : 0.0f;
-    snprintf(path, sizeof path, "%s.fps", base);
-    p->fps = (int)mg_json_get_long(json, path, -1);
-    snprintf(path, sizeof path, "%s.ping", base);
-    p->ping = (int)mg_json_get_long(json, path, -1);
-    snprintf(path, sizeof path, "%s.sosUntil", base);
-    p->sos_until_ms = (long long)mg_json_get_long(json, path, 0);
+    p->x = mg_json_get_num(item, "$.x", &number) ? (float)number : 0.0f;
+    p->y = mg_json_get_num(item, "$.y", &number) ? (float)number : 0.0f;
+    p->fps = (int)mg_json_get_long(item, "$.fps", -1);
+    p->ping = (int)mg_json_get_long(item, "$.ping", -1);
+    p->sos_until_ms = mg_json_get_num(item, "$.sosUntil", &number)
+                          ? (long long)number : 0;
 
-    int old_index = -1;
-    for (int old = 0; old < previous_count; ++old) {
-      if (p->client_id[0] && !strcmp(p->client_id, previous_ids[old])) {
-        old_index = old;
-        break;
-      }
-    }
-    bool local = S.env && S.env->usr && p->client_id[0] &&
-                 !strcmp(p->client_id, S.env->usr->usrs.ntl_client_id);
-    bool sos = p->sos_until_ms > (long long)time(NULL) * 1000LL;
-    if (!baseline_only && !local) {
-      if (sos && (old_index < 0 || !previous_sos[old_index])) alert_sos = true;
-      else if (old_index < 0) alert_player = true;
-    }
   }
-  S.presence_baselined = true;
-  if (alert_sos) ntl_team_emit_alert(NTL_ALERT_SOS);
-  else if (alert_player) ntl_team_emit_alert(NTL_ALERT_PLAYER);
 }
 
 static long long json_millis(struct mg_str json, const char *path) {
@@ -806,7 +763,6 @@ static void handle_ws_json(struct mg_str json) {
     if (vlither_chat_joined()) parse_presence(json);
     else {
       S.player_count = 0;
-      S.presence_baselined = false;
     }
   } else if (!strcmp(type, "events")) {
     parse_events(json);
@@ -842,13 +798,15 @@ static void handle_ws_json(struct mg_str json) {
       return;
     }
     game_data *g = &S.env->usr->gdata;
-    for (int i = 0; i < 512; ++i) {
-      char path[96];
-      snprintf(path, sizeof path, "$.players[%d].snakeId", i);
-      int snake_id = (int)mg_json_get_long(json, path, -1);
-      if (snake_id < 0) break;
-      snprintf(path, sizeof path, "$.players[%d].tagId", i);
-      int tag_id = (int)mg_json_get_long(json, path, -1);
+    struct mg_str players = mg_json_get_tok(json, "$.players");
+    struct mg_str item = {0};
+    size_t offset = 0;
+    int parsed = 0;
+    while (parsed++ < 512 &&
+           (offset = mg_json_next(players, offset, NULL, &item)) != 0) {
+      int snake_id = (int)mg_json_get_long(item, "$.snakeId", -1);
+      int tag_id = (int)mg_json_get_long(item, "$.tagId", -1);
+      if (snake_id < 0) continue;
       snake *o = get_snake(g, snake_id);
       if (o && tag_id >= 0 && find_entry(tag_id)) {
         o->vlither_tag_id = tag_id;
@@ -889,7 +847,6 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
       S.ws_open = false;
       S.hello_sent = false;
       S.player_count = 0;
-      S.presence_baselined = false;
       S.voice_listener_count = 0;
 #ifdef ANDROID
       /* Do not keep recording or playing a stale queue while relay is down.
@@ -907,6 +864,9 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
 
 static void send_identity(const char *type) {
   if (!S.ws || !S.ws_open || !S.env || !S.env->usr) return;
+  /* Never grow an unbounded realtime queue on a slow/mobile connection.
+     Leaving the heartbeat timestamp unchanged makes the next frame retry. */
+  if (S.ws->send.len >= VLITHER_WS_BACKPRESSURE_BYTES) return;
   user_settings *us = &S.env->usr->usrs;
   bool chat_joined = us->vlither_chat_joined;
   game_data *g = &S.env->usr->gdata;
@@ -1188,7 +1148,11 @@ void vlither_tags_update(tenv *env) {
     unsigned char pcm[VLITHER_VOICE_FRAME_MAX];
     size_t pcm_len = 0;
     int sent = 0;
-    while (sent < 8 && android_jni_voice_poll_capture(
+    /* Drain only the audio needed for this rendered frame.  Eight JNI calls
+       in one frame produced catch-up bursts after a hitch; the Android queue
+       already drops its oldest frame when full, keeping voice live. */
+    while (sent < 2 && S.ws->send.len < VLITHER_WS_BACKPRESSURE_BYTES &&
+           android_jni_voice_poll_capture(
                            pcm, sizeof pcm, &pcm_len)) {
       if (pcm_len >= 2 && pcm_len <= VLITHER_VOICE_FRAME_MAX && !(pcm_len & 1u)) {
         unsigned char packet[VLITHER_VOICE_FRAME_MAX + 4];
@@ -1520,12 +1484,10 @@ void vlither_chat_set_joined(bool joined) {
   save_user_settings(us);
   if (joined) {
     S.next_connect = 0.0;
-    S.presence_baselined = false;
     clear_chat_messages();
     set_status("Joining Vlither Chat...");
   } else {
     S.player_count = 0;
-    S.presence_baselined = false;
     clear_chat_messages();
     clear_snake_mappings();
     S.voice_in_room = false;

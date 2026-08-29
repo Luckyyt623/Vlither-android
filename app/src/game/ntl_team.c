@@ -88,7 +88,6 @@ typedef struct {
   bool voice_create_pending;
   double sos_until;
   bool sos_message_pending;
-  double last_alert_time;
 } ntl_state;
 static ntl_state S;
 
@@ -173,21 +172,6 @@ static void ntl_schedule_retry(double now);
 static bool same_server(const char *a, const char *b);
 static size_t ntl_append_utf8(char *out, size_t cap, size_t n,
                               unsigned int cp);
-
-void ntl_team_emit_alert(int kind) {
-  if (!S.env || !S.env->usr) return;
-  user_settings *us = &S.env->usr->usrs;
-  bool enabled = kind == NTL_ALERT_SOS ? us->ntl_alert_sos :
-                 kind == NTL_ALERT_PLAYER ? us->ntl_alert_new_player :
-                 us->ntl_alert_chat;
-  if (!enabled) return;
-  double now = mg_millis() / 1000.0;
-  if (kind != NTL_ALERT_SOS && now - S.last_alert_time < 0.30) return;
-  S.last_alert_time = now;
-#ifdef ANDROID
-  android_jni_notification_beep(kind);
-#endif
-}
 
 static void ntl_history_clock(time_t when, char out[6]) {
   out[0] = 0;
@@ -698,7 +682,6 @@ static size_t ntl_snapshot_overlap(const char *old_msg, const char *new_msg) {
 
 static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
   if (!delta) return;
-  bool added = false;
   while (*delta == '\n' || *delta == ' ') delta++;
 
   const char *p = delta;
@@ -731,7 +714,6 @@ static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
         memcpy(message, segment, part_len);
         message[part_len] = 0;
         add_history(nick, message);
-        added = true;
       }
 
       if (!pipe) break;
@@ -741,7 +723,6 @@ static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
     if (!end) break;
     p = end + 1;
   }
-  if (added) ntl_team_emit_alert(NTL_ALERT_CHAT);
 }
 
 static bool ntl_snapshot_contains_message(const char *snapshot,
@@ -907,26 +888,6 @@ static bool parse_members(const char *s, size_t len) {
       m->tg = (int)field_num(p, e, "tg", -1);
       m->is_bot = field_bool(p, e, "bot", false);
       m->is_sos = field_bool(p, e, "sos", false);
-
-      const ntl_member *previous = NULL;
-      for (int old_i = 0; old_i < S.count; ++old_i) {
-        ntl_member *candidate = &S.members[old_i];
-        bool same_client = strlen(m->nick) >= 8 &&
-                           strlen(candidate->nick) >= 8 &&
-                           !strncasecmp(m->nick, candidate->nick, 8);
-        bool same_snake = m->sid >= 0 && candidate->sid == m->sid &&
-                          same_server(m->srv, candidate->srv);
-        if (same_client || same_snake) { previous = candidate; break; }
-      }
-      bool is_local_record = strlen(m->nick) >= 8 &&
-                             strlen(S.request_client_id) == 8 &&
-                             !strncasecmp(m->nick, S.request_client_id, 8);
-      if (!baseline_only && !is_local_record) {
-        if (m->is_sos && (!previous || !previous->is_sos))
-          ntl_team_emit_alert(NTL_ALERT_SOS);
-        else if (!previous)
-          ntl_team_emit_alert(NTL_ALERT_PLAYER);
-      }
 
       if (S.inflight_msg[0] && strlen(m->nick) >= 8 &&
           !strncmp(m->nick, S.request_client_id, 8) &&
@@ -2570,10 +2531,6 @@ void ntl_team_panel(tenv *env) {
     }
     igSameLine(0, 16);
     igCheckbox("Show Vlither players", &S.players_open);
-    if (igCheckbox("Player activity beep", &us->ntl_alert_new_player))
-      save_user_settings(us);
-    if (igIsItemHovered(0))
-      igSetTooltip("Beep when a player appears or reconnects in NTL/Vlither Chat.");
     igCheckbox("Show same-server Vlither players on minimap",
                &us->vlither_show_minimap_players);
     igCheckbox("Show FPS & ping in player list##vlither",
@@ -2786,10 +2743,6 @@ void ntl_team_panel(tenv *env) {
     save_user_settings(us);
   }
   igCheckbox("Show NTL players", &S.players_open);
-  if (igCheckbox("Player activity beep", &us->ntl_alert_new_player))
-    save_user_settings(us);
-  if (igIsItemHovered(0))
-    igSetTooltip("Beep when a player appears or reconnects in NTL/Vlither Chat.");
   igCheckbox("Show FPS & ping in player list##ntl", &us->ntl_show_player_stats);
   ntl_draw_friends_zoom_control(us, "##ntl_friends_zoom");
   igTextDisabled("Shows FPS/ping from Vlither Android and NTL clients that publish NTL performance details.");

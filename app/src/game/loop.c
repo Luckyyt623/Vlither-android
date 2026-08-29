@@ -28,9 +28,10 @@ void game_loop(tenv* env) {
       usr->r->global.bd_opacity = 0;
       usr->r->global.minimap_opacity = 0;
 
-      if (glfwGetTime() > TIMEOUT) {
+      double connect_elapsed = glfwGetTime() - gdata->connect_started_at;
+      if (gdata->connection && connect_elapsed > TIMEOUT) {
         gdata->connection->is_closing = true;
-        DLOG("TIMEOUT: glfwGetTime()=%.2f > %d", glfwGetTime(), TIMEOUT);
+        DLOG("TIMEOUT: connect elapsed %.2f > %d", connect_elapsed, TIMEOUT);
         printf("Connection timed out.");
       }
 
@@ -46,9 +47,29 @@ void game_loop(tenv* env) {
                     NULL);
       igPopStyleColor(1);
 
+      if (gdata->restart_req) {
+        const char *reconnect_text = "Connection interrupted - reconnecting...";
+        ImVec2 reconnect_size;
+        igCalcTextSize(&reconnect_size, reconnect_text, NULL, false, -1.0f);
+        igSetCursorPosX(ctx->size[0] * 0.5f - reconnect_size.x * 0.5f);
+        igTextColored((ImVec4){1.0f, 0.78f, 0.28f, 1.0f}, "%s",
+                      reconnect_text);
+      }
+
       if (gdata->closed) {
-        gdata->conn = DISCONNECTED;
+        gdata->connection = NULL;
         gdata->closed = false;
+        if (gdata->restart_req && !gdata->suppress_reconnect &&
+            gdata->reconnect_attempts < 3) {
+          gdata->reconnect_attempts++;
+          game_data_reset(env);
+          gdata->conn = CONNECTING;
+          server_connect(env);
+        } else {
+          gdata->restart_req = false;
+          gdata->reconnect_attempts = 0;
+          gdata->conn = DISCONNECTED;
+        }
       }
       break;
     }
@@ -60,26 +81,40 @@ void game_loop(tenv* env) {
       redraw(env);
       ui_overlay(env);
 
-      if (usrs->hotkeys[HOTKEY_QUIT].active ||
-          (usrs->quit_mc &&
-           tmouse_button_pressed(env->ms, GLFW_MOUSE_BUTTON_MIDDLE))) {
+      if (!gdata->closed && gdata->connection &&
+          (usrs->hotkeys[HOTKEY_QUIT].active ||
+           (usrs->quit_mc &&
+            tmouse_button_pressed(env->ms, GLFW_MOUSE_BUTTON_MIDDLE)))) {
+        gdata->suppress_reconnect = true;
+        gdata->restart_req = false;
         gdata->connection->is_closing = true;
-      } else if (usrs->hotkeys[HOTKEY_RESTART].active ||
-                 (usrs->restart_rc &&
-                  tmouse_button_pressed(env->ms, GLFW_MOUSE_BUTTON_RIGHT))) {
+      } else if (!gdata->closed && gdata->connection &&
+                 (usrs->hotkeys[HOTKEY_RESTART].active ||
+                  (usrs->restart_rc &&
+                   tmouse_button_pressed(env->ms, GLFW_MOUSE_BUTTON_RIGHT)))) {
+        gdata->suppress_reconnect = false;
         gdata->connection->is_closing = true;
         gdata->restart_req = true;
       }
 
       if (gdata->closed) {
+        bool reconnect = gdata->restart_req && !gdata->suppress_reconnect;
+        if (reconnect && !gdata->preview_active) {
+          usrs->kills = gdata->data.kills;
+          usrs->score = gdata->data.score;
+          usrs->play_time = gdata->data.play_etm;
+          save_user_settings(usrs);
+        }
         game_data_reset(env);
+        gdata->connection = NULL;
 
-        if (gdata->restart_req) {
+        if (reconnect) {
+          if (gdata->reconnect_attempts < 1) gdata->reconnect_attempts = 1;
           usr->gdata.conn = CONNECTING;
-          glfwSetTime(0);
           server_connect(env);
-          gdata->restart_req = false;
         } else {
+          gdata->restart_req = false;
+          gdata->reconnect_attempts = 0;
           usr->gdata.conn = DISCONNECTED;
         }
         gdata->closed = false;

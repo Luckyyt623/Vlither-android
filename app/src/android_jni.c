@@ -20,32 +20,6 @@
 
 extern struct android_app* g_android_app;
 
-void android_jni_notification_beep(int kind) {
-    if (!g_android_app || !g_android_app->activity ||
-        !g_android_app->activity->vm || !g_android_app->activity->clazz)
-        return;
-    JavaVM* vm = g_android_app->activity->vm;
-    JNIEnv* env = NULL;
-    bool attached = false;
-    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
-    if (status == JNI_EDETACHED) {
-        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
-        attached = true;
-    } else if (status != JNI_OK || !env) return;
-
-    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
-    if (cls && !(*env)->ExceptionCheck(env)) {
-        jmethodID mid = (*env)->GetStaticMethodID(
-            env, cls, "playNotificationBeep", "(Landroid/app/Activity;I)V");
-        if (mid && !(*env)->ExceptionCheck(env))
-            (*env)->CallStaticVoidMethod(env, cls,
-                mid, g_android_app->activity->clazz, (jint)kind);
-    }
-    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-    if (cls) (*env)->DeleteLocalRef(env, cls);
-    if (attached) (*vm)->DetachCurrentThread(vm);
-}
-
 void android_jni_capture_sync(bool recording_enabled,
                               bool screenshots_enabled,
                               bool session_active) {

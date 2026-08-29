@@ -427,7 +427,14 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
         gdata->conn = CONNECTED;
         if (gdata->data.protocol_version != PROTOCOL_VERSION) {
           printf("Protocol version %d is not supported.\n", gdata->data.protocol_version);
+          gdata->restart_req = false;
+          gdata->suppress_reconnect = true;
           c->is_closing = true;
+        } else {
+          /* A successful spawn ends any transient-disconnect retry cycle. */
+          gdata->restart_req = false;
+          gdata->suppress_reconnect = false;
+          gdata->reconnect_attempts = 0;
         }
         glfwSetTime(0);
       }
@@ -1380,6 +1387,8 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
     mg_ws_send(c, (uint8_t[]){'c', 0}, 2, WEBSOCKET_OP_BINARY);
   } else if (ev == MG_EV_WS_MSG) {
     struct mg_ws_message* msg = (struct mg_ws_message*)ev_data;
+    gdata->network_rx_bytes += msg->data.len;
+    if (msg->data.len == 0) return;
     uint8_t* a = (uint8_t*)msg->data.buf;
     int m = 0;
     if (a[m] < 32) {
@@ -1387,12 +1396,14 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
       while (m < l) {
         int len;
         if (a[m] < 32) {
+          if (l - m < 2) break;
           len = a[m] << 8 | a[m + 1];
           m += 2;
         } else {
           len = a[m] - 32;
           m++;
         }
+        if (len <= 0 || len > l - m) break;
         uint8_t* a2 = a + m;
         got_packet(env, a2, len);
         m += len;
@@ -1409,6 +1420,15 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
   } else if (ev == MG_EV_CLOSE) {
     DLOG("conn closed");
     printf("Connection closed\n");
+    if (gdata->curr_screen == PLAYING && gdata->conn == CONNECTED &&
+        gdata->data.follow_view && !gdata->preview_active &&
+        !gdata->suppress_reconnect && !gdata->restart_req) {
+      /* Do not throw an active player straight to the homepage for a
+         transient mobile/TLS drop. Rejoin the selected server automatically. */
+      gdata->restart_req = true;
+      gdata->reconnect_attempts = 0;
+    }
+    if (gdata->connection == c) gdata->connection = NULL;
     gdata->closed = true;
   }
 }

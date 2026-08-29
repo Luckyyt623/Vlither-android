@@ -104,11 +104,6 @@ void input(tenv* env) {
 
         if (usrs->ctrl_mode_trackpad) {
 
-        #define NTL_FORBIDDEN_R  23.0f
-        #define NTL_SPAWN_R      44.0f
-        #define NTL_VEL_DECAY    0.85f
-        #define NTL_VEL_WEIGHT   0.15f
-
         float sw = (float)ctx->size[0];
         float sh = (float)ctx->size[1];
         float cx = sw * 0.5f;
@@ -120,8 +115,11 @@ void input(tenv* env) {
           if (env->wnd->touch.just_down || !gdata->touch_ctrl.tp_tracking) {
 
             float ang = me->eang;
-            float spawn_x = cx + NTL_SPAWN_R * cosf(ang);
-            float spawn_y = cy + NTL_SPAWN_R * sinf(ang);
+            /* Official mobile starts the arrow 58 scaled pixels ahead of the
+               snake, preserving the current direction when a new drag begins. */
+            float spawn_r = 58.0f * me->sc * gdata->data.gsc;
+            float spawn_x = cx + spawn_r * cosf(ang);
+            float spawn_y = cy + spawn_r * sinf(ang);
 
             gdata->touch_ctrl.tp_tracking     = true;
             gdata->touch_ctrl.tp_visible      = true;
@@ -129,10 +127,10 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_anchor_y     = spawn_y;
             gdata->touch_ctrl.tp_last_touch_x = tx;
             gdata->touch_ctrl.tp_last_touch_y = ty;
+            gdata->touch_ctrl.tp_target_x     = spawn_x;
+            gdata->touch_ctrl.tp_target_y     = spawn_y;
             gdata->touch_ctrl.tp_cursor_x     = spawn_x;
             gdata->touch_ctrl.tp_cursor_y     = spawn_y;
-            gdata->touch_ctrl.tp_vx           = 0.0f;
-            gdata->touch_ctrl.tp_vy           = 0.0f;
           } else {
 
             float nx = gdata->touch_ctrl.tp_anchor_x
@@ -140,27 +138,15 @@ void input(tenv* env) {
             float ny = gdata->touch_ctrl.tp_anchor_y
                      + (ty - gdata->touch_ctrl.tp_last_touch_y) * usrs->arrow_sensitivity;
 
-            nx = GLM_MAX(0.0f, GLM_MIN(sw, nx));
-            ny = GLM_MAX(0.0f, GLM_MIN(sh, ny));
-
-            float fdx  = nx - cx;
-            float fdy  = ny - cy;
-            float dist = sqrtf(fdx * fdx + fdy * fdy);
-            if (dist < NTL_FORBIDDEN_R && dist > 0.001f) {
-              float a = atan2f(fdy, fdx);
-              nx = cx + cosf(a) * NTL_FORBIDDEN_R;
-              ny = cy + sinf(a) * NTL_FORBIDDEN_R;
-            }
-
-            float mdx = nx - gdata->touch_ctrl.tp_cursor_x;
-            float mdy = ny - gdata->touch_ctrl.tp_cursor_y;
-            gdata->touch_ctrl.tp_vx =
-                gdata->touch_ctrl.tp_vx * NTL_VEL_DECAY + mdx * NTL_VEL_WEIGHT;
-            gdata->touch_ctrl.tp_vy =
-                gdata->touch_ctrl.tp_vy * NTL_VEL_DECAY + mdy * NTL_VEL_WEIGHT;
-
-            gdata->touch_ctrl.tp_cursor_x = nx;
-            gdata->touch_ctrl.tp_cursor_y = ny;
+            /* Like the official client, the steering target is unrestricted:
+               it may cross the snake head. The rendered arrow follows the
+               target by 60% per frame, while steering uses the target itself. */
+            gdata->touch_ctrl.tp_target_x = nx;
+            gdata->touch_ctrl.tp_target_y = ny;
+            gdata->touch_ctrl.tp_cursor_x +=
+                (nx - gdata->touch_ctrl.tp_cursor_x) * 0.6f;
+            gdata->touch_ctrl.tp_cursor_y +=
+                (ny - gdata->touch_ctrl.tp_cursor_y) * 0.6f;
           }
 
           gdata->touch_ctrl.tp_cursor_angle_deg =
@@ -168,8 +154,8 @@ void input(tenv* env) {
                      cx  - gdata->touch_ctrl.tp_cursor_x) *
               (180.0f / PI);
 
-          xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
-          ym = (int)(gdata->touch_ctrl.tp_cursor_y - cy);
+          xm = (int)(gdata->touch_ctrl.tp_target_x - cx);
+          ym = (int)(gdata->touch_ctrl.tp_target_y - cy);
 
         } else {
 
@@ -181,8 +167,8 @@ void input(tenv* env) {
             gdata->touch_ctrl.tp_visible  = false;
           }
 
-          xm = (int)(gdata->touch_ctrl.tp_cursor_x - cx);
-          ym = (int)(gdata->touch_ctrl.tp_cursor_y - cy);
+          xm = (int)(gdata->touch_ctrl.tp_target_x - cx);
+          ym = (int)(gdata->touch_ctrl.tp_target_y - cy);
         }
 
         } else {
@@ -274,12 +260,10 @@ void input(tenv* env) {
       gdata->data.last_e_mtm = gdata->data.ctm;
       gdata->data.lsxm = xm;
       gdata->data.lsym = ym;
-      float d2 = xm * xm + ym * ym;
-      if (d2 > 256) {
-        ang = atan2f(ym, xm);
-        me->eang = ang;
-      } else
-        ang = me->wang;
+      /* Official mobile has no centre dead-zone. At the exact head position,
+         atan2f(0, 0) resolves to 0 and therefore targets screen-right. */
+      ang = atan2f(ym, xm);
+      me->eang = ang;
       ang = fmodf(ang, PI2);
       if (ang < 0) ang += PI2;
       int sang = (int)floorf((250 + 1) * ang / PI2);

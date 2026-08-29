@@ -44,6 +44,13 @@ void server_connect(tenv* env) {
   if (gdata->curr_screen == PLAYING)
     gdata->server_list.ping_stop = 1;
 
+  gdata->closed = false;
+  gdata->connect_started_at = glfwGetTime();
+  if (!gdata->restart_req) {
+    gdata->suppress_reconnect = false;
+    gdata->reconnect_attempts = 0;
+  }
+
   char url[256] = {};
 
   bool is_local = (strncmp(usrs->server_address, "127.", 4) == 0 ||
@@ -61,6 +68,10 @@ void server_connect(tenv* env) {
                   "%s:%s\r\n%s:%s\r\n",
                   "Origin", "https://slither.com",
                   "Host", "slither.com");
+  if (!gdata->connection) {
+    gdata->closed = true;
+    return;
+  }
 #ifdef ANDROID
 
   mg_mgr_poll(&gdata->network_manager, 5);
@@ -71,8 +82,25 @@ void server_connect(tenv* env) {
 void server_poll(tenv* env) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
+  /* This function runs on the render thread once per frame.  A positive
+     timeout made Mongoose sleep for up to 5 ms whenever the socket was idle,
+     consuming almost a third of a 60 FPS frame budget and causing visible
+     hitching when another manager delivered a packet in the same frame.
+     Rendering is already a high-frequency poll loop, so gameplay polling must
+     always be non-blocking on every platform. */
 #ifdef ANDROID
-  mg_mgr_poll(&gdata->network_manager, 5);
+  /* Mongoose deliberately reads at most one socket chunk per poll. After a
+     slow render frame, one 16 KiB pass may not drain a busy Slither server's
+     queued burst. A few zero-time passes catch up without ever sleeping the
+     render thread or changing normal packet latency. */
+  uint64_t previous_rx = gdata->network_rx_bytes;
+  for (int i = 0; i < 4; ++i) {
+    mg_mgr_poll(&gdata->network_manager, 0);
+    if (gdata->closed || !gdata->connection) break;
+    uint64_t current_rx = gdata->network_rx_bytes;
+    if (current_rx == previous_rx) break;
+    previous_rx = current_rx;
+  }
 #else
   mg_mgr_poll(&gdata->network_manager, 0);
 #endif

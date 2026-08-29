@@ -23,8 +23,6 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -914,7 +912,10 @@ class GameActivity : NativeActivity() {
             if (activity !is GameActivity || speakerId.isBlank() || pcm.size < 2) return
             ensureVoicePlaybackThread()
             val packet = VoicePacket(
-                speakerId.take(64), pcm.copyOf(), gain.coerceIn(0f, 1f)
+                /* JNI already created a private ByteArray for this packet.
+                 * A second copy here doubled voice allocation churn and made
+                 * Android GC more likely to interrupt a gameplay frame. */
+                speakerId.take(64), pcm, gain.coerceIn(0f, 1f)
             )
             if (!voicePlaybackQueue.offer(packet)) {
                 voicePlaybackQueue.poll()
@@ -1113,23 +1114,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Lightweight NTL-style gameplay alert. kind 2 is the longer SOS
-         * tone; chat and teammate arrivals intentionally stay subtle. */
-        @JvmStatic
-        fun playNotificationBeep(activity: Activity, kind: Int) {
-            activity.runOnUiThread {
-                try {
-                    val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION,
-                                             if (kind == 2) 90 else 68)
-                    tone.startTone(ToneGenerator.TONE_PROP_BEEP,
-                                   if (kind == 2) 260 else 120)
-                    activity.window.decorView.postDelayed({ tone.release() },
-                                                           if (kind == 2) 360L else 220L)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Notification beep failed: ${e.message}")
-                }
-            }
-        }
     }
 
 

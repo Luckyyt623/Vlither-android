@@ -158,12 +158,6 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Chat timestamps");
       igAlignTextToFramePadding();
-      igText("Chat alert sound");
-      igAlignTextToFramePadding();
-      igText("Player activity beep");
-      igAlignTextToFramePadding();
-      igText("SOS alert sound");
-      igAlignTextToFramePadding();
       igText("Stealth mode");
       igAlignTextToFramePadding();
       igText("Show tags");
@@ -293,9 +287,6 @@ void ui_settings(tenv* env) {
                       (const char*[]){"Small", "Regular", "Large"}, 3, -1);
       igCheckbox("##snake scores", &usrs->snake_scores);
       igCheckbox("##chat timestamps", &usrs->ntl_chat_timestamps);
-      igCheckbox("##chat alert sound", &usrs->ntl_alert_chat);
-      igCheckbox("##teammate alert sound", &usrs->ntl_alert_new_player);
-      igCheckbox("##sos alert sound", &usrs->ntl_alert_sos);
       igCheckbox("##stealth mode", &usrs->ntl_stealth_mode);
       igCheckbox("##show all tags", &usrs->show_tags);
       igBeginDisabled(!usrs->show_tags);

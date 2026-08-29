@@ -270,9 +270,10 @@ typedef struct user_settings {
   bool ntl_high_visibility_skins;
   bool ntl_nicks_plus;
   bool ntl_names_on_top;
-  bool ntl_alert_sos;
-  bool ntl_alert_new_player;
-  bool ntl_alert_chat;
+  /* Reserved slots keep the existing user.dat layout compatible. */
+  bool ntl_legacy_option_1;
+  bool ntl_legacy_option_2;
+  bool ntl_legacy_option_3;
   bool ntl_chat_timestamps;
   bool ntl_dynamic_minimap;
   bool ntl_border_indicator;

@@ -71,6 +71,8 @@ void redraw(tenv* env) {
   int mode_index = usrs->hotkeys[HOTKEY_ASSIST].active ? 1 : 0;
   gameplay_mode* mode = usrs->modes + mode_index;
   bool render_shadows = mode->show_shadows && !usrs->performance_mode;
+  bool render_food_glow = usrs->food_glow[mode_index] &&
+                          !usrs->performance_mode;
 
   if (!gdata->data.dead) {
     if (gdata->data.fvtg > 0) {
@@ -120,7 +122,7 @@ void redraw(tenv* env) {
         float fy =
             mhh2 + gdata->data.gsc * (fo->ry - gdata->data.view_yy) - d * 0.5;
 
-        if (usrs->food_glow[mode_index]) {
+        if (render_food_glow) {
           float gd = d * 1.85f;
           fd_renderer_push(usr->r->fdr,
                            &(fd_instance){{fx - (gd - d) * 0.5f,
@@ -153,7 +155,7 @@ void redraw(tenv* env) {
         float fy =
             mhh2 + gdata->data.gsc * (fo->ry - gdata->data.view_yy) - d * 0.5;
 
-        if (usrs->food_glow[mode_index]) {
+        if (render_food_glow) {
           float gd = d * 1.85f;
           fd_renderer_push(usr->r->fdr,
                            &(fd_instance){{fx - (gd - d) * 0.5f,
@@ -316,7 +318,11 @@ void redraw(tenv* env) {
             nty = nty + 32 + 11 * o->sc * gdata->data.gsc;
 
           bool strong_name_outline = mode->player_names_outline || team_teammate;
-          int name_outline_radius = team_teammate ? 2 : 1;
+          /* A radius of two creates 24 extra text draws per teammate name.
+             Keep the stronger normal-quality outline, but use the regular
+             eight-neighbour outline in Performance mode. */
+          int name_outline_radius = team_teammate && !usrs->performance_mode
+                                        ? 2 : 1;
           if (strong_name_outline) {
             for (int x = -name_outline_radius; x <= name_outline_radius; x++) {
               for (int y = -name_outline_radius; y <= name_outline_radius; y++) {

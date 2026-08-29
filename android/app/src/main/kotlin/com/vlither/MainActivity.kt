@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.1"
+        private const val CURRENT_VERSION   = "4.7.2"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,42 +209,21 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-     Update 4.7.1
+     Update 4.7.2
 
-        What's New:
+What’s New
 
-        • Direct Backup Save
-          Create backup now saves a complete .vlitherbackup file directly in Downloads/Vlither on modern Android.
+- Arrow behavior now closely matches the official mobile client.
+- Fixed an issue that could unexpectedly disconnect players from the server.
+- Improved FPS stability and optimized network performance for lower ping and fewer lag spikes.
 
-       • Gameplay Ping Protection
-          Server-list latency scans now stop as soon as Play is pressed, before the game WebSocket connects. The picker also uses smaller probe batches, so checking server pings cannot compete with gameplay traffic on mobile data.
+Thank you for using Vlither Android!
 
-        • Friends / Online Players Zoom
-          Added a persistent 0.75x–1.50x zoom control in both Vlither and NTL Chat settings. Narrow player panels now move server, version and performance details onto a wrapped second line so the list stays inside the screen on different phones.
-
-        • Settings, Chat & Bot Fixes
-          Backup and Load now sit directly above the final Reset and OK actions. In-game NTL/Vlither Chat visibility survives restarts, Chat includes a player-activity beep toggle, and turning Bot off can no longer be overridden by an open Voice panel near the border.
-
-        • Shared Chat Colours & Emoji Badges
-          Choose a public Vlither profile colour and a font-safe emoji badge in Chat. Other players see both in live messages, the online player list and your same-server minimap marker. Profile choices are included in Settings Backup and Restore.
-
-        • Settings Backup and Restore
-          Export settings, Controls, custom buttons and the uploaded arrow to one backup file, then restore them through Android's file picker.
-
-        • Leaderboard Title Colour
-          The centred “Vlither Leaderboard” title now has its own colour picker, independent of the player-row colour style.
-
-        • Community Ratings & Reviews
-          Rate Vlither from 1 to 5, publish a message, read other players' reviews, update your own review and report inappropriate posts for moderation.
-
-       
-
-        Thanks for using Vlither Android!
-        Changes made by Lucky
+Developed by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.1")
+            .setTitle("What's New in v4.7.2")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

@@ -72,10 +72,10 @@ typedef struct game_data {
 
     float tp_cursor_x;
     float tp_cursor_y;
+    float tp_target_x;
+    float tp_target_y;
     float tp_anchor_x;
     float tp_anchor_y;
-    float tp_vx;
-    float tp_vy;
     float tp_last_touch_x;
     float tp_last_touch_y;
     float tp_disappear_angle;
@@ -106,6 +106,13 @@ typedef struct game_data {
   } server_list;
 
   bool restart_req;
+  /* A real gameplay socket can briefly drop during a mobile network handover
+     or after a long render frame. Unexpected drops retry in-place; explicit
+     Quit and incompatible-protocol closes suppress that retry. */
+  bool suppress_reconnect;
+  int reconnect_attempts;
+  double connect_started_at;
+  uint64_t network_rx_bytes;
   bool closed;
 
   struct {
