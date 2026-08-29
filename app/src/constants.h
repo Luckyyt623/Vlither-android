@@ -75,7 +75,8 @@ typedef enum screen {
   NTL_PANEL = 5,
   KEYBOARD_EDITOR = 6,
   VOICE_PANEL = 7,
-  EVENTS_PANEL = 8
+  EVENTS_PANEL = 8,
+  RATINGS_PANEL = 9
 } screen;
 
 typedef enum font_size {

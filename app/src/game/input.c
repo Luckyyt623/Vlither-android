@@ -38,8 +38,7 @@ void input(tenv* env) {
     int snakes_len = tdarray_length(gdata->data.snakes);
     snake* me = gdata->data.snakes + (snakes_len - 1);
 
-    if (usrs->hotkeys[HOTKEY_BOT].active ||
-        ntl_team_voice_controls_open()) {
+    if (usrs->hotkeys[HOTKEY_BOT].active) {
       xm = gdata->bot.output.xm;
       ym = gdata->bot.output.ym;
     } else {

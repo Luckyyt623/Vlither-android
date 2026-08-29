@@ -283,12 +283,11 @@ void ui_overlay(tenv* env) {
       ImVec2 lb_title_size;
       igCalcTextSize(&lb_title_size, lb_title, NULL, false, -1.0f);
       igSetCursorPosX(table_x + (tb_width - lb_title_size.x) * 0.5f);
-      ImVec4 title_color = usrs->ntl_leaderboard_style == 2
-                               ? (ImVec4){usrs->ntl_leaderboard_color[0],
-                                          usrs->ntl_leaderboard_color[1],
-                                          usrs->ntl_leaderboard_color[2],
-                                          usrs->ntl_leaderboard_color[3]}
-                               : (ImVec4){1.0f, 0.88f, 0.30f, 0.96f};
+      ImVec4 title_color =
+          (ImVec4){usrs->leaderboard_title_color[0],
+                   usrs->leaderboard_title_color[1],
+                   usrs->leaderboard_title_color[2],
+                   usrs->leaderboard_title_color[3]};
       igTextColored(title_color, "%s", lb_title);
       igPopFont();
       igSetCursorPosX(table_x);

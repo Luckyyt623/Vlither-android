@@ -29,6 +29,18 @@
 #define VLITHER_VOICE_FRAME_MAX 2048
 #define VLITHER_EVENT_MAX 24
 
+/* These badge glyphs are present in Vlither's bundled Liberation Sans font,
+   unlike many newer U+1Fxxx emoji characters which render as empty boxes on
+   older Android phones. Index zero intentionally means no badge. */
+static const char *VLITHER_PROFILE_EMOJIS[] = {
+    "", "☺", "☻", "♥", "♦", "♠", "♣", "♪", "♫", "♀", "♂"};
+#define VLITHER_PROFILE_EMOJI_COUNT \
+  ((int)(sizeof VLITHER_PROFILE_EMOJIS / sizeof VLITHER_PROFILE_EMOJIS[0]))
+
+const char *vlither_backend_base_url(void) {
+  return VLITHER_TAG_BACKEND_URL;
+}
+
 typedef struct vlither_tag_atlas_entry {
   int id;
   float u0, v0, u1, v1;
@@ -53,6 +65,8 @@ typedef struct vlither_chat_message {
   char nick[64];
   char text[256];
   char server[96];
+  char profile_color[7];
+  char profile_emoji[8];
 } vlither_chat_message;
 
 typedef struct vlither_chat_player {
@@ -62,6 +76,8 @@ typedef struct vlither_chat_player {
   char server[96];
   char version[16];
   char voice_room_id[25];
+  char profile_color[7];
+  char profile_emoji[8];
   int snake_id;
   float x, y;
   int fps, ping;
@@ -374,7 +390,9 @@ static void copy_json_string(struct mg_str json, const char *path,
 
 static bool append_chat_message(long long seq, long long time_ms,
                                 const char *client_id, const char *nick,
-                                const char *text, const char *server) {
+                                const char *text, const char *server,
+                                const char *profile_color,
+                                const char *profile_emoji) {
   if (!text || !text[0]) return false;
   if (seq > 0 && seq <= S.last_chat_seq) return false;
   int idx;
@@ -394,6 +412,10 @@ static bool append_chat_message(long long seq, long long time_ms,
   strncpy(m->text, text, sizeof m->text - 1);
   strncpy(m->server, server && server[0] ? server : "_GAME_MENU_",
           sizeof m->server - 1);
+  strncpy(m->profile_color, profile_color ? profile_color : "",
+          sizeof m->profile_color - 1);
+  strncpy(m->profile_emoji, profile_emoji ? profile_emoji : "",
+          sizeof m->profile_emoji - 1);
   if (seq > S.last_chat_seq) S.last_chat_seq = seq;
   return true;
 }
@@ -415,6 +437,7 @@ static void parse_chat_message(struct mg_str json, const char *base_path) {
                           ? (long long)time_number
                           : (long long)time(NULL) * 1000LL;
   char client_id[65], nick[64], text[256], server[96];
+  char profile_color[7], profile_emoji[8];
   snprintf(path, sizeof path, "%s.clientId", base_path);
   copy_json_string(json, path, client_id, sizeof client_id, "");
   snprintf(path, sizeof path, "%s.nickname", base_path);
@@ -423,7 +446,12 @@ static void parse_chat_message(struct mg_str json, const char *base_path) {
   copy_json_string(json, path, text, sizeof text, "");
   snprintf(path, sizeof path, "%s.server", base_path);
   copy_json_string(json, path, server, sizeof server, "_GAME_MENU_");
-  if (append_chat_message(seq, time_ms, client_id, nick, text, server) &&
+  snprintf(path, sizeof path, "%s.profileColor", base_path);
+  copy_json_string(json, path, profile_color, sizeof profile_color, "");
+  snprintf(path, sizeof path, "%s.profileEmoji", base_path);
+  copy_json_string(json, path, profile_emoji, sizeof profile_emoji, "");
+  if (append_chat_message(seq, time_ms, client_id, nick, text, server,
+                          profile_color, profile_emoji) &&
       S.env && S.env->usr &&
       strcmp(client_id, S.env->usr->usrs.ntl_client_id))
     ntl_team_emit_alert(NTL_ALERT_CHAT);
@@ -467,6 +495,12 @@ static void parse_presence(struct mg_str json) {
     snprintf(path, sizeof path, "%s.voiceRoomId", base);
     copy_json_string(json, path, p->voice_room_id,
                      sizeof p->voice_room_id, "");
+    snprintf(path, sizeof path, "%s.profileColor", base);
+    copy_json_string(json, path, p->profile_color,
+                     sizeof p->profile_color, "");
+    snprintf(path, sizeof path, "%s.profileEmoji", base);
+    copy_json_string(json, path, p->profile_emoji,
+                     sizeof p->profile_emoji, "");
     snprintf(path, sizeof path, "%s.voiceEnabled", base);
     mg_json_get_bool(json, path, &p->voice_enabled);
     snprintf(path, sizeof path, "%s.voiceMuted", base);
@@ -889,6 +923,8 @@ static void send_identity(const char *type) {
   int ping = playing && g->data.ping > 0 ? g->data.ping : -1;
 
   char client[32], server[192], nick[96], map_name[96], version[32];
+  char profile_color[7] = "";
+  char profile_emoji[8];
   json_escape(client, sizeof client, us->ntl_client_id);
   json_escape(server, sizeof server, server_name);
   json_escape(nick, sizeof nick, us->nickname[0] ? us->nickname : "Vlither");
@@ -897,6 +933,23 @@ static void send_identity(const char *type) {
                                            : (us->nickname[0] ? us->nickname
                                                                : "Vlither"));
   json_escape(version, sizeof version, APP_VERSION);
+  int emoji_index = us->vlither_profile_emoji;
+  if (emoji_index < 0 || emoji_index >= VLITHER_PROFILE_EMOJI_COUNT)
+    emoji_index = 0;
+  json_escape(profile_emoji, sizeof profile_emoji,
+              VLITHER_PROFILE_EMOJIS[emoji_index]);
+  if (us->vlither_profile_color_custom) {
+    int rgb[3];
+    for (int i = 0; i < 3; ++i) {
+      float value = us->vlither_profile_color[i];
+      if (!isfinite(value)) value = 0.0f;
+      if (value < 0.0f) value = 0.0f;
+      if (value > 1.0f) value = 1.0f;
+      rgb[i] = (int)(value * 255.0f + 0.5f);
+    }
+    snprintf(profile_color, sizeof profile_color, "%02x%02x%02x",
+             rgb[0], rgb[1], rgb[2]);
+  }
   char json[896];
   int n = snprintf(json, sizeof json,
                    "{\"type\":\"%s\",\"clientId\":\"%s\","
@@ -904,11 +957,13 @@ static void send_identity(const char *type) {
                    "\"mapName\":\"%s\",\"sosUntil\":%lld,"
                    "\"version\":\"%s\",\"x\":%.1f,\"y\":%.1f,"
                    "\"fps\":%d,\"ping\":%d,\"chatJoined\":%s,"
+                   "\"profileColor\":\"%s\",\"profileEmoji\":\"%s\","
                    "\"voiceEnabled\":%s,"
                    "\"voiceMuted\":%s,\"voiceDeafened\":%s}",
                    type, client, server, snake_id, nick, map_name,
                    S.local_sos_until_ms, version, x, y, fps, ping,
                    chat_joined ? "true" : "false",
+                   profile_color, profile_emoji,
                    (chat_joined && S.voice_enabled) ? "true" : "false",
                    (S.voice_muted || S.voice_deafened) ? "true" : "false",
                    S.voice_deafened ? "true" : "false");
@@ -1299,6 +1354,14 @@ const char *vlither_chat_history_text(int index) {
 const char *vlither_chat_history_server(int index) {
   const vlither_chat_message *m = chat_at(index); return m ? m->server : "";
 }
+const char *vlither_chat_history_color(int index) {
+  const vlither_chat_message *m = chat_at(index);
+  return m ? m->profile_color : "";
+}
+const char *vlither_chat_history_emoji(int index) {
+  const vlither_chat_message *m = chat_at(index);
+  return m ? m->profile_emoji : "";
+}
 long long vlither_chat_history_time_ms(int index) {
   const vlither_chat_message *m = chat_at(index); return m ? m->time_ms : 0;
 }
@@ -1319,6 +1382,14 @@ const char *vlither_chat_player_client_id(int index) {
 }
 const char *vlither_chat_player_map_name(int index) {
   return index >= 0 && index < S.player_count ? S.players[index].map_name : "";
+}
+const char *vlither_chat_player_color(int index) {
+  return index >= 0 && index < S.player_count
+             ? S.players[index].profile_color : "";
+}
+const char *vlither_chat_player_emoji(int index) {
+  return index >= 0 && index < S.player_count
+             ? S.players[index].profile_emoji : "";
 }
 int vlither_chat_player_snake_id(int index) {
   return index >= 0 && index < S.player_count ? S.players[index].snake_id : -1;
@@ -1352,6 +1423,20 @@ bool vlither_chat_player_voice_deafened(int index) {
 const char *vlither_chat_player_voice_room_id(int index) {
   return index >= 0 && index < S.player_count
              ? S.players[index].voice_room_id : "";
+}
+
+int vlither_profile_emoji_count(void) {
+  return VLITHER_PROFILE_EMOJI_COUNT;
+}
+
+const char *vlither_profile_emoji_at(int index) {
+  return index >= 0 && index < VLITHER_PROFILE_EMOJI_COUNT
+             ? VLITHER_PROFILE_EMOJIS[index] : "";
+}
+
+void vlither_chat_profile_changed(void) {
+  /* Force the next update tick to publish the new optional profile fields. */
+  S.last_heartbeat = 0;
 }
 
 static void vlither_normalize_server(char *out, size_t cap, const char *in) {

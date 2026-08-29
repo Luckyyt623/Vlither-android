@@ -22,8 +22,8 @@ android {
         applicationId "com.vlither"
         minSdk 26
         targetSdk 34
-        versionCode 26
-        versionName "4.7.5"
+        versionCode 35
+        versionName "4.8.4"
     }
 
     signingConfigs {

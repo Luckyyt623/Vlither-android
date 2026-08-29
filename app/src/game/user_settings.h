@@ -304,6 +304,35 @@ typedef struct user_settings {
   uint8_t capture_settings_reserved[16];
   bool record_gameplay;
   bool screenshot_on_kill;
+
+  /* v4.0 extension: anonymous review ownership. The random token stays only
+     on this device; the Vlither backend stores a one-way hash. */
+  uint8_t ratings_settings_reserved[16];
+  char ratings_owner_token[65];
+
+  /* v4.1 extension: the centred "Vlither Leaderboard" title has its own
+     colour, independent of the player-row colour style. */
+  uint8_t leaderboard_title_settings_reserved[16];
+  vec4 leaderboard_title_color;
+
+  /* v4.2 extension: the public Vlither Chat profile used by presence,
+     messages and same-server minimap markers. The badge is an index into a
+     small font-safe preset list; no arbitrary text is persisted or sent. */
+  uint8_t vlither_profile_settings_reserved[16];
+  bool vlither_profile_color_custom;
+  vec3 vlither_profile_color;
+  int vlither_profile_emoji;
+
+  /* v4.3 extension: remember whether each gameplay chat HUD is visible.
+     These are display-only preferences and do not leave Global Chat. */
+  uint8_t chat_hud_settings_reserved[16];
+  bool vlither_chat_hud_visible;
+  bool ntl_chat_hud_visible;
+
+  /* v4.4 extension: shared scale for the floating and embedded
+     Online Players/Friends lists. */
+  uint8_t friends_panel_settings_reserved[16];
+  float friends_panel_zoom;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

@@ -3,12 +3,14 @@
 #include "game/ntl_team.h"
 #include "game/ntl_tags.h"
 #include "game/vlither_tags.h"
+#include "game/vlither_ratings.h"
 #include "ui/skin_editor.h"
 #include "ui/title_screen.h"
 #include "ui/settings.h"
 #include "ui/controls.h"
 #include "ui/key_buttons.h"
 #include "ui/viewport.h"
+#include "ui/ratings.h"
 #include "user.h"
 #ifdef ANDROID
 #include "android_jni.h"
@@ -99,12 +101,14 @@ void tinit(tenv* env) {
   ntl_team_init(env);
   ntl_tags_init(env);
   vlither_tags_init(env);
+  vlither_ratings_init(env);
   DLOG("tinit: game_data_init done");
   DLOG("tinit: complete");
 }
 
 void tdestroy(tenv* env) {
   ui_key_buttons_destroy(env);
+  vlither_ratings_destroy(env);
   vlither_tags_destroy(env);
   ntl_tags_destroy(env);
   ntl_team_destroy(env);
@@ -186,6 +190,7 @@ void trender(tenv* env) {
                     gdata->curr_screen == NTL_PANEL ||
                     gdata->curr_screen == VOICE_PANEL ||
                     gdata->curr_screen == EVENTS_PANEL ||
+                    gdata->curr_screen == RATINGS_PANEL ||
                     gdata->curr_screen == KEYBOARD_EDITOR ||
                     ntl_team_voice_controls_open() ||
                     igGetIO_Nil()->WantTextInput);
@@ -243,6 +248,7 @@ void trender(tenv* env) {
     ntl_team_update(env);
     ntl_tags_update(env);
     vlither_tags_update(env);
+    vlither_ratings_update(env);
 
     /* Process on-screen key buttons before gameplay input. Android keeps a
        separate UI pointer stream, so a button gesture can be consumed here
@@ -273,6 +279,9 @@ void trender(tenv* env) {
         break;
       case EVENTS_PANEL:
         ui_events_panel(env);
+        break;
+      case RATINGS_PANEL:
+        ui_ratings_panel(env);
         break;
       case KEYBOARD_EDITOR:
         /* Dedicated black-screen editor for user-created keyboard buttons. */

@@ -36,6 +36,14 @@ void server_connect(tenv* env) {
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
 
+  /* The server-picker probes are useful only on the homepage.  They used to
+     keep up to 64 connections alive after Play was pressed, competing with
+     the real game WebSocket on mobile data.  Signal the detached probe worker
+     before creating a real gameplay connection; it checks this flag at most
+     50 ms later and discards unfinished results. */
+  if (gdata->curr_screen == PLAYING)
+    gdata->server_list.ping_stop = 1;
+
   char url[256] = {};
 
   bool is_local = (strncmp(usrs->server_address, "127.", 4) == 0 ||
@@ -309,7 +317,7 @@ void server_list_destroy(tenv* env) {
  * report the best achievable latency to that server.
  * ------------------------------------------------------------------ */
 
-#define PING_BATCH    64
+#define PING_BATCH    12
 #define PING_TIMEOUT  7000   /* ms, used for IPv4 probes */
 #define PING_SAMPLES  4      /* number of ping/pong round trips sampled */
 #define PING_BYTE     0x70   /* 'p' - single-byte ping payload used by /ptc */

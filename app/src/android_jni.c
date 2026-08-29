@@ -145,6 +145,42 @@ bool android_jni_request_custom_arrow(void) {
     return result;
 }
 
+static bool android_jni_request_settings_action(const char* method_name) {
+    if (!method_name || !g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return false;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        attached = true;
+    } else if (status != JNI_OK || !env) return false;
+
+    bool result = false;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, method_name, "(Landroid/app/Activity;)Z");
+        if (mid && !(*env)->ExceptionCheck(env))
+            result = (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz) == JNI_TRUE;
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+    return result;
+}
+
+bool android_jni_request_settings_backup(void) {
+    return android_jni_request_settings_action("requestSettingsBackup");
+}
+
+bool android_jni_request_settings_restore(void) {
+    return android_jni_request_settings_action("requestSettingsRestore");
+}
+
 #define VOICE_CAPTURE_FRAME_MAX 2048
 
 bool android_jni_voice_poll_capture(unsigned char* out, size_t cap, size_t* out_len) {

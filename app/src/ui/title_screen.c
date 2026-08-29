@@ -8,6 +8,7 @@
 #include "../user.h"
 #include "../game/vlither_tags.h"
 #include "../imgui_setup.h"
+#include "ratings.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -472,6 +473,14 @@ void ui_title_screen(tenv* env) {
     }
     igPopTextWrapPos();
     igPopFont();
+  }
+  const float ratings_button_y =
+      event_button_y + frame_height * 1.15f + homepage_px(58.0f);
+  igSetCursorPos((ImVec2){home_edge, ratings_button_y});
+  if (igButton("Ratings & Reviews",
+               (ImVec2){side_button_w, frame_height * 1.15f})) {
+    ui_ratings_panel_open();
+    usr->gdata.curr_screen = RATINGS_PANEL;
   }
 #endif
 

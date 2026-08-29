@@ -288,6 +288,29 @@ void user_settings_default(user_settings* usr_settings) {
          sizeof usr_settings->capture_settings_reserved);
   usr_settings->record_gameplay = false;
   usr_settings->screenshot_on_kill = false;
+  memset(usr_settings->ratings_settings_reserved, 0,
+         sizeof usr_settings->ratings_settings_reserved);
+  usr_settings->ratings_owner_token[0] = 0;
+  memset(usr_settings->leaderboard_title_settings_reserved, 0,
+         sizeof usr_settings->leaderboard_title_settings_reserved);
+  usr_settings->leaderboard_title_color[0] = 1.0f;
+  usr_settings->leaderboard_title_color[1] = 0.88f;
+  usr_settings->leaderboard_title_color[2] = 0.30f;
+  usr_settings->leaderboard_title_color[3] = 0.96f;
+  memset(usr_settings->vlither_profile_settings_reserved, 0,
+         sizeof usr_settings->vlither_profile_settings_reserved);
+  usr_settings->vlither_profile_color_custom = false;
+  usr_settings->vlither_profile_color[0] = 0.35f;
+  usr_settings->vlither_profile_color[1] = 0.68f;
+  usr_settings->vlither_profile_color[2] = 1.0f;
+  usr_settings->vlither_profile_emoji = 0;
+  memset(usr_settings->chat_hud_settings_reserved, 0,
+         sizeof usr_settings->chat_hud_settings_reserved);
+  usr_settings->vlither_chat_hud_visible = true;
+  usr_settings->ntl_chat_hud_visible = true;
+  memset(usr_settings->friends_panel_settings_reserved, 0,
+         sizeof usr_settings->friends_panel_settings_reserved);
+  usr_settings->friends_panel_zoom = 1.0f;
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -364,11 +387,40 @@ void read_user_settings(user_settings* usr_settings) {
   size_t v36_prefix = offsetof(user_settings, ntl_competitive_settings_reserved);
   size_t v37_prefix = offsetof(user_settings, integrated_mode_settings_reserved);
   size_t v38_prefix = offsetof(user_settings, capture_settings_reserved);
+  size_t v40_prefix = offsetof(user_settings, ratings_settings_reserved);
+  size_t v41_prefix =
+      offsetof(user_settings, leaderboard_title_settings_reserved);
+  size_t v42_prefix =
+      offsetof(user_settings, vlither_profile_settings_reserved);
+  size_t v43_prefix =
+      offsetof(user_settings, chat_hud_settings_reserved);
+  size_t v44_prefix =
+      offsetof(user_settings, friends_panel_settings_reserved);
   bool migrate_single_mode_features =
       (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v44_prefix)
+    /* Preserve both v4.3 chat-HUD visibility values while initializing the
+       new player-list zoom to 1.0x. */
+    bytes_to_read = v44_prefix;
+  else if ((size_t)file_size >= v43_prefix)
+    /* Preserve the complete public-profile build while keeping both gameplay
+       chat HUDs visible by default for existing users. */
+    bytes_to_read = v43_prefix;
+  else if ((size_t)file_size >= v42_prefix)
+    /* Preserve the complete leaderboard-title build while initializing the
+       new public profile to automatic colour and no emoji. */
+    bytes_to_read = v42_prefix;
+  else if ((size_t)file_size >= v41_prefix)
+    /* Preserve the complete ratings build while giving the title its
+       original gold colour by default. */
+    bytes_to_read = v41_prefix;
+  else if ((size_t)file_size >= v40_prefix)
+    /* Preserve v3.9 capture preferences while generating a fresh anonymous
+       review-ownership token on first use. */
+    bytes_to_read = v40_prefix;
   else if ((size_t)file_size >= v38_prefix)
     /* Preserve every independent Normal/Assist preference from v3.8 while
        initializing local capture controls to disabled. */
@@ -692,6 +744,41 @@ void read_user_settings(user_settings* usr_settings) {
   }
   loaded.record_gameplay = !!loaded.record_gameplay;
   loaded.screenshot_on_kill = !!loaded.screenshot_on_kill;
+  if (loaded.ratings_owner_token[0]) {
+    bool valid_token = loaded.ratings_owner_token[64] == 0;
+    for (int i = 0; valid_token && i < 64; ++i) {
+      char c = loaded.ratings_owner_token[i];
+      valid_token = (c >= '0' && c <= '9') ||
+                    (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F');
+    }
+    if (!valid_token) loaded.ratings_owner_token[0] = 0;
+  }
+  for (int c = 0; c < 4; ++c) {
+    if (!isfinite(loaded.leaderboard_title_color[c]) ||
+        loaded.leaderboard_title_color[c] < 0.0f ||
+        loaded.leaderboard_title_color[c] > 1.0f)
+      loaded.leaderboard_title_color[c] =
+          (const float[]){1.0f, 0.88f, 0.30f, 0.96f}[c];
+  }
+  loaded.vlither_profile_color_custom =
+      !!loaded.vlither_profile_color_custom;
+  for (int c = 0; c < 3; ++c) {
+    if (!isfinite(loaded.vlither_profile_color[c]) ||
+        loaded.vlither_profile_color[c] < 0.0f ||
+        loaded.vlither_profile_color[c] > 1.0f)
+      loaded.vlither_profile_color[c] =
+          (const float[]){0.35f, 0.68f, 1.0f}[c];
+  }
+  if (loaded.vlither_profile_emoji < 0 ||
+      loaded.vlither_profile_emoji > 10)
+    loaded.vlither_profile_emoji = 0;
+  loaded.vlither_chat_hud_visible = !!loaded.vlither_chat_hud_visible;
+  loaded.ntl_chat_hud_visible = !!loaded.ntl_chat_hud_visible;
+  if (!isfinite(loaded.friends_panel_zoom) ||
+      loaded.friends_panel_zoom < 0.75f ||
+      loaded.friends_panel_zoom > 1.50f)
+    loaded.friends_panel_zoom = 1.0f;
 
   *usr_settings = loaded;
 }

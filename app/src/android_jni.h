@@ -14,6 +14,8 @@ void android_jni_notify_game_ready(void);
 
 void android_jni_open_url(const char* url);
 bool android_jni_request_custom_arrow(void);
+bool android_jni_request_settings_backup(void);
+bool android_jni_request_settings_restore(void);
 void android_jni_notification_beep(int kind);
 
 /* Decode an Android asset (including WebP) to malloc-owned RGBA bytes. */

@@ -435,7 +435,6 @@ void oef(tenv* env) {
     }
   }
 
-  if ((usrs->hotkeys[HOTKEY_BOT].active ||
-       ntl_team_voice_controls_open()) && gdata->data.follow_view)
+  if (usrs->hotkeys[HOTKEY_BOT].active && gdata->data.follow_view)
     sbot_go(env);
 }

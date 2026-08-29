@@ -1,6 +1,15 @@
 #include "settings.h"
 
+#include <math.h>
+
 #include "../user.h"
+#ifdef ANDROID
+#include "../android_jni.h"
+#endif
+
+#ifdef ANDROID
+static bool settings_transfer_unavailable = false;
+#endif
 
 static void draw_vlither_key_selector(const char *label, int *key) {
   char preview[2] = {(char)*key, 0};
@@ -84,12 +93,27 @@ void ui_settings(tenv* env) {
              usr->imgui_data.regular_font[usrs->ui_font_size]->LegacySize);
 
   float frame_height = igGetFrameHeight();
-  float child_window_height =
-      ctx->size[1] - style->WindowPadding.y * 4 - frame_height;
+  /* The action footer is pinned to the fullscreen Settings window. Reserve
+     its full height before sizing the two scrollable table rows; otherwise a
+     short landscape phone lets Hotkeys paint behind Create backup / Reset. */
+  ImVec2 settings_window_size;
+  igGetWindowSize(&settings_window_size);
+  float footer_btn_h = frame_height * 1.8f;
 #ifdef ANDROID
+  float footer_h = footer_btn_h * 2.0f + style->ItemSpacing.y;
+  float settings_table_h = settings_window_size.y -
+      style->WindowPadding.y * 2.0f - footer_h -
+      style->ItemSpacing.y * 2.0f;
+  float child_window_height = fmaxf(
+      1.0f,
+      (settings_table_h - style->ItemSpacing.y) * 0.5f);
   const int panel_columns = 2;
-  child_window_height = (child_window_height - style->ItemSpacing.y) * 0.5f;
 #else
+  float footer_h = footer_btn_h;
+  float child_window_height = fmaxf(
+      frame_height * 2.0f,
+      settings_window_size.y - style->WindowPadding.y * 2.0f - footer_h -
+          style->ItemSpacing.y * 2.0f);
   const int panel_columns = 4;
 #endif
 
@@ -122,9 +146,11 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Leaderboard title");
       igAlignTextToFramePadding();
+      igText("Title text colour");
+      igAlignTextToFramePadding();
       igText("Leaderboard style");
       igAlignTextToFramePadding();
-      igText("Leaderboard colour");
+      igText("Player text colour");
       igAlignTextToFramePadding();
       igText("Names font size");
       igAlignTextToFramePadding();
@@ -134,7 +160,7 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Chat alert sound");
       igAlignTextToFramePadding();
-      igText("Teammate alert sound");
+      igText("Player activity beep");
       igAlignTextToFramePadding();
       igText("SOS alert sound");
       igAlignTextToFramePadding();
@@ -249,12 +275,16 @@ void ui_settings(tenv* env) {
                           sizeof usrs->leaderboard_title,
                           ImGuiInputTextFlags_None, NULL, NULL);
       igSetNextItemWidth(-1);
+      igColorEdit4("##leaderboard title colour",
+                   usrs->leaderboard_title_color,
+                   ImGuiColorEditFlags_AlphaBar);
+      igSetNextItemWidth(-1);
       igCombo_Str_arr("##leaderboard style", &usrs->ntl_leaderboard_style,
                       (const char*[]){"Snake colours", "Top-10 gradient",
                                       "Single colour"}, 3, -1);
       igBeginDisabled(usrs->ntl_leaderboard_style != 2);
       igSetNextItemWidth(-1);
-      igColorEdit4("##leaderboard colour", usrs->ntl_leaderboard_color,
+      igColorEdit4("##leaderboard player colour", usrs->ntl_leaderboard_color,
                    ImGuiColorEditFlags_AlphaBar);
       igEndDisabled();
       igSetNextItemWidth(-1);
@@ -615,22 +645,81 @@ void ui_settings(tenv* env) {
     igEndTable();
   }
 
-  float btn_w = ctx->size[0] * 0.25f - style->ItemSpacing.x * 2;
-  float btn_h = frame_height * 1.8f;
-  float col2_x = ctx->size[0] * 0.5f + style->WindowPadding.x;
+  /* Responsive two-column footer. Backup actions share one row immediately
+     above the final Reset / OK row, keeping the primary confirmation in the
+     bottom-right on every Android screen width. */
+  float footer_x = style->WindowPadding.x;
+  float footer_w = settings_window_size.x - style->WindowPadding.x * 2.0f;
+  float btn_w = (footer_w - style->ItemSpacing.x) * 0.5f;
+  float btn_h = footer_btn_h;
+  float col1_x = footer_x;
+  float col2_x = footer_x + btn_w + style->ItemSpacing.x;
+  float bottom_y = settings_window_size.y - style->WindowPadding.y - btn_h;
+  float backup_y = bottom_y - style->ItemSpacing.y - btn_h;
+#ifdef ANDROID
+  igSetCursorPosX(col1_x);
+  igSetCursorPosY(backup_y);
+  if (igButton("Create backup", (ImVec2){btn_w, btn_h})) {
+    /* Export the current in-memory values, including Controls and custom
+       buttons, rather than the last values written by the OK button. */
+    save_user_settings(usrs);
+    if (!android_jni_request_settings_backup())
+      settings_transfer_unavailable = true;
+  }
+  if (igIsItemHovered(0))
+    igSetTooltip("Saves settings, Controls, custom buttons and the uploaded arrow. Keep the backup private because it also contains saved team IDs and keys.");
   igSetCursorPosX(col2_x);
-  igSetCursorPosY(ctx->size[1] - style->WindowPadding.y - btn_h * 2 - style->ItemSpacing.y);
+  igSetCursorPosY(backup_y);
+  if (igButton("Load backup", (ImVec2){btn_w, btn_h}))
+    igOpenPopup_Str("Load Vlither backup?", 0);
+#endif
+  igSetCursorPosX(col1_x);
+  igSetCursorPosY(bottom_y);
   if (igButton("Reset", (ImVec2){btn_w, btn_h})) {
     user_settings_default(usrs);
     env->config.vsync = usrs->vsync;
     twindow_request_refresh(env->wnd);
   }
   igSetCursorPosX(col2_x);
-  igSetCursorPosY(ctx->size[1] - style->WindowPadding.y - btn_h);
+  igSetCursorPosY(bottom_y);
   if (igButton("OK", (ImVec2){btn_w, btn_h})) {
     save_user_settings(usrs);
     gdata->curr_screen = TITLE_SCREEN;
   }
+
+#ifdef ANDROID
+  float dialog_btn_w = fminf(btn_w, 220.0f);
+  if (igBeginPopupModal("Load Vlither backup?", NULL,
+                        ImGuiWindowFlags_AlwaysAutoResize |
+                        ImGuiWindowFlags_NoSavedSettings)) {
+    igTextWrapped("This replaces all current settings, Controls and custom buttons. Vlither will close after a successful load; reopen it to apply the backup.");
+    igSpacing();
+    igTextColored((ImVec4){0.96f, 0.73f, 0.25f, 1.0f},
+                  "Only choose a backup you created in Vlither.");
+    igSpacing();
+    if (igButton("Cancel", (ImVec2){dialog_btn_w * 0.72f, btn_h}))
+      igCloseCurrentPopup();
+    igSameLine(0, style->ItemSpacing.x);
+    if (igButton("Choose backup", (ImVec2){dialog_btn_w, btn_h})) {
+      if (!android_jni_request_settings_restore())
+        settings_transfer_unavailable = true;
+      igCloseCurrentPopup();
+    }
+    igEndPopup();
+  }
+  if (settings_transfer_unavailable) {
+    igOpenPopup_Str("Backup unavailable", 0);
+    settings_transfer_unavailable = false;
+  }
+  if (igBeginPopupModal("Backup unavailable", NULL,
+                        ImGuiWindowFlags_AlwaysAutoResize |
+                        ImGuiWindowFlags_NoSavedSettings)) {
+    igTextWrapped("Android could not open the file picker. Please try again.");
+    if (igButton("OK##backup unavailable", (ImVec2){dialog_btn_w, btn_h}))
+      igCloseCurrentPopup();
+    igEndPopup();
+  }
+#endif
 
   igPopFont();
 }

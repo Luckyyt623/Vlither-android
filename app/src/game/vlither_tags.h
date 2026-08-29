@@ -9,6 +9,7 @@
 void vlither_tags_init(tenv *env);
 void vlither_tags_update(tenv *env);
 void vlither_tags_destroy(tenv *env);
+const char *vlither_backend_base_url(void);
 
 bool vlither_tags_handle_command(const char *input);
 void vlither_tags_skin_panel(tenv *env);
@@ -21,6 +22,8 @@ int vlither_chat_history_count(void);
 const char *vlither_chat_history_nick(int index);
 const char *vlither_chat_history_text(int index);
 const char *vlither_chat_history_server(int index);
+const char *vlither_chat_history_color(int index);
+const char *vlither_chat_history_emoji(int index);
 long long vlither_chat_history_time_ms(int index);
 int vlither_chat_player_count(void);
 const char *vlither_chat_player_nick(int index);
@@ -28,6 +31,8 @@ const char *vlither_chat_player_server(int index);
 const char *vlither_chat_player_version(int index);
 const char *vlither_chat_player_client_id(int index);
 const char *vlither_chat_player_map_name(int index);
+const char *vlither_chat_player_color(int index);
+const char *vlither_chat_player_emoji(int index);
 int vlither_chat_player_snake_id(int index);
 float vlither_chat_player_x(int index);
 float vlither_chat_player_y(int index);
@@ -44,6 +49,9 @@ bool vlither_chat_is_nickname_sos(const char *nickname, const char *server);
 void vlither_chat_set_joined(bool joined);
 bool vlither_chat_joined(void);
 void vlither_chat_set_sos_until(long long until_ms);
+int vlither_profile_emoji_count(void);
+const char *vlither_profile_emoji_at(int index);
+void vlither_chat_profile_changed(void);
 
 /* Event ping system. Backend timestamps are UTC epoch milliseconds; the UI
    formats them with the phone's local timezone. Interest is persisted by the

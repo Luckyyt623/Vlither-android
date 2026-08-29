@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7"
+        private const val CURRENT_VERSION   = "4.7.1"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,70 +209,42 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-     Update 4.7
+     Update 4.7.1
 
         What's New:
 
-        • Original Slither Mobile Joystick
-          Vlither's old joystick has been replaced with the Slither mobile-style fixed grey base and moving white thumb. Its steering movement, position, size, opacity and side controls are supported.
+        • Direct Backup Save
+          Create backup now saves a complete .vlitherbackup file directly in Downloads/Vlither on modern Android.
 
-        • IPv4 Server List and 4-digit SID
-          You can enter either IPv4:Port or a 4-digit SID in the same server field.
+       • Gameplay Ping Protection
+          Server-list latency scans now stop as soon as Play is pressed, before the game WebSocket connects. The picker also uses smaller probe batches, so checking server pings cannot compete with gameplay traffic on mobile data.
 
-        • Normal and Assist Mode Settings
-          Competitive, Low, Normal and High graphics presets are built directly into both modes. Each mode independently stores enemy tag/cosmetic filters, high-visibility skins, Snake Nicks+, name placement, Skinless Peek and own/team true-skin rules.
+        • Friends / Online Players Zoom
+          Added a persistent 0.75x–1.50x zoom control in both Vlither and NTL Chat settings. Narrow player panels now move server, version and performance details onto a wrapped second line so the list stays inside the screen on different phones.
 
-        • Skinless Peek and True Skins
-          Hold W to temporarily reveal true skins. Your own and teammate true skins can remain visible while other snakes use the high-visibility skinless view.
+        • Settings, Chat & Bot Fixes
+          Backup and Load now sit directly above the final Reset and OK actions. In-game NTL/Vlither Chat visibility survives restarts, Chat includes a player-activity beep toggle, and turning Bot off can no longer be overridden by an open Voice panel near the border.
 
-        • Rendering and Visibility Controls
-          Added food glow, adjustable snake shadows, centre lines on other snakes, shader cycling, local-only invisible skin and Stealth mode. Bright snakes automatically use a dark centre line for visibility.
+        • Shared Chat Colours & Emoji Badges
+          Choose a public Vlither profile colour and a font-safe emoji badge in Chat. Other players see both in live messages, the online player list and your same-server minimap marker. Profile choices are included in Settings Backup and Restore.
 
-        • Minimap and Team Improvements
-          Added Clock Map, dynamic minimap sizing, border-distance indicator, custom minimap display name and stable unique colours for NTL and Vlither players. Same-server teammates and SOS players are also highlighted on the leaderboard.
+        • Settings Backup and Restore
+          Export settings, Controls, custom buttons and the uploaded arrow to one backup file, then restore them through Android's file picker.
 
-        • Chat Alerts and Timestamps
-          The shared General settings now control timestamps and alert sounds for both NTL and Vlither Global Chat. Separate alerts are available for new messages, newly joined teammates and SOS requests.
+        • Leaderboard Title Colour
+          The centred “Vlither Leaderboard” title now has its own colour picker, independent of the player-row colour style.
 
-        • Vlither Global Chat Privacy
-          Added Leave Global Chat and Join Global Chat. While left, you disappear from Vlither presence, minimap, player list, teammate detection, chat and Voice; you also cannot see or interact with other Vlither players.
+        • Community Ratings & Reviews
+          Rate Vlither from 1 to 5, publish a message, read other players' reviews, update your own review and report inappropriate posts for moderation.
 
-        • SOS Help
-          Press S to publish a four-minute SOS and send “Help me!” to configured Vlither and NTL chats. Your teammate name becomes red, and SOS clears automatically on death.
-
-        • Custom Leaderboard
-          Change the leaderboard title and choose snake colours, a Top-10 gradient or one custom colour.
-
-        • Custom Arrow and Zoom Bar
-          Upload a PNG, JPEG or WebP arrow from Android storage. Zoom length, thickness/width and thumb size can now be adjusted independently.
-
-        • Chat, Tags and Presence Fixes
-          Improved Vlither Chat/Tags connection stability, teammate matching, player colours, minimap names, FPS/ping display and Global Chat presence handling.
-
-        • Live NTL Private Tags
-          You NTL private tags visibility is improved.
-
-        • Teammate Leaderboard Names
-          Now you can see your teammate name on the board clearly.
-
-        • Local Gameplay Recording
-          Added an optional 30 FPS gameplay recorder. It starts only after entering a real server, stops and finalizes automatically on the homepage, and saves MP4 files locally in Movies/Vlither. Android's screen-capture permission is required for each recording session.
-
-        • Kill Screenshots
-          Added optional automatic PNG screenshots about 150 ms after every server-confirmed kill. Images stay local in Pictures/Vlither/Kills.
-
-        • Bot Border Safety
-          Fixed bot mode ignoring the wall during self-circle/coil behaviour. Predictive border checks now have priority over food, encircle and coil goals, use the real snake-head position, and turn inward before the snake touches a shrinking server border.
-          
-          • UI Improved 
-          Now Vlither UI change and sync according to your phone resolution
+       
 
         Thanks for using Vlither Android!
         Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7")
+            .setTitle("What's New in v4.7.1")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

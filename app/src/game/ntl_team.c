@@ -118,6 +118,51 @@ static ImVec4 ntl_unique_color(const char *name, unsigned int salt) {
 static ImU32 ntl_unique_u32(const char *name, unsigned int salt) {
   return igColorConvertFloat4ToU32(ntl_unique_color(name, salt));
 }
+
+static int ntl_hex_digit(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static ImVec4 ntl_vlither_profile_color(const char *hex,
+                                        const char *fallback_name) {
+  if (!hex || strlen(hex) != 6)
+    return ntl_unique_color(fallback_name, 0x564c4954u);
+  int rgb[3];
+  for (int i = 0; i < 3; ++i) {
+    int hi = ntl_hex_digit(hex[i * 2]);
+    int lo = ntl_hex_digit(hex[i * 2 + 1]);
+    if (hi < 0 || lo < 0)
+      return ntl_unique_color(fallback_name, 0x564c4954u);
+    rgb[i] = hi * 16 + lo;
+  }
+  return (ImVec4){rgb[0] / 255.0f, rgb[1] / 255.0f,
+                  rgb[2] / 255.0f, 1.0f};
+}
+
+static ImVec4 ntl_vlither_text_color(const char *hex,
+                                     const char *fallback_name) {
+  ImVec4 color = ntl_vlither_profile_color(hex, fallback_name);
+  float luma = color.x * 0.2126f + color.y * 0.7152f + color.z * 0.0722f;
+  if (luma < 0.34f) {
+    float mix = (0.34f - luma) / 0.34f * 0.55f;
+    color.x += (1.0f - color.x) * mix;
+    color.y += (1.0f - color.y) * mix;
+    color.z += (1.0f - color.z) * mix;
+  }
+  return color;
+}
+
+static void ntl_vlither_profile_label(char *out, size_t cap,
+                                      const char *emoji, const char *name) {
+  if (!out || cap == 0) return;
+  if (!name || !name[0]) name = "Vlither";
+  if (emoji && emoji[0]) snprintf(out, cap, "%s %s", emoji, name);
+  else snprintf(out, cap, "%s", name);
+  out[cap - 1] = 0;
+}
 static bool ntl_feed_is_fresh(void);
 static void ntl_queue_message(const user_settings *us);
 static void chat_submit_current(const user_settings *us);
@@ -545,13 +590,17 @@ bool ntl_team_send_text(const char *text) {
     ntl_team_system_message(
         "NTL chat is not configured. Add your team ID and auth key first.");
     S.ntl_chat_open = true;
+    us->ntl_chat_hud_visible = true;
+    save_user_settings(us);
     return false;
   }
 
   strncpy(S.input, text, sizeof S.input - 1);
   S.input[sizeof S.input - 1] = 0;
   S.ntl_chat_open = true;
+  us->ntl_chat_hud_visible = true;
   us->ntl_chat_minimized = false;
+  save_user_settings(us);
   ntl_queue_message(us);
   return true;
 }
@@ -1077,8 +1126,10 @@ void ntl_team_init(tenv *env) {
     strncpy(S.last_presence_server, "_GAME_MENU_",
             sizeof S.last_presence_server - 1);
   }
-  S.ntl_chat_open = true;
-  S.vlither_chat_open = true;
+  S.ntl_chat_open = env && env->usr
+                        ? env->usr->usrs.ntl_chat_hud_visible : true;
+  S.vlither_chat_open = env && env->usr
+                            ? env->usr->usrs.vlither_chat_hud_visible : true;
   S.voice_selected_room = -1;
   S.select_chat_tab = true;
   tuser_data *u = env ? env->usr : NULL;
@@ -1324,7 +1375,12 @@ static snake *ntl_visible_snake_for_member(game_data *g,
 
 static void ntl_draw_marker(ImDrawList *dl, ImVec2 p, float radius,
                             int shape, ImU32 fill) {
-  ImU32 border = IM_COL32(0, 0, 0, 210);
+  int r = (int)(fill & 0xffu);
+  int g = (int)((fill >> 8) & 0xffu);
+  int b = (int)((fill >> 16) & 0xffu);
+  ImU32 border = r * 21 + g * 72 + b * 7 < 9000
+                     ? IM_COL32(255, 255, 255, 225)
+                     : IM_COL32(0, 0, 0, 210);
   float border_radius = radius + 1.4f;
   if (shape == 1) {
     ImVec2 outer[4] = {{p.x, p.y - border_radius},
@@ -1464,7 +1520,9 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
       if (dist > 1.0f) { rx /= dist; ry /= dist; }
       ImVec2 p = {center.x + rx * map_radius, center.y + ry * map_radius};
       const char *color_name = vlither_chat_player_nick(i);
-      ImU32 marker_col = ntl_unique_u32(color_name, 0x564c4954u);
+      ImVec4 profile_col = ntl_vlither_profile_color(
+          vlither_chat_player_color(i), color_name);
+      ImU32 marker_col = igColorConvertFloat4ToU32(profile_col);
       ntl_draw_marker(dl, p, us->ntl_marker_size, us->ntl_marker_shape,
                       marker_col);
 
@@ -1472,6 +1530,10 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
         const char *name = vlither_chat_player_map_name(i);
         if (!name || !name[0]) name = vlither_chat_player_nick(i);
         if (!name || !name[0]) name = "Vlither";
+        char profile_label[96];
+        ntl_vlither_profile_label(profile_label, sizeof profile_label,
+                                  vlither_chat_player_emoji(i), name);
+        name = profile_label;
         igPushFont(u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
                    u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize);
         ImVec2 text_size;
@@ -1679,6 +1741,124 @@ static bool ntl_voice_icon_button(tuser_data *u, const char *id,
   return pressed;
 }
 
+static void ntl_draw_wrapped_color(ImVec4 color, const char *text) {
+  igPushStyleColor_Vec4(ImGuiCol_Text, color);
+  igTextWrapped("%s", text);
+  igPopStyleColor(1);
+}
+
+static void ntl_player_stats_text(char *out, size_t out_size, int fps,
+                                  int ping) {
+  out[0] = 0;
+  if (fps >= 0 && ping >= 0)
+    snprintf(out, out_size, "%d FPS | %d ms", fps, ping);
+  else if (fps >= 0)
+    snprintf(out, out_size, "%d FPS", fps);
+  else if (ping >= 0)
+    snprintf(out, out_size, "%d ms", ping);
+}
+
+static void ntl_draw_vlither_player_row(user_settings *us, int i,
+                                        bool compact) {
+  const char *player_name = vlither_chat_player_nick(i);
+  char player_label[96];
+  ntl_vlither_profile_label(player_label, sizeof player_label,
+                            vlither_chat_player_emoji(i), player_name);
+  ImVec4 name_color = ntl_vlither_text_color(
+      vlither_chat_player_color(i), player_name);
+  int fps = vlither_chat_player_fps(i);
+  int ping = vlither_chat_player_ping(i);
+
+  if (!compact) {
+    igTextColored(name_color, "● %s", player_label);
+    igSameLine(0, 4);
+    igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s",
+                  vlither_chat_player_server(i));
+    igSameLine(0, 4);
+    igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "Vlither v%s",
+                  vlither_chat_player_version(i));
+    if (us->vlither_show_player_stats && (fps >= 0 || ping >= 0)) {
+      char stats[64];
+      ntl_player_stats_text(stats, sizeof stats, fps, ping);
+      igSameLine(0, 4);
+      igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f}, "%s", stats);
+    }
+    return;
+  }
+
+  char first_line[112];
+  snprintf(first_line, sizeof first_line, "● %s", player_label);
+  ntl_draw_wrapped_color(name_color, first_line);
+
+  char stats[64];
+  ntl_player_stats_text(stats, sizeof stats, fps, ping);
+  char metadata[256];
+  snprintf(metadata, sizeof metadata, "%s | Vlither v%s%s%s",
+           vlither_chat_player_server(i), vlither_chat_player_version(i),
+           us->vlither_show_player_stats && stats[0] ? " | " : "",
+           us->vlither_show_player_stats ? stats : "");
+  ntl_draw_wrapped_color((ImVec4){0.62f, 0.76f, 0.80f, 0.9f}, metadata);
+}
+
+static void ntl_draw_team_player_row(user_settings *us, ntl_member *m,
+                                     bool compact) {
+  const char *clean_name = ntl_clean_name(m->nick);
+  ImVec4 name_color = ntl_unique_color(clean_name, 0x4e544c31u);
+  const char *owner = m->owner[0] ? m->owner : "unknown";
+  const char *server = m->srv[0] ? m->srv : "_GAME_MENU_";
+  char version[40];
+  if (m->has_vlither_telemetry && m->vlither_ver[0])
+    snprintf(version, sizeof version, "Vlither v%s", m->vlither_ver);
+  else
+    snprintf(version, sizeof version, "NTL v%s",
+             m->ver[0] ? m->ver : "?");
+
+  if (!compact) {
+    igTextColored((ImVec4){0.85f, 0.2f, 0.2f, 1.0f}, "%s", owner);
+    igSameLine(0, 4);
+    igTextColored(name_color, "● %s", clean_name);
+    igSameLine(0, 4);
+    igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s", server);
+    igSameLine(0, 4);
+    igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s", version);
+    if (us->ntl_show_player_stats && m->has_telemetry &&
+        (m->fps >= 0 || m->ping >= 0)) {
+      char stats[64];
+      ntl_player_stats_text(stats, sizeof stats, m->fps, m->ping);
+      igSameLine(0, 4);
+      igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f}, "%s", stats);
+    }
+    return;
+  }
+
+  char first_line[112];
+  snprintf(first_line, sizeof first_line, "● %s", clean_name);
+  ntl_draw_wrapped_color(name_color, first_line);
+
+  char stats[64];
+  ntl_player_stats_text(stats, sizeof stats, m->fps, m->ping);
+  char metadata[320];
+  snprintf(metadata, sizeof metadata, "%s | %s | %s%s%s", owner, server,
+           version,
+           us->ntl_show_player_stats && m->has_telemetry && stats[0]
+               ? " | "
+               : "",
+           us->ntl_show_player_stats && m->has_telemetry ? stats : "");
+  ntl_draw_wrapped_color((ImVec4){0.62f, 0.76f, 0.80f, 0.9f}, metadata);
+}
+
+static void ntl_draw_friends_zoom_control(user_settings *us,
+                                          const char *slider_id) {
+  igText("Friends / players zoom");
+  igSetNextItemWidth(-1.0f);
+  igSliderFloat(slider_id, &us->friends_panel_zoom, 0.75f, 1.50f,
+                "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+  if (igIsItemDeactivatedAfterEdit()) save_user_settings(us);
+  if (igIsItemHovered(0))
+    igSetTooltip("Changes text size in Online Players. Narrow panels switch "
+                 "to a wrapped two-line layout automatically.");
+}
+
 void ntl_team_draw(tenv *env) {
   tuser_data *u = env->usr;
   user_settings *us = &u->usrs;
@@ -1823,8 +2003,12 @@ void ntl_team_draw(tenv *env) {
             igTextColored((ImVec4){0.62f, 0.66f, 0.72f, 0.86f}, "%s ", clock);
             igSameLine(0, 0);
           }
-          igTextColored(ntl_unique_color(sender, 0x564c4954u), "[%s]: ",
-                        sender && sender[0] ? sender : "Vlither");
+          char sender_label[96];
+          ntl_vlither_profile_label(sender_label, sizeof sender_label,
+                                    vlither_chat_history_emoji(n), sender);
+          igTextColored(ntl_vlither_text_color(
+                            vlither_chat_history_color(n), sender),
+                        "[%s]: ", sender_label);
           igSameLine(0, 0);
           igTextColored((ImVec4){0.92f, 0.92f, 0.96f, 1.0f}, "%s", text);
         }
@@ -1892,8 +2076,14 @@ void ntl_team_draw(tenv *env) {
                     ImGuiWindowFlags_NoBackground;
 
 #ifdef ANDROID
-    float players_max_w = fmaxf(220.0f, vp->WorkSize.x * 0.82f);
-    float players_max_h = fmaxf(120.0f, vp->WorkSize.y * 0.88f);
+    /* Never let the stored layout become larger than the current phone's
+       usable area (rotation, cut-outs and split-screen can all shrink it). */
+    float players_max_w =
+        fminf(vp->WorkSize.x, fmaxf(220.0f, vp->WorkSize.x * 0.82f));
+    float players_max_h =
+        fminf(vp->WorkSize.y, fmaxf(120.0f, vp->WorkSize.y * 0.88f));
+    players_max_w = fmaxf(1.0f, players_max_w);
+    players_max_h = fmaxf(1.0f, players_max_h);
     float players_min_w = fminf(250.0f, players_max_w);
     float players_min_h = fminf(120.0f, players_max_h);
     float pw = ntl_clampf(us->ntl_players_rel_w * vp->WorkSize.x,
@@ -1915,74 +2105,31 @@ void ntl_team_draw(tenv *env) {
 
     if (igBegin("Online Players##ntl_hud", &S.players_open, player_flags)) {
       igPushFont(u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
-                 u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize);
+                 u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize *
+                     us->friends_panel_zoom);
+      ImVec2 players_avail;
+      igGetContentRegionAvail(&players_avail);
+      bool compact_players =
+          players_avail.x < 430.0f * us->friends_panel_zoom;
       if (S.vlither_chat_active) {
-        igTextColored((ImVec4){1.0f, 1.0f, 1.0f, 0.8f},
-                      "Vlither players (nick, srv, ver):");
+        ntl_draw_wrapped_color((ImVec4){1.0f, 1.0f, 1.0f, 0.8f},
+                               "Vlither players (nick, srv, ver):");
         int count = vlither_chat_player_count();
-        for (int i = 0; i < count; ++i) {
-          const char *player_name = vlither_chat_player_nick(i);
-          igTextColored(ntl_unique_color(player_name, 0x564c4954u),
-                        "● %s", player_name);
-          igSameLine(0, 4);
-          igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s",
-                        vlither_chat_player_server(i));
-          igSameLine(0, 4);
-          igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "Vlither v%s",
-                        vlither_chat_player_version(i));
-          if (us->vlither_show_player_stats) {
-            int fps = vlither_chat_player_fps(i);
-            int ping = vlither_chat_player_ping(i);
-            if (fps >= 0 || ping >= 0) {
-              igSameLine(0, 4);
-              if (fps >= 0 && ping >= 0)
-                igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f},
-                              "%d FPS | %d ms", fps, ping);
-              else if (fps >= 0)
-                igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f}, "%d FPS", fps);
-              else
-                igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f}, "%d ms", ping);
-            }
-          }
-        }
+        for (int i = 0; i < count; ++i)
+          ntl_draw_vlither_player_row(us, i, compact_players);
         if (!count)
           igTextColored((ImVec4){0.6f, 0.6f, 0.6f, 1.0f},
                         "No Vlither players online");
       } else {
-        igTextColored((ImVec4){1.0f, 1.0f, 1.0f, 0.8f},
-                      "Online players (key owner, nick, srv, ver):");
+        ntl_draw_wrapped_color(
+            (ImVec4){1.0f, 1.0f, 1.0f, 0.8f},
+            "Online players (key owner, nick, srv, ver):");
         int visible = 0;
         for (int i = 0; i < S.count; ++i) {
           ntl_member *m = &S.members[i];
           if (!m->nick[0] || !strcmp(m->nick, "00000000")) continue;
           ++visible;
-          igTextColored((ImVec4){0.85f, 0.2f, 0.2f, 1.0f}, "%s",
-                        m->owner[0] ? m->owner : "unknown");
-          igSameLine(0, 4);
-          const char *clean_name = ntl_clean_name(m->nick);
-          igTextColored(ntl_unique_color(clean_name, 0x4e544c31u), "● %s",
-                        clean_name);
-          igSameLine(0, 4);
-          igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "%s",
-                        m->srv[0] ? m->srv : "_GAME_MENU_");
-          igSameLine(0, 4);
-          if (m->has_vlither_telemetry && m->vlither_ver[0])
-            igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "Vlither v%s",
-                          m->vlither_ver);
-          else
-            igTextColored((ImVec4){0.2f, 0.8f, 0.8f, 0.8f}, "NTL v%s",
-                          m->ver[0] ? m->ver : "?");
-          if (us->ntl_show_player_stats && m->has_telemetry &&
-              (m->fps >= 0 || m->ping >= 0)) {
-            igSameLine(0, 4);
-            if (m->fps >= 0 && m->ping >= 0)
-              igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f},
-                            "%d FPS | %d ms", m->fps, m->ping);
-            else if (m->fps >= 0)
-              igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f}, "%d FPS", m->fps);
-            else
-              igTextColored((ImVec4){0.78f, 0.78f, 0.82f, 0.9f}, "%d ms", m->ping);
-          }
+          ntl_draw_team_player_row(us, m, compact_players);
         }
         if (!visible)
           igTextColored((ImVec4){0.6f, 0.6f, 0.6f, 1.0f},
@@ -2417,14 +2564,72 @@ void ntl_team_panel(tenv *env) {
     igTextWrapped("Vlither Chat is the public chat for players currently connected through the Vlither Android backend. The player list below shows online Vlither clients.");
     if (!chat_joined)
       igTextDisabled("While left, your presence, minimap marker, player-list entry, chat messages and voice status are hidden from Vlither users.");
-    igCheckbox("Show Vlither in-game chat", &S.vlither_chat_open);
+    if (igCheckbox("Show Vlither in-game chat", &S.vlither_chat_open)) {
+      us->vlither_chat_hud_visible = S.vlither_chat_open;
+      save_user_settings(us);
+    }
     igSameLine(0, 16);
     igCheckbox("Show Vlither players", &S.players_open);
+    if (igCheckbox("Player activity beep", &us->ntl_alert_new_player))
+      save_user_settings(us);
+    if (igIsItemHovered(0))
+      igSetTooltip("Beep when a player appears or reconnects in NTL/Vlither Chat.");
     igCheckbox("Show same-server Vlither players on minimap",
                &us->vlither_show_minimap_players);
     igCheckbox("Show FPS & ping in player list##vlither",
                &us->vlither_show_player_stats);
+    ntl_draw_friends_zoom_control(us, "##vlither_friends_zoom");
     igTextDisabled("Minimap players use the Team dots style from NTL Players & minimap.");
+    /* Closed by default so short phone screens retain the full chat body.
+       Every control inside uses the current content width and therefore
+       stacks naturally instead of clipping on narrow devices. */
+    if (igCollapsingHeader_TreeNodeFlags("My map colour & emoji",
+                                         ImGuiTreeNodeFlags_None)) {
+      bool profile_changed = false;
+      if (igCheckbox("Use my chosen colour",
+                     &us->vlither_profile_color_custom))
+        profile_changed = true;
+      ImVec2 profile_avail;
+      igGetContentRegionAvail(&profile_avail);
+      if (profile_avail.x >= 390.0f) igSameLine(0, 12);
+      igSetNextItemWidth(fminf(180.0f, profile_avail.x));
+      if (igColorEdit3("##vlither_profile_colour", us->vlither_profile_color,
+                       ImGuiColorEditFlags_NoInputs)) {
+        us->vlither_profile_color_custom = true;
+        profile_changed = true;
+      }
+      int emoji_count = vlither_profile_emoji_count();
+      if (us->vlither_profile_emoji < 0 ||
+          us->vlither_profile_emoji >= emoji_count)
+        us->vlither_profile_emoji = 0;
+      const char *selected_emoji =
+          vlither_profile_emoji_at(us->vlither_profile_emoji);
+      char emoji_preview[32];
+      snprintf(emoji_preview, sizeof emoji_preview, "%s",
+               selected_emoji[0] ? selected_emoji : "None");
+      igText("Emoji badge");
+      igSetNextItemWidth(fminf(180.0f, profile_avail.x));
+      if (igBeginCombo("##vlither_profile_emoji", emoji_preview,
+                       ImGuiComboFlags_None)) {
+        for (int i = 0; i < emoji_count; ++i) {
+          const char *emoji = vlither_profile_emoji_at(i);
+          char option[40];
+          snprintf(option, sizeof option, "%s##vlither_emoji_%d",
+                   emoji[0] ? emoji : "None", i);
+          if (igSelectable_Bool(option, us->vlither_profile_emoji == i,
+                                ImGuiSelectableFlags_None, (ImVec2){0, 0})) {
+            us->vlither_profile_emoji = i;
+            profile_changed = true;
+          }
+        }
+        igEndCombo();
+      }
+      igTextWrapped("Other Vlither players see this in chat, the player list and on the map. It is included in Settings Backup.");
+      if (profile_changed) {
+        save_user_settings(us);
+        vlither_chat_profile_changed();
+      }
+    }
     igSeparator();
 
     /* Keep navigation visible on short/wide Android displays.  The previous
@@ -2444,6 +2649,8 @@ void ntl_team_panel(tenv *env) {
     igSameLine(0, style->ItemSpacing.x);
     if (igButton("Chat##vlither_top", (ImVec2){nav_w_v, nav_h_v})) {
       S.vlither_chat_open = true;
+      us->vlither_chat_hud_visible = true;
+      save_user_settings(us);
       S.focus_vlither_input = true;
     }
     igSeparator();
@@ -2482,7 +2689,12 @@ void ntl_team_panel(tenv *env) {
           igTextDisabled("%s", clock);
           igSameLine(0, 6);
         }
-        igTextColored(ntl_unique_color(sender, 0x564c4954u), "%s", sender);
+        char sender_label[96];
+        ntl_vlither_profile_label(sender_label, sizeof sender_label,
+                                  vlither_chat_history_emoji(i), sender);
+        igTextColored(ntl_vlither_text_color(
+                          vlither_chat_history_color(i), sender),
+                      "%s", sender_label);
         igSameLine(0, 6);
         igTextWrapped("%s", vlither_chat_history_text(i));
       }
@@ -2512,27 +2724,19 @@ void ntl_team_panel(tenv *env) {
                      (ImVec2){players_w, wide_v ? body_h_v : body_h_v * 0.36f},
                      ImGuiChildFlags_Borders, ImGuiWindowFlags_AlwaysVerticalScrollbar);
     igSeparatorText("Online Vlither Players");
+    igPushFont(u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
+               u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize *
+                   us->friends_panel_zoom);
     int pcount = vlither_chat_player_count();
     if (!pcount) {
       igTextDisabled("No Vlither players online.");
     } else {
       for (int i = 0; i < pcount; ++i) {
-        const char *player_name = vlither_chat_player_nick(i);
-        igTextColored(ntl_unique_color(player_name, 0x564c4954u),
-                      "● %s", player_name);
-        igTextDisabled("%s  |  Vlither v%s",
-                       vlither_chat_player_server(i),
-                       vlither_chat_player_version(i));
-        if (us->vlither_show_player_stats) {
-          int fps = vlither_chat_player_fps(i);
-          int ping = vlither_chat_player_ping(i);
-          if (fps >= 0 && ping >= 0) igTextDisabled("%d FPS  |  %d ms", fps, ping);
-          else if (fps >= 0) igTextDisabled("%d FPS", fps);
-          else if (ping >= 0) igTextDisabled("%d ms", ping);
-        }
+        ntl_draw_vlither_player_row(us, i, true);
         igSpacing();
       }
     }
+    igPopFont();
     igEndChild();
 
     igPopFont();
@@ -2577,9 +2781,17 @@ void ntl_team_panel(tenv *env) {
                    ImGuiChildFlags_Borders, ImGuiWindowFlags_None);
   igSeparatorText("Chat connection");
   igCheckbox("Enable NTL chat", &us->ntl_enabled);
-  igCheckbox("Show NTL in-game chat", &S.ntl_chat_open);
+  if (igCheckbox("Show NTL in-game chat", &S.ntl_chat_open)) {
+    us->ntl_chat_hud_visible = S.ntl_chat_open;
+    save_user_settings(us);
+  }
   igCheckbox("Show NTL players", &S.players_open);
+  if (igCheckbox("Player activity beep", &us->ntl_alert_new_player))
+    save_user_settings(us);
+  if (igIsItemHovered(0))
+    igSetTooltip("Beep when a player appears or reconnects in NTL/Vlither Chat.");
   igCheckbox("Show FPS & ping in player list##ntl", &us->ntl_show_player_stats);
+  ntl_draw_friends_zoom_control(us, "##ntl_friends_zoom");
   igTextDisabled("Shows FPS/ping from Vlither Android and NTL clients that publish NTL performance details.");
 
   igSpacing();
@@ -2763,38 +2975,31 @@ void ntl_team_panel(tenv *env) {
       igBeginChild_Str("##ntl_members", (ImVec2){0, 0},
                        ImGuiChildFlags_None,
                        ImGuiWindowFlags_AlwaysVerticalScrollbar);
+      igPushFont(u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR],
+                 u->imgui_data.mono_font_bold[FONT_SIZE_REGULAR]->LegacySize *
+                     us->friends_panel_zoom);
       if (S.count == 0) {
         igTextDisabled("No NTL players received yet.");
       } else {
         for (int i = 0; i < S.count; ++i) {
           ntl_member *m = &S.members[i];
+          ntl_draw_team_player_row(us, m, true);
           bool same = same_server(m->srv, us->server_address);
-          const char *clean_name = ntl_clean_name(m->nick);
-          igTextColored(ntl_unique_color(clean_name, 0x4e544c31u),
-                        "● %s", clean_name);
-          igSameLine(0, 10);
-          igTextColored(
+          char status[96];
+          if (m->score > 0)
+            snprintf(status, sizeof status, "%s | Score %d",
+                     same ? "Same server" : "Other server", m->score);
+          else
+            snprintf(status, sizeof status, "%s",
+                     same ? "Same server" : "Other server");
+          ntl_draw_wrapped_color(
               same ? (ImVec4){0.35f, 1.0f, 0.5f, 1.0f}
                    : (ImVec4){0.65f, 0.65f, 0.65f, 1.0f},
-              same ? "Same server" : "Other server");
-          if (m->score > 0) {
-            igSameLine(0, 10);
-            igTextDisabled("Score %d", m->score);
-          }
-          igTextDisabled("Server: %s", m->srv[0] ? m->srv : "Unknown");
-          if (m->has_vlither_telemetry && m->vlither_ver[0])
-            igTextDisabled("Vlither version: %s", m->vlither_ver);
-          else
-            igTextDisabled("NTL version: %s", m->ver[0] ? m->ver : "?");
-          if (us->ntl_show_player_stats && m->has_telemetry) {
-            if (m->fps >= 0 && m->ping >= 0)
-              igTextDisabled("%d FPS  |  %d ms", m->fps, m->ping);
-            else if (m->fps >= 0) igTextDisabled("%d FPS", m->fps);
-            else if (m->ping >= 0) igTextDisabled("%d ms", m->ping);
-          }
+              status);
           igSpacing();
         }
       }
+      igPopFont();
       igEndChild();
       igEndTabItem();
     }

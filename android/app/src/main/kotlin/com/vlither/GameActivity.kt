@@ -11,6 +11,7 @@ import android.app.NativeActivity
 import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -26,8 +27,10 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Process
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -46,7 +49,13 @@ import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.HashMap
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -56,6 +65,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 class GameActivity : NativeActivity() {
 
@@ -86,6 +99,17 @@ class GameActivity : NativeActivity() {
         private const val VOICE_PERMISSION_REQUEST = 4401
         private const val EVENT_NOTIFICATION_PERMISSION_REQUEST = 4402
         private const val CUSTOM_ARROW_REQUEST = 4403
+        private const val SETTINGS_BACKUP_CREATE_REQUEST = 4404
+        private const val SETTINGS_BACKUP_OPEN_REQUEST = 4405
+        private const val SETTINGS_FILE_NAME = "user.dat"
+        private const val CUSTOM_ARROW_FILE_NAME = "custom_arrow_image"
+        private const val BACKUP_MANIFEST_ENTRY = "manifest.txt"
+        private const val BACKUP_SETTINGS_ENTRY = "user.dat"
+        private const val BACKUP_ARROW_ENTRY = "custom_arrow_image"
+        private const val BACKUP_MANIFEST = "VLITHER_BACKUP_V1\n"
+        private const val MIN_BACKUP_BYTES = 64
+        private const val MAX_SETTINGS_BACKUP_BYTES = 1024 * 1024
+        private const val MAX_ARROW_BACKUP_BYTES = 12 * 1024 * 1024
         private const val EVENT_ALARM_ACTION = "com.vlither.EVENT_START"
         private const val VOICE_SAMPLE_RATE = 16_000
         private const val VOICE_FRAME_BYTES = 640 // 20 ms, PCM16 mono @ 16 kHz
@@ -251,6 +275,54 @@ class GameActivity : NativeActivity() {
                 true
             } catch (e: Exception) {
                 Log.e(TAG, "Could not open custom-arrow picker", e)
+                false
+            }
+        }
+
+        @JvmStatic
+        fun requestSettingsBackup(activity: Activity): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                        activity is GameActivity) {
+                        /* Modern Android document pickers can return an empty
+                           placeholder to NativeActivity without delivering a
+                           usable result URI. Save through MediaStore instead. */
+                        activity.exportSettingsBackupToDownloads()
+                    } else {
+                        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+                            .format(Date())
+                        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "application/octet-stream"
+                            putExtra(Intent.EXTRA_TITLE,
+                                "Vlither-backup-$stamp.vlitherbackup")
+                        }
+                        activity.startActivityForResult(
+                            intent, SETTINGS_BACKUP_CREATE_REQUEST)
+                    }
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open settings-backup destination", e)
+                false
+            }
+        }
+
+        @JvmStatic
+        fun requestSettingsRestore(activity: Activity): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/octet-stream"
+                    }
+                    activity.startActivityForResult(
+                        intent, SETTINGS_BACKUP_OPEN_REQUEST)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open settings-backup picker", e)
                 false
             }
         }
@@ -1381,6 +1453,290 @@ class GameActivity : NativeActivity() {
 
     /* ── Lifecycle ─────────────────────────────────────────────────── */
 
+    private fun copyFileIntoBackup(
+        zip: ZipOutputStream,
+        entryName: String,
+        file: File,
+        maximumBytes: Int
+    ) {
+        if (!file.isFile) return
+        if (file.length() <= 0L || file.length() > maximumBytes.toLong())
+            throw IllegalArgumentException("$entryName has an invalid size")
+        zip.putNextEntry(ZipEntry(entryName))
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                total += read
+                if (total > maximumBytes)
+                    throw IllegalArgumentException("$entryName is too large")
+                zip.write(buffer, 0, read)
+            }
+        }
+        zip.closeEntry()
+    }
+
+    private fun readBackupEntry(zip: ZipInputStream, maximumBytes: Int): ByteArray {
+        val output = ByteArrayOutputStream(minOf(maximumBytes, 64 * 1024))
+        val buffer = ByteArray(64 * 1024)
+        var total = 0
+        while (true) {
+            val read = zip.read(buffer)
+            if (read <= 0) break
+            total += read
+            if (total > maximumBytes)
+                throw IllegalArgumentException("Backup entry is too large")
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    private fun buildSettingsBackup(): ByteArray {
+        val settings = filesDir.resolve(SETTINGS_FILE_NAME)
+        if (!settings.isFile)
+            throw IllegalStateException("Settings file is not ready")
+        val bytes = ByteArrayOutputStream()
+        ZipOutputStream(BufferedOutputStream(bytes)).use { zip ->
+            zip.putNextEntry(ZipEntry(BACKUP_MANIFEST_ENTRY))
+            zip.write(BACKUP_MANIFEST.toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+            copyFileIntoBackup(zip, BACKUP_SETTINGS_ENTRY, settings,
+                MAX_SETTINGS_BACKUP_BYTES)
+            copyFileIntoBackup(zip, BACKUP_ARROW_ENTRY,
+                filesDir.resolve(CUSTOM_ARROW_FILE_NAME),
+                MAX_ARROW_BACKUP_BYTES)
+        }
+        val backup = bytes.toByteArray()
+        if (backup.size < MIN_BACKUP_BYTES)
+            throw IllegalStateException("Backup data was not created")
+        return backup
+    }
+
+    private fun writeSettingsBackup(uri: android.net.Uri, backup: ByteArray) {
+        /* rwt requests a new, truncated document. Some file managers only
+           commit the document once this stream is closed, so build and check
+           all data before opening it and always close it after a full write. */
+        val output = try {
+            contentResolver.openOutputStream(uri, "rwt")
+        } catch (_: Exception) {
+            contentResolver.openOutputStream(uri, "wt")
+        } ?: throw IllegalStateException("Could not open destination")
+        BufferedOutputStream(output).use { stream ->
+            stream.write(backup)
+            stream.flush()
+        }
+        val savedSize = try {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use {
+                it.length
+            } ?: -1L
+        } catch (_: Exception) {
+            // A few cloud document providers allow writing but cannot report
+            // a readable size immediately. The closed write above is valid.
+            -1L
+        }
+        if (savedSize >= 0L && savedSize != backup.size.toLong())
+            throw IllegalStateException("Only $savedSize of ${backup.size} bytes were saved")
+    }
+
+    private fun exportSettingsBackup(uri: android.net.Uri) {
+        Thread({
+            try {
+                val backup = buildSettingsBackup()
+                writeSettingsBackup(uri, backup)
+                runOnUiThread {
+                    Toast.makeText(this,
+                        "Backup saved (${backup.size / 1024 + 1} KB).",
+                        Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not export Vlither backup", e)
+                runOnUiThread {
+                    Toast.makeText(this,
+                        "Backup failed: ${e.message ?: "invalid destination"}",
+                        Toast.LENGTH_LONG).show()
+                }
+            }
+        }, "VlitherBackupExport").start()
+    }
+
+    private fun exportSettingsBackupToDownloads() {
+        Thread({
+            var destination: android.net.Uri? = null
+            try {
+                val backup = buildSettingsBackup()
+                val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+                    .format(Date())
+                val fileName = "Vlither-backup-$stamp.vlitherbackup"
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH,
+                        "${Environment.DIRECTORY_DOWNLOADS}/Vlither")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Could not create Downloads file")
+                destination = uri
+                writeSettingsBackup(uri, backup)
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                if (contentResolver.update(uri, values, null, null) <= 0)
+                    throw IllegalStateException("Could not finish Downloads file")
+                runOnUiThread {
+                    Toast.makeText(this,
+                        "Backup saved in Downloads/Vlither\n$fileName (${backup.size} bytes)",
+                        Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                destination?.let {
+                    try { contentResolver.delete(it, null, null) }
+                    catch (_: Exception) { }
+                }
+                Log.e(TAG, "Could not save Vlither backup to Downloads", e)
+                runOnUiThread {
+                    Toast.makeText(this,
+                        "Backup failed: ${e.message ?: "storage error"}",
+                        Toast.LENGTH_LONG).show()
+                }
+            }
+        }, "VlitherBackupDownloads").start()
+    }
+
+    private fun validSettingsPayload(bytes: ByteArray): Boolean {
+        return bytes.size in 128..MAX_SETTINGS_BACKUP_BYTES &&
+            bytes[0] == '2'.code.toByte() &&
+            bytes[1] == '.'.code.toByte() &&
+            bytes[2] == '0'.code.toByte() &&
+            bytes[3] == 0.toByte()
+    }
+
+    private fun replaceFromTemp(temp: File, target: File) {
+        if (target.exists() && !target.delete())
+            throw IllegalStateException("Could not replace ${target.name}")
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            if (!temp.delete()) temp.deleteOnExit()
+        }
+    }
+
+    private fun installRestoredFiles(settingsBytes: ByteArray, arrowBytes: ByteArray?) {
+        val settings = filesDir.resolve(SETTINGS_FILE_NAME)
+        val arrow = filesDir.resolve(CUSTOM_ARROW_FILE_NAME)
+        val settingsTemp = filesDir.resolve("$SETTINGS_FILE_NAME.restore")
+        val arrowTemp = filesDir.resolve("$CUSTOM_ARROW_FILE_NAME.restore")
+        val settingsBefore = filesDir.resolve("$SETTINGS_FILE_NAME.before_restore")
+        val arrowBefore = filesDir.resolve("$CUSTOM_ARROW_FILE_NAME.before_restore")
+        val hadSettings = settings.isFile
+        val hadArrow = arrow.isFile
+
+        settingsTemp.delete()
+        arrowTemp.delete()
+        settingsBefore.delete()
+        arrowBefore.delete()
+        if (hadSettings) settings.copyTo(settingsBefore, overwrite = true)
+        if (hadArrow) arrow.copyTo(arrowBefore, overwrite = true)
+        try {
+            FileOutputStream(settingsTemp).use { output ->
+                output.write(settingsBytes)
+                output.fd.sync()
+            }
+            if (arrowBytes != null) {
+                FileOutputStream(arrowTemp).use { output ->
+                    output.write(arrowBytes)
+                    output.fd.sync()
+                }
+            }
+            replaceFromTemp(settingsTemp, settings)
+            if (arrowBytes != null) replaceFromTemp(arrowTemp, arrow)
+            else if (arrow.exists() && !arrow.delete())
+                throw IllegalStateException("Could not replace custom arrow")
+            settingsBefore.delete()
+            arrowBefore.delete()
+        } catch (e: Exception) {
+            settingsTemp.delete()
+            arrowTemp.delete()
+            if (hadSettings && settingsBefore.isFile) {
+                settings.delete()
+                settingsBefore.copyTo(settings, overwrite = true)
+            } else if (!hadSettings) settings.delete()
+            if (hadArrow && arrowBefore.isFile) {
+                arrow.delete()
+                arrowBefore.copyTo(arrow, overwrite = true)
+            } else if (!hadArrow) arrow.delete()
+            settingsBefore.delete()
+            arrowBefore.delete()
+            throw e
+        }
+    }
+
+    private fun restoreSettingsBackup(uri: android.net.Uri) {
+        Thread({
+            try {
+                var manifest: ByteArray? = null
+                var settings: ByteArray? = null
+                var arrow: ByteArray? = null
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("Could not open backup")
+                ZipInputStream(input).use { zip ->
+                    while (true) {
+                        val entry = zip.nextEntry ?: break
+                        if (entry.isDirectory)
+                            throw IllegalArgumentException("Invalid backup folder")
+                        when (entry.name) {
+                            BACKUP_MANIFEST_ENTRY -> {
+                                if (manifest != null)
+                                    throw IllegalArgumentException("Duplicate manifest")
+                                manifest = readBackupEntry(zip, 128)
+                            }
+                            BACKUP_SETTINGS_ENTRY -> {
+                                if (settings != null)
+                                    throw IllegalArgumentException("Duplicate settings")
+                                settings = readBackupEntry(zip,
+                                    MAX_SETTINGS_BACKUP_BYTES)
+                            }
+                            BACKUP_ARROW_ENTRY -> {
+                                if (arrow != null)
+                                    throw IllegalArgumentException("Duplicate custom arrow")
+                                arrow = readBackupEntry(zip,
+                                    MAX_ARROW_BACKUP_BYTES)
+                            }
+                            else -> throw IllegalArgumentException(
+                                "Unknown backup entry")
+                        }
+                        zip.closeEntry()
+                    }
+                }
+                if (manifest?.toString(Charsets.UTF_8) != BACKUP_MANIFEST)
+                    throw IllegalArgumentException("Not a Vlither backup")
+                val settingsPayload = settings
+                    ?: throw IllegalArgumentException("Settings are missing")
+                if (!validSettingsPayload(settingsPayload))
+                    throw IllegalArgumentException("Settings backup is incompatible")
+                if (arrow?.isEmpty() == true)
+                    throw IllegalArgumentException("Custom arrow is invalid")
+                installRestoredFiles(settingsPayload, arrow)
+                runOnUiThread {
+                    Toast.makeText(this,
+                        "Backup loaded. Reopen Vlither to use restored settings.",
+                        Toast.LENGTH_LONG).show()
+                    window.decorView.postDelayed({
+                        Process.killProcess(Process.myPid())
+                    }, 1200L)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not restore Vlither backup", e)
+                runOnUiThread {
+                    Toast.makeText(this,
+                        "Load failed: ${e.message ?: "invalid backup"}",
+                        Toast.LENGTH_LONG).show()
+                }
+            }
+        }, "VlitherBackupRestore").start()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         @Suppress("DEPRECATION")
@@ -1409,6 +1765,16 @@ class GameActivity : NativeActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == GameplayCaptureController.CAPTURE_REQUEST_CODE) {
             GameplayCaptureController.handleActivityResult(this, resultCode, data)
+            return
+        }
+        if (requestCode == SETTINGS_BACKUP_CREATE_REQUEST) {
+            if (resultCode == Activity.RESULT_OK)
+                data?.data?.let { exportSettingsBackup(it) }
+            return
+        }
+        if (requestCode == SETTINGS_BACKUP_OPEN_REQUEST) {
+            if (resultCode == Activity.RESULT_OK)
+                data?.data?.let { restoreSettingsBackup(it) }
             return
         }
         if (requestCode != CUSTOM_ARROW_REQUEST || resultCode != Activity.RESULT_OK)
