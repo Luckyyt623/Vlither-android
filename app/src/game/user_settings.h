@@ -334,6 +334,16 @@ typedef struct user_settings {
      Online Players/Friends lists. */
   uint8_t friends_panel_settings_reserved[16];
   float friends_panel_zoom;
+
+  /* v4.5+ extension: native Snakey Rain integration. Can be toggled live
+     without restarting Vlither. Bot in-game name/skin are sent on login. */
+  uint8_t snakey_rain_settings_reserved[16];
+  bool snakey_rain_enabled;
+  char snakey_rain_username[64];
+  char snakey_rain_password[64];
+  int snakey_rain_max_bots;
+  char snakey_rain_bot_name[25];
+  char snakey_rain_bot_skin[128];
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

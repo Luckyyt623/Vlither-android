@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.2"
+        private const val CURRENT_VERSION   = "4.7.3"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,21 +209,18 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-     Update 4.7.2
-
+Update 4.7.3
 What’s New
+Snakey Rain — control bots in-game (name, skin, boost, modes)
+Chat UI — cleaner Vlither & NTL chat with a glass-style message bar
+Stability — fewer random disconnects (more fixes coming)
 
-- Arrow behavior now closely matches the official mobile client.
-- Fixed an issue that could unexpectedly disconnect players from the server.
-- Improved FPS stability and optimized network performance for lower ping and fewer lag spikes.
-
-Thank you for using Vlither Android!
-
-Developed by Lucky
+Thanks for playing Vlither Android.
+Changes by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.2")
+            .setTitle("What's New in v4.7.3")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

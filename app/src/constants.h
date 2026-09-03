@@ -18,7 +18,7 @@
 #define NUM_PREY_SIZES 22
 #define MAX_MINIMAP_SIZE 512
 #define ARROW_STYLE_COUNT 9
-#define TIMEOUT 5
+#define TIMEOUT 8
 #define PING_SAMPLE_COUNT 8
 #define GOOD_PING 30
 #define BAD_PING 60

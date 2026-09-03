@@ -7,6 +7,7 @@
 #include "../network/server.h"
 #include "../user.h"
 #include "../game/vlither_tags.h"
+#include "../game/snakey_rain.h"
 #include "../imgui_setup.h"
 #include "ratings.h"
 
@@ -177,6 +178,99 @@ static void draw_homepage_background_picker(tenv* env, float frame_height) {
     usrs->homepage_background = 5;
     save_user_settings(usrs);
   }
+  igEndPopup();
+}
+
+static void draw_snakey_rain_homepage(tenv *env, float frame_height) {
+  if (!env || !env->usr || !env->ctx) return;
+  user_settings *us = &env->usr->usrs;
+  const float edge = homepage_px(16.0f);
+  const float button_w = homepage_px(210.0f);
+  char label[96];
+  snprintf(label, sizeof label, "Snakey Rain: %s##snakey_rain_home",
+           us->snakey_rain_enabled ? "ON" : "OFF");
+  igSetCursorPos((ImVec2){env->ctx->size[0] - button_w - edge,
+                          edge + frame_height * 2.15f + homepage_px(16.0f)});
+  if (igButton(label, (ImVec2){button_w, frame_height * 1.15f}))
+    igOpenPopup_Str("Snakey Rain Settings", 0);
+
+  float popup_w = homepage_min(homepage_px(390.0f),
+                               env->ctx->size[0] - homepage_px(24.0f));
+  igSetNextWindowSize((ImVec2){popup_w, 0.0f}, ImGuiCond_Appearing);
+  if (!igBeginPopup("Snakey Rain Settings", ImGuiWindowFlags_NoSavedSettings))
+    return;
+
+  igSeparatorText("Snakey Rain");
+  bool enabled = us->snakey_rain_enabled;
+  if (igCheckbox("Enable Snakey Rain", &enabled)) {
+    us->snakey_rain_enabled = enabled;
+    save_user_settings(us);
+    snakey_rain_apply_settings(env);
+  }
+  igSpacing();
+
+  igBeginDisabled(!us->snakey_rain_enabled);
+  igSetNextItemWidth(-1.0f);
+  igInputTextWithHint("##snakey_username", "Snakey Rain username",
+                      us->snakey_rain_username,
+                      sizeof us->snakey_rain_username,
+                      ImGuiInputTextFlags_None, NULL, NULL);
+  if (igIsItemDeactivatedAfterEdit()) {
+    save_user_settings(us);
+    snakey_rain_apply_settings(env);
+  }
+  igSetNextItemWidth(-1.0f);
+  igInputTextWithHint("##snakey_password", "Snakey Rain password",
+                      us->snakey_rain_password,
+                      sizeof us->snakey_rain_password,
+                      ImGuiInputTextFlags_Password, NULL, NULL);
+  if (igIsItemDeactivatedAfterEdit()) {
+    save_user_settings(us);
+    snakey_rain_apply_settings(env);
+  }
+  igText("Maximum bots");
+  igSetNextItemWidth(-1.0f);
+  igSliderInt("##snakey_max_bots", &us->snakey_rain_max_bots, 1, 1000,
+              "%d", ImGuiSliderFlags_AlwaysClamp);
+  if (igIsItemDeactivatedAfterEdit()) {
+    save_user_settings(us);
+    snakey_rain_apply_settings(env);
+  }
+  igText("Bot in-game name (max 24)");
+  igSetNextItemWidth(-1.0f);
+  igInputTextWithHint("##snakey_bot_name", "Name shown on bots",
+                      us->snakey_rain_bot_name,
+                      sizeof us->snakey_rain_bot_name,
+                      ImGuiInputTextFlags_None, NULL, NULL);
+  if (igIsItemDeactivatedAfterEdit()) {
+    save_user_settings(us);
+    snakey_rain_apply_settings(env);
+  }
+  igText("Bot skin code");
+  igSetNextItemWidth(-1.0f);
+  igInputTextWithHint("##snakey_bot_skin", "Skin string (same as extension)",
+                      us->snakey_rain_bot_skin,
+                      sizeof us->snakey_rain_bot_skin,
+                      ImGuiInputTextFlags_None, NULL, NULL);
+  if (igIsItemDeactivatedAfterEdit()) {
+    save_user_settings(us);
+    snakey_rain_apply_settings(env);
+  }
+  igEndDisabled();
+
+  igSpacing();
+  igTextWrapped("Credentials, bot name/skin, and the selected game server are sent to snakeyrain.com when bots start.");
+  if (snakey_rain_enabled_at_start()) {
+    igTextColored((ImVec4){0.35f, 1.0f, 0.55f, 1.0f},
+                  "Active now.");
+  } else if (us->snakey_rain_enabled) {
+    igTextColored((ImVec4){1.0f, 0.85f, 0.35f, 1.0f},
+                  "Enabled — will connect when you play.");
+  }
+
+  ImVec2 avail;
+  igGetContentRegionAvail(&avail);
+  if (igButton("Close", (ImVec2){avail.x, 0.0f})) igCloseCurrentPopup();
   igEndPopup();
 }
 
@@ -416,6 +510,7 @@ void ui_title_screen(tenv* env) {
 
   float frame_height = igGetFrameHeight();
   draw_homepage_background_picker(env, frame_height);
+  draw_snakey_rain_homepage(env, frame_height);
 
 #ifdef ANDROID
   /* Homepage policy entry point and the supplied Discord artwork. The image is

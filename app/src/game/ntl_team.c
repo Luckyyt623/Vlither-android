@@ -2015,14 +2015,32 @@ void ntl_team_draw(tenv *env) {
 
       igSetCursorPosY(fmaxf(0.0f, win_sz.y - igGetFrameHeight() - 8.0f));
       igPushItemWidth(fmaxf(40.0f, win_sz.x - 16.0f));
+      /* Glass-style message field */
+      igPushStyleColor_Vec4(ImGuiCol_FrameBg,
+                            (ImVec4){0.08f, 0.10f, 0.14f, 0.28f});
+      igPushStyleColor_Vec4(ImGuiCol_FrameBgHovered,
+                            (ImVec4){0.12f, 0.16f, 0.22f, 0.40f});
+      igPushStyleColor_Vec4(ImGuiCol_FrameBgActive,
+                            (ImVec4){0.14f, 0.20f, 0.28f, 0.48f});
+      igPushStyleColor_Vec4(ImGuiCol_Text,
+                            (ImVec4){0.95f, 0.97f, 1.0f, 0.92f});
+      igPushStyleColor_Vec4(ImGuiCol_TextDisabled,
+                            (ImVec4){0.75f, 0.80f, 0.88f, 0.55f});
+      igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 10.0f);
+      igPushStyleVar_Float(ImGuiStyleVar_FrameBorderSize, 1.0f);
+      igPushStyleColor_Vec4(ImGuiCol_Border,
+                            (ImVec4){1.0f, 1.0f, 1.0f, 0.18f});
       igBeginDisabled(S.vlither_chat_active && !vlither_chat_joined());
       bool submitted = igInputTextWithHint(
           "##chat_box_input",
           S.vlither_chat_active ? "Message Vlither chat..." : "Message NTL team...",
           S.input, sizeof S.input, ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
+      igEndDisabled();
+      igPopStyleColor(1); /* Border */
+      igPopStyleVar(2);
+      igPopStyleColor(5);
       igPopItemWidth();
       if (submitted) chat_submit_current(us);
-      igEndDisabled();
     }
     igEnd();
   }
@@ -2667,9 +2685,20 @@ void ntl_team_panel(tenv *env) {
       igSetKeyboardFocusHere(0);
       S.focus_vlither_input = false;
     }
-    bool v_enter = igInputTextWithHint("##vlither_panel_input", "Message Vlither chat...",
-                                       S.input, sizeof S.input,
-                                       ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
+    igPushStyleColor_Vec4(ImGuiCol_FrameBg, (ImVec4){0.08f, 0.10f, 0.14f, 0.28f});
+    igPushStyleColor_Vec4(ImGuiCol_FrameBgHovered, (ImVec4){0.12f, 0.16f, 0.22f, 0.40f});
+    igPushStyleColor_Vec4(ImGuiCol_FrameBgActive, (ImVec4){0.14f, 0.20f, 0.28f, 0.48f});
+    igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){0.95f, 0.97f, 1.0f, 0.92f});
+    igPushStyleColor_Vec4(ImGuiCol_TextDisabled, (ImVec4){0.75f, 0.80f, 0.88f, 0.55f});
+    igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 10.0f);
+    igPushStyleVar_Float(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    igPushStyleColor_Vec4(ImGuiCol_Border, (ImVec4){1.0f, 1.0f, 1.0f, 0.18f});
+    bool v_enter = igInputTextWithHint(
+        "##vlither_panel_input", "Message Vlither chat...", S.input,
+        sizeof S.input, ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
+    igPopStyleColor(1);
+    igPopStyleVar(2);
+    igPopStyleColor(5);
     igSameLine(0, 6);
     if (igButton("Send##vlither", (ImVec2){70, 0}) || v_enter)
       chat_submit_current(us);
@@ -2886,9 +2915,20 @@ void ntl_team_panel(tenv *env) {
       igEndChild();
 
       igSetNextItemWidth(-76);
+      igPushStyleColor_Vec4(ImGuiCol_FrameBg, (ImVec4){0.08f, 0.10f, 0.14f, 0.28f});
+      igPushStyleColor_Vec4(ImGuiCol_FrameBgHovered, (ImVec4){0.12f, 0.16f, 0.22f, 0.40f});
+      igPushStyleColor_Vec4(ImGuiCol_FrameBgActive, (ImVec4){0.14f, 0.20f, 0.28f, 0.48f});
+      igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){0.95f, 0.97f, 1.0f, 0.92f});
+      igPushStyleColor_Vec4(ImGuiCol_TextDisabled, (ImVec4){0.75f, 0.80f, 0.88f, 0.55f});
+      igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 10.0f);
+      igPushStyleVar_Float(ImGuiStyleVar_FrameBorderSize, 1.0f);
+      igPushStyleColor_Vec4(ImGuiCol_Border, (ImVec4){1.0f, 1.0f, 1.0f, 0.18f});
       bool enter = igInputTextWithHint(
           "##ntl_panel_input", "Message team...", S.input, sizeof S.input,
           ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
+      igPopStyleColor(1);
+      igPopStyleVar(2);
+      igPopStyleColor(5);
       igSameLine(0, 6);
       if (igButton("Send", (ImVec2){70, 0}) || enter) ntl_queue_message(us);
       igEndTabItem();

@@ -10,6 +10,7 @@
 #include "../game/food.h"
 #include "../game/snake.h"
 #include "../game/ntl_tags.h"
+#include "../game/snakey_rain.h"
 #include "../user.h"
 #ifdef ANDROID
 #include "../android_jni.h"
@@ -215,6 +216,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     }
 
     mg_ws_send(c, ba, m, WEBSOCKET_OP_BINARY);
+    snakey_rain_on_spawn(env, ba, (size_t)m);
     free(ba);
   } else if (cmd == 'a') {
     gdata->data.grd = a[m] << 16 | a[m + 1] << 8 | a[m + 2];
@@ -1420,14 +1422,10 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
   } else if (ev == MG_EV_CLOSE) {
     DLOG("conn closed");
     printf("Connection closed\n");
-    if (gdata->curr_screen == PLAYING && gdata->conn == CONNECTED &&
-        gdata->data.follow_view && !gdata->preview_active &&
-        !gdata->suppress_reconnect && !gdata->restart_req) {
-      /* Do not throw an active player straight to the homepage for a
-         transient mobile/TLS drop. Rejoin the selected server automatically. */
-      gdata->restart_req = true;
-      gdata->reconnect_attempts = 0;
-    }
+    /* Do not auto-rejoin on a normal disconnect. The player returns to the
+       title screen and joins again via Play. Auto-rejoin only happens when
+       something already set restart_req (Instant Restart on death, or the
+       Restart hotkey). */
     if (gdata->connection == c) gdata->connection = NULL;
     gdata->closed = true;
   }

@@ -74,6 +74,24 @@ typedef struct ntl_tags_state {
   ntl_tag_atlas_entry fixed_atlas[NTL_FIXED_TAG_MAX];
   texture *fixed_atlas_tex;
   VkDescriptorSet fixed_atlas_ds;
+
+  /* A freshly-decoded catalog waiting on its async GPU upload
+     (tcontext_async_transfer_busy) before it's safe to swap into the
+     fields above. Avoids the old vkWaitForFences(UINT64_MAX) main-thread
+     stall on every hourly catalog refresh. */
+  bool dynamic_swap_pending;
+  texture *dynamic_atlas_tex_pending;
+  ntl_tag_meta dynamic_meta_pending[NTL_DYNAMIC_TAG_MAX];
+  ntl_tag_atlas_entry dynamic_atlas_pending[NTL_DYNAMIC_TAG_MAX];
+  int dynamic_tag_count_pending;
+  int private_tag_min_pending;
+
+  bool fixed_swap_pending;
+  texture *fixed_atlas_tex_pending;
+  ntl_tag_meta fixed_meta_pending[NTL_FIXED_TAG_MAX];
+  ntl_tag_atlas_entry fixed_atlas_pending[NTL_FIXED_TAG_MAX];
+  int fixed_tag_count_pending;
+  int public_tag_max_pending;
   int mapped_tag_count;
   double last_mapping_received;
   char status[192];
@@ -402,28 +420,22 @@ static bool install_dynamic_catalog(struct mg_str json) {
     free(pixels);
     return false;
   }
-  texture *new_tex = create_mipmap_texture_from_rgba(
+  texture *new_tex = create_mipmap_texture_from_rgba_async(
       S.env->ctx, pixels, NTL_DYNAMIC_ATLAS_SIZE, NTL_DYNAMIC_ATLAS_SIZE);
   free(pixels);
   if (!new_tex) return false;
-  VkDescriptorSet new_ds = igImplVulkan_AddTexture(
-      S.env->usr->r->linear_sampler, new_tex->view,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  if (!new_ds) {
-    destroy_texture(S.env->ctx, new_tex);
-    return false;
-  }
 
-  if (S.dynamic_atlas_ds) igImplVulkan_RemoveTexture(S.dynamic_atlas_ds);
-  if (S.dynamic_atlas_tex) destroy_texture(S.env->ctx, S.dynamic_atlas_tex);
-  memcpy(S.dynamic_meta, parsed_meta,
+  /* Don't touch the live S.dynamic_atlas_* fields yet — the GPU upload
+     is still in flight. ntl_tags_update() finalizes this (descriptor set
+     + swap-in) once tcontext_async_transfer_busy() clears. */
+  memcpy(S.dynamic_meta_pending, parsed_meta,
          sizeof parsed_meta[0] * (size_t)parsed_count);
-  memcpy(S.dynamic_atlas, parsed_atlas,
+  memcpy(S.dynamic_atlas_pending, parsed_atlas,
          sizeof parsed_atlas[0] * (size_t)parsed_count);
-  S.dynamic_tag_count = parsed_count;
-  S.private_tag_min = GLM_MAX(304, 581 - source_count);
-  S.dynamic_atlas_tex = new_tex;
-  S.dynamic_atlas_ds = new_ds;
+  S.dynamic_tag_count_pending = parsed_count;
+  S.private_tag_min_pending = GLM_MAX(304, 581 - source_count);
+  S.dynamic_atlas_tex_pending = new_tex;
+  S.dynamic_swap_pending = true;
   return true;
 }
 
@@ -496,28 +508,19 @@ static bool install_fixed_catalog(struct mg_str json) {
     free(pixels);
     return false;
   }
-  texture *new_tex = create_mipmap_texture_from_rgba(
+  texture *new_tex = create_mipmap_texture_from_rgba_async(
       S.env->ctx, pixels, NTL_DYNAMIC_ATLAS_SIZE, NTL_DYNAMIC_ATLAS_SIZE);
   free(pixels);
   if (!new_tex) return false;
-  VkDescriptorSet new_ds = igImplVulkan_AddTexture(
-      S.env->usr->r->linear_sampler, new_tex->view,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-  if (!new_ds) {
-    destroy_texture(S.env->ctx, new_tex);
-    return false;
-  }
 
-  if (S.fixed_atlas_ds) igImplVulkan_RemoveTexture(S.fixed_atlas_ds);
-  if (S.fixed_atlas_tex) destroy_texture(S.env->ctx, S.fixed_atlas_tex);
-  memcpy(S.fixed_meta, parsed_meta,
+  memcpy(S.fixed_meta_pending, parsed_meta,
          sizeof parsed_meta[0] * (size_t)parsed_count);
-  memcpy(S.fixed_atlas, parsed_atlas,
+  memcpy(S.fixed_atlas_pending, parsed_atlas,
          sizeof parsed_atlas[0] * (size_t)parsed_count);
-  S.fixed_tag_count = parsed_count;
-  S.public_tag_max = 303 + source_count;
-  S.fixed_atlas_tex = new_tex;
-  S.fixed_atlas_ds = new_ds;
+  S.fixed_tag_count_pending = parsed_count;
+  S.public_tag_max_pending = 303 + source_count;
+  S.fixed_atlas_tex_pending = new_tex;
+  S.fixed_swap_pending = true;
   return true;
 }
 
@@ -912,10 +915,67 @@ void ntl_tags_init(tenv *env) {
   S.ready = true;
 }
 
+/* Called once per frame. Cheap no-op unless a catalog refresh just
+   finished decoding and its async GPU upload has landed. */
+static void finalize_pending_catalog_swaps(tenv *env) {
+  if (!env || !env->ctx) return;
+  if (tcontext_async_transfer_busy(env->ctx)) return;  /* still uploading */
+
+  if (S.dynamic_swap_pending) {
+    VkDescriptorSet new_ds = igImplVulkan_AddTexture(
+        env->usr->r->linear_sampler, S.dynamic_atlas_tex_pending->view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (new_ds) {
+      if (S.dynamic_atlas_ds) igImplVulkan_RemoveTexture(S.dynamic_atlas_ds);
+      if (S.dynamic_atlas_tex) destroy_texture(env->ctx, S.dynamic_atlas_tex);
+      memcpy(S.dynamic_meta, S.dynamic_meta_pending,
+             sizeof S.dynamic_meta_pending[0] *
+                 (size_t)S.dynamic_tag_count_pending);
+      memcpy(S.dynamic_atlas, S.dynamic_atlas_pending,
+             sizeof S.dynamic_atlas_pending[0] *
+                 (size_t)S.dynamic_tag_count_pending);
+      S.dynamic_tag_count = S.dynamic_tag_count_pending;
+      S.private_tag_min = S.private_tag_min_pending;
+      S.dynamic_atlas_tex = S.dynamic_atlas_tex_pending;
+      S.dynamic_atlas_ds = new_ds;
+    } else {
+      destroy_texture(env->ctx, S.dynamic_atlas_tex_pending);
+    }
+    S.dynamic_atlas_tex_pending = NULL;
+    S.dynamic_swap_pending = false;
+  }
+
+  if (S.fixed_swap_pending) {
+    VkDescriptorSet new_ds = igImplVulkan_AddTexture(
+        env->usr->r->linear_sampler, S.fixed_atlas_tex_pending->view,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (new_ds) {
+      if (S.fixed_atlas_ds) igImplVulkan_RemoveTexture(S.fixed_atlas_ds);
+      if (S.fixed_atlas_tex) destroy_texture(env->ctx, S.fixed_atlas_tex);
+      memcpy(S.fixed_meta, S.fixed_meta_pending,
+             sizeof S.fixed_meta_pending[0] *
+                 (size_t)S.fixed_tag_count_pending);
+      memcpy(S.fixed_atlas, S.fixed_atlas_pending,
+             sizeof S.fixed_atlas_pending[0] *
+                 (size_t)S.fixed_tag_count_pending);
+      S.fixed_tag_count = S.fixed_tag_count_pending;
+      S.public_tag_max = S.public_tag_max_pending;
+      S.fixed_atlas_tex = S.fixed_atlas_tex_pending;
+      S.fixed_atlas_ds = new_ds;
+    } else {
+      destroy_texture(env->ctx, S.fixed_atlas_tex_pending);
+    }
+    S.fixed_atlas_tex_pending = NULL;
+    S.fixed_swap_pending = false;
+  }
+}
+
 void ntl_tags_update(tenv *env) {
   if (!S.ready) return;
   if (env) S.env = env;
   mg_mgr_poll(&S.mgr, 0);
+  if (S.env && S.env->ctx) tcontext_poll_async_transfer(S.env->ctx);
+  finalize_pending_catalog_swaps(S.env);
 
   double now = mg_millis() / 1000.0;
   if (S.auth && S.auth_started > 0.0 && now - S.auth_started > 12.0) {
@@ -934,7 +994,6 @@ void ntl_tags_update(tenv *env) {
     if (S.dynamic_tag_count == 0)
       set_status("NTL private-tag catalog timed out. Retrying.");
   }
-  if (!S.catalog && now >= S.next_catalog_sync) begin_catalog_sync();
   if (S.fixed_catalog && S.fixed_catalog_started > 0.0 &&
       now - S.fixed_catalog_started > NTL_TAG_CATALOG_TIMEOUT_SECONDS) {
     S.fixed_catalog->is_closing = 1;
@@ -944,8 +1003,6 @@ void ntl_tags_update(tenv *env) {
     if (S.fixed_tag_count == 0)
       set_status("NTL public-tag catalogue timed out. Retrying.");
   }
-  if (!S.fixed_catalog && now >= S.next_fixed_catalog_sync)
-    begin_fixed_catalog_sync();
 
   if (!S.env || !S.env->usr) return;
   game_data *g = &S.env->usr->gdata;
@@ -953,6 +1010,32 @@ void ntl_tags_update(tenv *env) {
   snake *me = local_snake();
   bool in_game = me && g->conn == CONNECTED && g->curr_screen == PLAYING &&
                  !g->preview_active;
+  /* Heavy catalogue HTTP (up to multi‑MB) competes with the live Slither
+     WebSocket on mobile radios. 4.6 did not do live catalogue pulls during
+     play; keep tag WS/positions, but only fetch catalogues in menu/lobby. */
+  bool allow_catalog = g->curr_screen != PLAYING || g->preview_active ||
+                       g->conn != CONNECTED;
+  if (!allow_catalog) {
+    if (S.catalog) {
+      S.catalog->is_closing = 1;
+      S.catalog = NULL;
+      S.catalog_started = 0.0;
+      /* Retry after the match instead of immediately. */
+      if (S.next_catalog_sync < now + 30.0)
+        S.next_catalog_sync = now + 30.0;
+    }
+    if (S.fixed_catalog) {
+      S.fixed_catalog->is_closing = 1;
+      S.fixed_catalog = NULL;
+      S.fixed_catalog_started = 0.0;
+      if (S.next_fixed_catalog_sync < now + 30.0)
+        S.next_fixed_catalog_sync = now + 30.0;
+    }
+  } else {
+    if (!S.catalog && now >= S.next_catalog_sync) begin_catalog_sync();
+    if (!S.fixed_catalog && now >= S.next_fixed_catalog_sync)
+      begin_fixed_catalog_sync();
+  }
 
   /* NTL also publishes each team member's active `tg` value through its
      normal presence endpoint. Use that as a second, official compatibility
@@ -1008,12 +1091,20 @@ void ntl_tags_update(tenv *env) {
 void ntl_tags_destroy(tenv *env) {
   if (!S.ready) return;
   tcontext *ctx = env ? env->ctx : (S.env ? S.env->ctx : NULL);
+  if (ctx && (S.dynamic_atlas_tex_pending || S.fixed_atlas_tex_pending)) {
+    tcontext_wait_idle(ctx);  /* shutdown only — safe to block here */
+    tcontext_poll_async_transfer(ctx);  /* reclaim the staging buffer */
+  }
   if (S.atlas_ds) igImplVulkan_RemoveTexture(S.atlas_ds);
   if (S.dynamic_atlas_ds) igImplVulkan_RemoveTexture(S.dynamic_atlas_ds);
   if (S.fixed_atlas_ds) igImplVulkan_RemoveTexture(S.fixed_atlas_ds);
   if (S.atlas_tex && ctx) destroy_texture(ctx, S.atlas_tex);
   if (S.dynamic_atlas_tex && ctx) destroy_texture(ctx, S.dynamic_atlas_tex);
   if (S.fixed_atlas_tex && ctx) destroy_texture(ctx, S.fixed_atlas_tex);
+  if (S.dynamic_atlas_tex_pending && ctx)
+    destroy_texture(ctx, S.dynamic_atlas_tex_pending);
+  if (S.fixed_atlas_tex_pending && ctx)
+    destroy_texture(ctx, S.fixed_atlas_tex_pending);
   mg_mgr_free(&S.mgr);
   memset(&S, 0, sizeof S);
 }

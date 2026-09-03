@@ -18,6 +18,8 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
 
 bool vlither_chat_connected(void);
 bool vlither_chat_send_text(const char *text);
+/* Local-only system line in Vlither chat (not sent to server). */
+void vlither_chat_system_message(const char *text);
 int vlither_chat_history_count(void);
 const char *vlither_chat_history_nick(int index);
 const char *vlither_chat_history_text(int index);

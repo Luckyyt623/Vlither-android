@@ -431,6 +431,14 @@ static void clear_chat_messages(void) {
   S.last_chat_seq = 0;
 }
 
+
+void vlither_chat_system_message(const char *text) {
+  if (!text || !text[0]) return;
+  /* seq=0 bypasses the last_chat_seq dedupe so local notices always show. */
+  append_chat_message(0, 0, "local", "Snakey Rain", text, "",
+                      "#7CFC00", "");
+}
+
 static void parse_chat_message(struct mg_str json, const char *base_path) {
   char path[128];
   snprintf(path, sizeof path, "%s.seq", base_path);

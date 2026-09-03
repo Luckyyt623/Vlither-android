@@ -314,6 +314,16 @@ void user_settings_default(user_settings* usr_settings) {
   memset(usr_settings->friends_panel_settings_reserved, 0,
          sizeof usr_settings->friends_panel_settings_reserved);
   usr_settings->friends_panel_zoom = 1.0f;
+  memset(usr_settings->snakey_rain_settings_reserved, 0,
+         sizeof usr_settings->snakey_rain_settings_reserved);
+  usr_settings->snakey_rain_enabled = false;
+  strcpy(usr_settings->snakey_rain_username, "snakeyuser");
+  strcpy(usr_settings->snakey_rain_password, "wormfood");
+  usr_settings->snakey_rain_max_bots = 1000;
+  strcpy(usr_settings->snakey_rain_bot_name, "SnakeyRain");
+  strcpy(usr_settings->snakey_rain_bot_skin,
+         "uuuuuuuauuuuuuaauuuuuaaauuuuaaaauuuaaaaauuaaaaaauaaaaaaa"
+         "uuaaaaaauuuaaaaauuuuaaaauuuuuaaauuuuuuaa");
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -399,11 +409,17 @@ void read_user_settings(user_settings* usr_settings) {
       offsetof(user_settings, chat_hud_settings_reserved);
   size_t v44_prefix =
       offsetof(user_settings, friends_panel_settings_reserved);
+  size_t v45_prefix =
+      offsetof(user_settings, snakey_rain_settings_reserved);
   bool migrate_single_mode_features =
       (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v45_prefix)
+    /* Preserve every v4.4 value while keeping Snakey Rain disabled until the
+       player explicitly opts in from the homepage. */
+    bytes_to_read = v45_prefix;
   else if ((size_t)file_size >= v44_prefix)
     /* Preserve both v4.3 chat-HUD visibility values while initializing the
        new player-list zoom to 1.0x. */
@@ -782,6 +798,24 @@ void read_user_settings(user_settings* usr_settings) {
       loaded.friends_panel_zoom < 0.75f ||
       loaded.friends_panel_zoom > 1.50f)
     loaded.friends_panel_zoom = 1.0f;
+  loaded.snakey_rain_enabled = !!loaded.snakey_rain_enabled;
+  loaded.snakey_rain_username[sizeof loaded.snakey_rain_username - 1] = 0;
+  loaded.snakey_rain_password[sizeof loaded.snakey_rain_password - 1] = 0;
+  if (!loaded.snakey_rain_username[0])
+    strcpy(loaded.snakey_rain_username, "snakeyuser");
+  if (!loaded.snakey_rain_password[0])
+    strcpy(loaded.snakey_rain_password, "wormfood");
+  if (loaded.snakey_rain_max_bots < 1 ||
+      loaded.snakey_rain_max_bots > 1000)
+    loaded.snakey_rain_max_bots = 1000;
+  loaded.snakey_rain_bot_name[sizeof loaded.snakey_rain_bot_name - 1] = 0;
+  loaded.snakey_rain_bot_skin[sizeof loaded.snakey_rain_bot_skin - 1] = 0;
+  if (!loaded.snakey_rain_bot_name[0])
+    strcpy(loaded.snakey_rain_bot_name, "SnakeyRain");
+  if (!loaded.snakey_rain_bot_skin[0])
+    strcpy(loaded.snakey_rain_bot_skin,
+           "uuuuuuuauuuuuuaauuuuuaaauuuuaaaauuuaaaaauuaaaaaauaaaaaaa"
+           "uuaaaaaauuuaaaaauuuuaaaauuuuuaaauuuuuuaa");
 
   *usr_settings = loaded;
 }

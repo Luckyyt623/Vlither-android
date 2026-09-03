@@ -4,6 +4,7 @@
 #include "game/ntl_tags.h"
 #include "game/vlither_tags.h"
 #include "game/vlither_ratings.h"
+#include "game/snakey_rain.h"
 #include "ui/skin_editor.h"
 #include "ui/title_screen.h"
 #include "ui/settings.h"
@@ -102,12 +103,14 @@ void tinit(tenv* env) {
   ntl_tags_init(env);
   vlither_tags_init(env);
   vlither_ratings_init(env);
+  snakey_rain_init(env);
   DLOG("tinit: game_data_init done");
   DLOG("tinit: complete");
 }
 
 void tdestroy(tenv* env) {
   ui_key_buttons_destroy(env);
+  snakey_rain_destroy(env);
   vlither_ratings_destroy(env);
   vlither_tags_destroy(env);
   ntl_tags_destroy(env);
@@ -249,6 +252,7 @@ void trender(tenv* env) {
     ntl_tags_update(env);
     vlither_tags_update(env);
     vlither_ratings_update(env);
+    snakey_rain_update(env);
 
     /* Process on-screen key buttons before gameplay input. Android keeps a
        separate UI pointer stream, so a button gesture can be consumed here
@@ -301,6 +305,9 @@ void trender(tenv* env) {
         ui_controls(env);
         break;
     }
+
+    if (gdata->curr_screen == PLAYING)
+      snakey_rain_draw(env);
 
 #ifdef ANDROID
     /* A hidden settings/controls preview is not the player's gameplay and

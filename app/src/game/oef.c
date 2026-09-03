@@ -29,6 +29,17 @@ void time_step(tenv* env) {
     }
   }
 
+  /* If a pong is ever lost (dropped/desynced packet), wfpr stays stuck
+     true forever and input.c's `if (!wfpr)` gate never fires again — the
+     client silently stops sending keepalive pings (251) for the rest of
+     the session. On mobile data that lets NAT/carrier idle-timeouts kill
+     the socket with no visible error. Self-heal: after a real stall
+     (well past the 750ms lag threshold), force-clear wfpr so input.c
+     retries with a fresh ping next frame instead of waiting forever. */
+  if (gdata->data.wfpr && gdata->data.ctm - gdata->data.last_ping_mtm > 3000) {
+    gdata->data.wfpr = false;
+  }
+
   if (gdata->data.lagging) {
     gdata->data.lag_mult -= 0.05f * gdata->data.vfr;
     if (gdata->data.lag_mult < .2) gdata->data.lag_mult = .2;

@@ -393,23 +393,29 @@ void _tcontext_create_frames(tcontext* context) {
             .queueFamilyIndex = context->queue_family,
         }, NULL, &context->cmd_pool);
 
-    VkCommandBuffer* cmds = malloc((context->fif + 1) * sizeof(VkCommandBuffer));
+    VkCommandBuffer* cmds = malloc((context->fif + 2) * sizeof(VkCommandBuffer));
     vkAllocateCommandBuffers(context->device,
         &(VkCommandBufferAllocateInfo){
             .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool        = context->cmd_pool,
             .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = context->fif + 1,
+            .commandBufferCount = context->fif + 2,
         }, cmds);
 
     for (int i = 0; i < context->fif; i++)
         context->frames[i].cmd = cmds[i];
     context->transfer_cmd = cmds[context->fif];
+    context->async_transfer_cmd = cmds[context->fif + 1];
     free(cmds);
 
     vkCreateFence(context->device,
         &(VkFenceCreateInfo){.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO},
         NULL, &context->transfer_fence);
+
+    vkCreateFence(context->device,
+        &(VkFenceCreateInfo){.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO},
+        NULL, &context->async_transfer_fence);
+    context->async_transfer_pending = false;
 }
 
 void _tcontext_create_allocator(tcontext* context) {
@@ -620,10 +626,36 @@ void tcontext_end(tcontext* context) {
 
 void tcontext_wait_idle(tcontext* context) { vkQueueWaitIdle(context->queue); }
 
+bool tcontext_async_transfer_busy(tcontext* context) {
+    return context->async_transfer_pending;
+}
+
+void tcontext_poll_async_transfer(tcontext* context) {
+    if (!context->async_transfer_pending) return;
+    if (vkGetFenceStatus(context->device, context->async_transfer_fence) !=
+        VK_SUCCESS)
+        return;  /* GPU still working through it — check again next frame */
+    vmaDestroyBuffer(context->allocator, context->async_staging_buffer,
+                     context->async_staging_memory);
+    vkResetFences(context->device, 1, &context->async_transfer_fence);
+    context->async_transfer_pending = false;
+}
+
 void tcontext_destroy(tcontext* context) {
+    /* Don't tear the device down while the GPU still owns the async staging
+       buffer — this is the one place a blocking wait is still correct. */
+    if (context->async_transfer_pending) {
+        vkWaitForFences(context->device, 1, &context->async_transfer_fence,
+                        VK_TRUE, UINT64_MAX);
+        vmaDestroyBuffer(context->allocator, context->async_staging_buffer,
+                         context->async_staging_memory);
+        context->async_transfer_pending = false;
+    }
+
     vkDestroyDescriptorPool(context->device, context->descriptor_pool, NULL);
     vmaDestroyAllocator(context->allocator);
     vkDestroyFence(context->device, context->transfer_fence, NULL);
+    vkDestroyFence(context->device, context->async_transfer_fence, NULL);
     vkDestroyCommandPool(context->device, context->cmd_pool, NULL);
 
     for (int i = 0; i < (int)context->image_count; i++)
