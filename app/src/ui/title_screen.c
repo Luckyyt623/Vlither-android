@@ -10,6 +10,7 @@
 #include "../game/snakey_rain.h"
 #include "../imgui_setup.h"
 #include "ratings.h"
+#include "../game/vlither_ratings.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -28,6 +29,7 @@ static long long event_now_ms(void) {
 static const char* const HOMEPAGE_BACKGROUND_NAMES[] = {
     "Normal Vlither", "Alpine Valley", "Himalayan Dawn",
     "Cloudsea Sunrise", "Neon Bridge", "Galaxy", "Fuji Sunset",
+    "Custom (Upload)",
 };
 
 static ImVec4 homepage_accent(int background) {
@@ -39,8 +41,9 @@ static ImVec4 homepage_accent(int background) {
       {0.55f, 0.20f, 0.62f, 1.0f}, /* Neon Bridge */
       {0.14f, 0.25f, 0.48f, 1.0f}, /* Galaxy */
       {0.48f, 0.25f, 0.18f, 1.0f}, /* Fuji Sunset */
+      {0.30f, 0.30f, 0.32f, 1.0f}, /* Custom (Upload) */
   };
-  if (background < 0 || background > 6) background = 5;
+  if (background < 0 || background > 7) background = 5;
   return accents[background];
 }
 
@@ -66,7 +69,7 @@ static void apply_homepage_background(tenv* env) {
   tuser_data* usr = env->usr;
   renderer* r = usr->r;
   int selected = usr->usrs.homepage_background;
-  if (selected < 0 || selected > 6) selected = 5;
+  if (selected < 0 || selected > 7) selected = 5;
 
   r->global.bd_opacity = 0.0f;
   r->global.minimap_opacity = 0.0f;
@@ -83,8 +86,19 @@ static void apply_homepage_background(tenv* env) {
 
   /* Gameplay owns variants 0..15. Homepage scenes are 16..21 and share the
      same one-texture lazy slot, so only the currently selected photo lives in
-     GPU memory. */
-  const int homepage_variant = 15 + selected;
+     GPU memory. The user-uploaded image (selected == 7) is a separate slot,
+     variant 22, shared with the in-game "Custom (Upload)" background. */
+  int homepage_variant;
+  float brightness;
+  if (selected == 7) {
+    homepage_variant = 22;
+    brightness = 1.0f; /* it's the user's own photo — don't dim it */
+  } else {
+    homepage_variant = 15 + selected;
+    static const float scene_brightness[] = {
+        1.00f, 0.68f, 0.74f, 0.76f, 0.76f, 0.88f, 0.72f};
+    brightness = scene_brightness[selected];
+  }
   renderer_set_background_variant(r, env->ctx, homepage_variant);
   if (r->bg_variant != homepage_variant || !r->active_bg_tex ||
       r->active_bg_tex->size[0] <= 0 || r->active_bg_tex->size[1] <= 0) {
@@ -97,9 +111,6 @@ static void apply_homepage_background(tenv* env) {
   const float scale_y = (float)env->ctx->size[1] /
                         (float)r->active_bg_tex->size[1];
   const float cover_scale = fmaxf(scale_x, scale_y);
-  static const float scene_brightness[] = {
-      1.00f, 0.68f, 0.74f, 0.76f, 0.76f, 0.88f, 0.72f};
-  const float brightness = scene_brightness[selected];
 
   r->global.zoom = 1.0f;
   r->global.bg_scale = cover_scale;
@@ -124,7 +135,7 @@ static void draw_homepage_background_picker(tenv* env, float frame_height) {
   user_settings* usrs = &usr->usrs;
   ImGuiStyle* style = igGetStyle();
   int selected = usrs->homepage_background;
-  if (selected < 0 || selected > 6) selected = 5;
+  if (selected < 0 || selected > 7) selected = 5;
 
   char button_label[80];
   snprintf(button_label, sizeof button_label,
@@ -154,7 +165,7 @@ static void draw_homepage_background_picker(tenv* env, float frame_height) {
   igSpacing();
   igSetNextItemWidth(-1.0f);
   if (igCombo_Str_arr("##homepage_scene", &usrs->homepage_background,
-                      HOMEPAGE_BACKGROUND_NAMES, 7, 7))
+                      HOMEPAGE_BACKGROUND_NAMES, 8, 8))
     save_user_settings(usrs);
 
   igBeginDisabled(usrs->homepage_background == 0);
@@ -178,6 +189,17 @@ static void draw_homepage_background_picker(tenv* env, float frame_height) {
     usrs->homepage_background = 5;
     save_user_settings(usrs);
   }
+#ifdef ANDROID
+  igSpacing();
+  if (igButton("Upload from gallery", (ImVec2){-1, 0.0f})) {
+    if (android_jni_request_custom_background()) {
+      usrs->homepage_background = 7;
+      save_user_settings(usrs);
+    }
+  }
+  igTextWrapped("Pick any photo from your phone. It's shared with the "
+                "in-game \"Custom (Upload)\" background too.");
+#endif
   igEndPopup();
 }
 
@@ -572,11 +594,25 @@ void ui_title_screen(tenv* env) {
   const float ratings_button_y =
       event_button_y + frame_height * 1.15f + homepage_px(58.0f);
   igSetCursorPos((ImVec2){home_edge, ratings_button_y});
-  if (igButton("Ratings & Reviews",
-               (ImVec2){side_button_w, frame_height * 1.15f})) {
-    ui_ratings_panel_open();
-    usr->gdata.curr_screen = RATINGS_PANEL;
+  {
+    char ratings_label[64];
+    if (vlither_ratings_has_unread_admin_reply())
+      snprintf(ratings_label, sizeof ratings_label, "Ratings & Reviews  •");
+    else
+      snprintf(ratings_label, sizeof ratings_label, "Ratings & Reviews");
+    if (igButton(ratings_label,
+                 (ImVec2){side_button_w, frame_height * 1.15f})) {
+      ui_ratings_panel_open();
+      usr->gdata.curr_screen = RATINGS_PANEL;
+    }
   }
+
+  const float website_button_y =
+      ratings_button_y + frame_height * 1.15f + home_gap;
+  igSetCursorPos((ImVec2){home_edge, website_button_y});
+  if (igButton("Vlither Website",
+               (ImVec2){side_button_w, frame_height * 1.15f}))
+    android_jni_open_url("https://vlitherandroid.onrender.com/");
 #endif
 
   /* Every homepage element uses the same 720p baseline. This keeps the menu
@@ -815,6 +851,13 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
                   frame_height * 6);
+  if (igButton("Tags store", (ImVec2){logo_size})) {
+    android_jni_open_webview("https://vlitherandroid.onrender.com/store");
+  }
+
+  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 8 +
+                  frame_height * 7);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);

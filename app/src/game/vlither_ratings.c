@@ -18,8 +18,15 @@ typedef enum rating_http_kind {
   RATING_HTTP_NONE = 0,
   RATING_HTTP_LOAD,
   RATING_HTTP_SUBMIT,
-  RATING_HTTP_REPORT
+  RATING_HTTP_REPORT,
+  RATING_HTTP_REPLY
 } rating_http_kind;
+
+typedef struct vlither_rating_reply {
+  char role[12];
+  char message[VLITHER_RATING_REPLY_TEXT_MAX + 1];
+  long long created_at_ms;
+} vlither_rating_reply;
 
 typedef struct vlither_rating_item {
   char id[65];
@@ -28,12 +35,17 @@ typedef struct vlither_rating_item {
   int rating;
   long long updated_at_ms;
   bool mine;
+  bool can_reply;
+  vlither_rating_reply replies[VLITHER_RATING_REPLY_MAX];
+  int reply_count;
+  long long latest_admin_reply_ms;
 } vlither_rating_item;
 
 static struct {
   bool ready;
   bool loaded;
   bool refresh_pending;
+  bool unread_admin_reply;
   tenv *env;
   struct mg_mgr mgr;
   struct mg_connection *http;
@@ -47,6 +59,7 @@ static struct {
   double average;
   int total;
   int mine_index;
+  long long seen_admin_reply_ms;
 } R;
 
 static void set_status(const char *text) {
@@ -151,7 +164,47 @@ static void parse_reviews(struct mg_str json) {
     snprintf(path, sizeof path, "%s.mine", base);
     mg_json_get_bool(json, path, &item->mine);
     if (item->mine) R.mine_index = R.count - 1;
+    snprintf(path, sizeof path, "%s.canReply", base);
+    mg_json_get_bool(json, path, &item->can_reply);
+    item->reply_count = 0;
+    item->latest_admin_reply_ms = 0;
+    for (int r = 0; r < VLITHER_RATING_REPLY_MAX; ++r) {
+      char rbase[80], rpath[96];
+      snprintf(rbase, sizeof rbase, "%s.replies[%d]", base, r);
+      snprintf(rpath, sizeof rpath, "%s.role", rbase);
+      char *role = mg_json_get_str(json, rpath);
+      if (!role) break;
+      vlither_rating_reply *reply = &item->replies[item->reply_count++];
+      strncpy(reply->role, role, sizeof reply->role - 1);
+      reply->role[sizeof reply->role - 1] = 0;
+      mg_free(role);
+      snprintf(rpath, sizeof rpath, "%s.message", rbase);
+      copy_json_string(json, rpath, reply->message, sizeof reply->message, "");
+      snprintf(rpath, sizeof rpath, "%s.createdAtMs", rbase);
+      reply->created_at_ms = json_millis(json, rpath);
+      if (!strcmp(reply->role, "admin") &&
+          reply->created_at_ms > item->latest_admin_reply_ms)
+        item->latest_admin_reply_ms = reply->created_at_ms;
+    }
+    if (item->mine && item->latest_admin_reply_ms > 0)
+      item->can_reply = true;
   }
+
+  if (R.mine_index >= 0) {
+    long long latest = R.items[R.mine_index].latest_admin_reply_ms;
+    if (latest > 0 && latest > R.seen_admin_reply_ms) {
+      if (R.seen_admin_reply_ms > 0 || R.loaded) {
+        R.unread_admin_reply = true;
+#ifdef ANDROID
+        extern void android_jni_show_local_notification(const char *title,
+                                                        const char *body);
+        android_jni_show_local_notification(
+            "Vlither", "Developer replied to your review");
+#endif
+      }
+    }
+  }
+
   R.loaded = true;
   char text[160];
   snprintf(text, sizeof text, R.total == 1
@@ -199,6 +252,9 @@ static void http_cb(struct mg_connection *c, int ev, void *ev_data) {
           ? "Review saved. It is currently hidden by moderation."
           : "Your review is published.");
         if (visibility) mg_free(visibility);
+        R.refresh_pending = true;
+      } else if (R.http_kind == RATING_HTTP_REPLY) {
+        set_status("Your reply was sent.");
         R.refresh_pending = true;
       } else {
         bool already = false;
@@ -325,6 +381,8 @@ void vlither_ratings_init(tenv *env) {
   memset(&R, 0, sizeof R);
   R.env = env;
   R.mine_index = -1;
+  if (env && env->usr)
+    R.seen_admin_reply_ms = env->usr->usrs.ratings_admin_reply_seen_ms;
   mg_mgr_init(&R.mgr);
   R.ready = true;
   if (env && env->usr) ensure_owner_token(&env->usr->usrs);
@@ -392,4 +450,88 @@ int vlither_ratings_mine_value(void) {
 }
 const char *vlither_ratings_mine_message(void) {
   return R.mine_index >= 0 ? R.items[R.mine_index].message : "";
+}
+
+bool vlither_ratings_reply(const char *message) {
+  if (!R.ready || !R.env || !R.env->usr || R.http || !message) return false;
+  if (R.mine_index < 0) {
+    set_status("Publish a review before replying.");
+    return false;
+  }
+  vlither_rating_item *mine = &R.items[R.mine_index];
+  if (!mine->can_reply || !mine->id[0]) {
+    set_status("Wait for a developer reply before you can respond.");
+    return false;
+  }
+  while (message && isspace((unsigned char)*message)) ++message;
+  if (!message || !message[0]) {
+    set_status("Write a reply first.");
+    return false;
+  }
+  user_settings *us = &R.env->usr->usrs;
+  ensure_owner_token(us);
+  char encoded_id[160], escaped_client[96], escaped_token[160];
+  char escaped_message[VLITHER_RATING_REPLY_TEXT_MAX * 2 + 8];
+  if (!mg_url_encode(mine->id, strlen(mine->id), encoded_id, sizeof encoded_id))
+    return false;
+  json_escape(escaped_client, sizeof escaped_client, us->ntl_client_id);
+  json_escape(escaped_token, sizeof escaped_token, us->ratings_owner_token);
+  json_escape(escaped_message, sizeof escaped_message, message);
+  char url[512], body[1200];
+  snprintf(url, sizeof url, "%s/api/v1/reviews/%s/replies",
+           vlither_backend_base_url(), encoded_id);
+  int body_len = snprintf(
+      body, sizeof body,
+      "{\"clientId\":\"%s\",\"ownerToken\":\"%s\",\"message\":\"%s\"}",
+      escaped_client, escaped_token, escaped_message);
+  if (body_len <= 0 || body_len >= (int)sizeof body) {
+    set_status("That reply is too long.");
+    return false;
+  }
+  set_status("Sending your reply...");
+  return begin_http(RATING_HTTP_REPLY, url, body);
+}
+
+int vlither_ratings_reply_count_at(int index) {
+  if (index < 0 || index >= R.count) return 0;
+  return R.items[index].reply_count;
+}
+
+const char *vlither_ratings_reply_role_at(int index, int reply_index) {
+  if (index < 0 || index >= R.count) return "";
+  if (reply_index < 0 || reply_index >= R.items[index].reply_count) return "";
+  return R.items[index].replies[reply_index].role;
+}
+
+const char *vlither_ratings_reply_message_at(int index, int reply_index) {
+  if (index < 0 || index >= R.count) return "";
+  if (reply_index < 0 || reply_index >= R.items[index].reply_count) return "";
+  return R.items[index].replies[reply_index].message;
+}
+
+long long vlither_ratings_reply_time_ms_at(int index, int reply_index) {
+  if (index < 0 || index >= R.count) return 0;
+  if (reply_index < 0 || reply_index >= R.items[index].reply_count) return 0;
+  return R.items[index].replies[reply_index].created_at_ms;
+}
+
+bool vlither_ratings_can_reply_at(int index) {
+  if (index < 0 || index >= R.count) return false;
+  return R.items[index].can_reply;
+}
+
+bool vlither_ratings_has_unread_admin_reply(void) {
+  return R.unread_admin_reply;
+}
+
+void vlither_ratings_mark_admin_replies_seen(void) {
+  if (R.mine_index >= 0) {
+    long long latest = R.items[R.mine_index].latest_admin_reply_ms;
+    if (latest > R.seen_admin_reply_ms) R.seen_admin_reply_ms = latest;
+  }
+  R.unread_admin_reply = false;
+  if (R.env && R.env->usr) {
+    R.env->usr->usrs.ratings_admin_reply_seen_ms = R.seen_admin_reply_ms;
+    save_user_settings(&R.env->usr->usrs);
+  }
 }

@@ -536,29 +536,62 @@ void snakey_rain_draw(tenv *env) {
       env->usr->gdata.curr_screen != PLAYING)
     return;
 
-  float scale = fmaxf(0.85f, fminf((float)env->ctx->size[1] / 720.0f, 1.25f));
-  float pad = 6.0f * scale;
-  float btn_h = 30.0f * scale;
-  float gap = 8.0f * scale;
+  /* Fit the top bar to phone width + height so small screens do not clip
+     buttons and large phones do not get oversized pills. */
+  float sw = (float)env->ctx->size[0];
+  float sh = (float)env->ctx->size[1];
+  if (sw < 1.0f || sh < 1.0f) return;
 
-  /* Measure compact pill widths */
+  float scale = fminf(sw / 390.0f, sh / 720.0f);
+  scale = fmaxf(0.70f, fminf(scale, 1.30f));
+
   char bots_label[32];
   snprintf(bots_label, sizeof bots_label, "Bots=%d", S.bot_count);
   const char *follow_label = sr_mode_name(S.mode);
   const char *boost_label = S.boost ? "Boost" : "No Boost";
 
+  float pad, btn_h, gap, bots_w, follow_w, boost_w, width, height, x, y;
   ImVec2 bots_sz, follow_sz, boost_sz;
-  igCalcTextSize(&bots_sz, bots_label, NULL, false, -1.0f);
-  igCalcTextSize(&follow_sz, follow_label, NULL, false, -1.0f);
-  igCalcTextSize(&boost_sz, boost_label, NULL, false, -1.0f);
 
-  float bots_w = bots_sz.x + pad * 2.5f;
-  float follow_w = follow_sz.x + pad * 2.5f;
-  float boost_w = boost_sz.x + pad * 2.5f;
-  float width = bots_w + follow_w + boost_w + gap * 2.0f + pad * 2.0f;
-  float height = btn_h + pad * 2.0f;
-  float x = ((float)env->ctx->size[0] - width) * 0.5f;
-  float y = 8.0f * scale;
+  for (int pass = 0; pass < 3; ++pass) {
+    pad = 6.0f * scale;
+    btn_h = fmaxf(26.0f, 30.0f * scale);
+    gap = fmaxf(4.0f, 8.0f * scale);
+
+    igCalcTextSize(&bots_sz, bots_label, NULL, false, -1.0f);
+    igCalcTextSize(&follow_sz, follow_label, NULL, false, -1.0f);
+    igCalcTextSize(&boost_sz, boost_label, NULL, false, -1.0f);
+
+    bots_w = bots_sz.x + pad * 2.4f;
+    follow_w = follow_sz.x + pad * 2.4f;
+    boost_w = boost_sz.x + pad * 2.4f;
+    width = bots_w + follow_w + boost_w + gap * 2.0f + pad * 2.0f;
+    height = btn_h + pad * 2.0f;
+
+    float side_margin = fmaxf(8.0f, 12.0f * scale);
+    float max_w = sw - side_margin * 2.0f;
+    if (width <= max_w || scale <= 0.70f) break;
+    scale *= max_w / width;
+    if (scale < 0.70f) scale = 0.70f;
+  }
+
+  float side_margin = fmaxf(8.0f, 12.0f * scale);
+  if (width > sw - side_margin * 2.0f) {
+    /* Last-resort shrink so the three pills always stay on-screen. */
+    float max_w = fmaxf(1.0f, sw - side_margin * 2.0f);
+    float fit = max_w / width;
+    bots_w *= fit;
+    follow_w *= fit;
+    boost_w *= fit;
+    gap *= fit;
+    pad *= fit;
+    width = bots_w + follow_w + boost_w + gap * 2.0f + pad * 2.0f;
+    btn_h = fmaxf(24.0f, btn_h * fit);
+    height = btn_h + pad * 2.0f;
+  }
+
+  x = (sw - width) * 0.5f;
+  y = fmaxf(6.0f, 8.0f * scale);
 
 #ifdef ANDROID
   android_ui_capture_rect(x, y, x + width, y + height);

@@ -1975,8 +1975,26 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   float lateral = (o->ntl_tag_id >= 0)
                       ? -(8.0f * body_scale + width * 0.34f)
                       : 0.0f;
-  ImVec2 tip = {hx + tag_back_x * distance + tag_side_x * lateral,
-                hy + tag_back_y * distance + tag_side_y * lateral};
+  ImVec2 target_tip = {hx + tag_back_x * distance + tag_side_x * lateral,
+                       hy + tag_back_y * distance + tag_side_y * lateral};
+
+  /* A little continuous, time-based sway so the tag doesn't look welded in
+     place — a pure function of elapsed time (not a per-frame random draw),
+     so it neither depends on frame rate nor accumulates. */
+  float sway_x = sinf(g->data.ctm * 0.0021f + o->xx * 0.01f) * 1.6f * body_scale;
+  float sway_y = cosf(g->data.ctm * 0.0027f + o->yy * 0.01f) * 1.6f * body_scale;
+  target_tip.x += sway_x;
+  target_tip.y += sway_y;
+
+  /* Spring-damper the rendered tip toward that target instead of snapping to
+     it directly — gives the antenna an organic, slightly-lagging wobble
+     through turns, the way a real hanging chain would, without the
+     frame-rate-dependent feel a fixed per-frame damping factor would have. */
+  tag_follow_point(&o->vlither_tag_tip_x, &o->vlither_tag_tip_y,
+                   &o->vlither_tag_tip_vx, &o->vlither_tag_tip_vy,
+                   &o->vlither_tag_tip_mtm, &o->vlither_tag_tip_ready,
+                   target_tip.x, target_tip.y, g->data.ctm, 170.0f, 11.0f);
+  ImVec2 tip = {o->vlither_tag_tip_x, o->vlither_tag_tip_y};
   float local_attach_x = (attach_x - 0.5f) * width;
   float local_attach_y = (attach_y - 0.5f) * height;
   ImVec2 center = {tip.x - (ux * local_attach_x + vx * local_attach_y),

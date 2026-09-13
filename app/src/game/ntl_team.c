@@ -2935,30 +2935,34 @@ void ntl_team_panel(tenv *env) {
     }
 
     if (igBeginTabItem("Players & minimap", NULL, ImGuiTabItemFlags_None)) {
-      igSeparatorText("Minimap teammates");
+      igSeparatorText("Minimap player dots");
       igCheckbox("Show teammates on minimap", &us->ntl_show_teammates);
       igCheckbox("Show teammate names", &us->ntl_marker_labels);
-      igText("My dot");
-      igSameLine(0, 8);
-      igSetNextItemWidth(120);
+      igTextWrapped("Change how large player dots appear on the minimap.");
+      igText("My dot size");
+      igSetNextItemWidth(-1.0f);
+      if (igSliderFloat("##own_marker_size", &us->own_marker_size, 2.0f, 28.0f,
+                        "%.1f px", ImGuiSliderFlags_AlwaysClamp)) {
+        /* live preview while dragging */
+      }
+      if (igIsItemDeactivatedAfterEdit()) save_user_settings(us);
+      igText("Shape / color");
+      igSetNextItemWidth(140);
       igCombo_Str_arr("##own_marker_shape", &us->own_marker_shape,
                       (const char*[]){"Circle", "Diamond", "Triangle"}, 3, -1);
       igSameLine(0, 8);
-      igSetNextItemWidth(120);
-      igSliderFloat("##own_marker_size", &us->own_marker_size, 2.0f, 14.0f,
-                    "%.1f px", ImGuiSliderFlags_AlwaysClamp);
-      igSameLine(0, 8);
       igColorEdit4("##own_marker_color", us->own_marker_color,
                    ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
-      igText("Team dots");
-      igSameLine(0, 8);
-      igSetNextItemWidth(120);
+      igSpacing();
+      igText("Other players' dot size");
+      igSetNextItemWidth(-1.0f);
+      igSliderFloat("##team_marker_size", &us->ntl_marker_size, 2.0f, 28.0f,
+                    "%.1f px", ImGuiSliderFlags_AlwaysClamp);
+      if (igIsItemDeactivatedAfterEdit()) save_user_settings(us);
+      igText("Shape / color");
+      igSetNextItemWidth(140);
       igCombo_Str_arr("##team_marker_shape", &us->ntl_marker_shape,
                       (const char*[]){"Circle", "Diamond", "Triangle"}, 3, -1);
-      igSameLine(0, 8);
-      igSetNextItemWidth(120);
-      igSliderFloat("##team_marker_size", &us->ntl_marker_size, 2.0f, 14.0f,
-                    "%.1f px", ImGuiSliderFlags_AlwaysClamp);
       igSameLine(0, 8);
       igColorEdit4("##team_marker_color", us->ntl_marker_color,
                    ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);

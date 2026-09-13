@@ -119,6 +119,33 @@ bool android_jni_request_custom_arrow(void) {
     return result;
 }
 
+bool android_jni_request_custom_background(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return false;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        attached = true;
+    } else if (status != JNI_OK || !env) return false;
+    bool result = false;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "requestCustomBackground", "(Landroid/app/Activity;)Z");
+        if (mid && !(*env)->ExceptionCheck(env))
+            result = (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz) == JNI_TRUE;
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+    return result;
+}
+
 static bool android_jni_request_settings_action(const char* method_name) {
     if (!method_name || !g_android_app || !g_android_app->activity ||
         !g_android_app->activity->vm || !g_android_app->activity->clazz)
@@ -523,6 +550,42 @@ ou_cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
+void android_jni_open_webview(const char* url) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        attached = true;
+    } else if (status != JNI_OK || !env) return;
+
+    /* GetObjectClass() on the activity instance we already hold — not a
+       name-based FindClass() — is what actually resolves app-defined
+       classes/methods correctly from this native thread. Same pattern as
+       android_jni_request_custom_arrow() above. The Kotlin side
+       (GameActivity.openTagsStore) does the actual Intent/startActivity
+       work, where a plain TagsStoreActivity::class reference is safe. */
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "openTagsStore",
+            "(Landroid/app/Activity;Ljava/lang/String;)Z");
+        if (mid && !(*env)->ExceptionCheck(env)) {
+            jstring url_jstr = (*env)->NewStringUTF(env, url);
+            (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz, url_jstr);
+            (*env)->DeleteLocalRef(env, url_jstr);
+        }
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+}
+
 static jbyteArray android_jni_utf8_bytes(JNIEnv* env, const char* text,
                                         size_t max_len) {
     if (!env) return NULL;
@@ -775,6 +838,48 @@ void android_jni_cancel_event_notification(const char* event_id) {
 
 event_cancel_cleanup:
     if (id_bytes) (*env)->DeleteLocalRef(env, id_bytes);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (did_attach) (*vm)->DetachCurrentThread(vm);
+}
+
+
+void android_jni_show_local_notification(const char* title, const char* body) {
+    if (!title || !title[0] || !g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool did_attach = false;
+    jclass cls = NULL;
+    jbyteArray title_bytes = NULL, body_bytes = NULL;
+    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        did_attach = true;
+    } else if (status != JNI_OK || !env) {
+        return;
+    }
+    cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (!cls || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        goto notif_cleanup;
+    }
+    jmethodID mid = (*env)->GetStaticMethodID(
+        env, cls, "showLocalNotification",
+        "(Landroid/app/Activity;[B[B)V");
+    if (!mid || (*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        goto notif_cleanup;
+    }
+    title_bytes = android_jni_utf8_bytes(env, title, 96);
+    body_bytes = android_jni_utf8_bytes(env, body ? body : "", 240);
+    if (!title_bytes || !body_bytes) goto notif_cleanup;
+    (*env)->CallStaticVoidMethod(env, cls, mid, g_android_app->activity->clazz,
+                                 title_bytes, body_bytes);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+notif_cleanup:
+    if (title_bytes) (*env)->DeleteLocalRef(env, title_bytes);
+    if (body_bytes) (*env)->DeleteLocalRef(env, body_bytes);
     if (cls) (*env)->DeleteLocalRef(env, cls);
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }

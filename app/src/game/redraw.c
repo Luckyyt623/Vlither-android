@@ -1640,7 +1640,12 @@ void redraw(tenv* env) {
   usr->r->global.zoom = gdata->data.gsc;
   usr->r->global.grd = gdata->data.grd;
   usr->r->global.bd_radius = gdata->data.flux_grd;
-  renderer_set_background_variant(usr->r, env->ctx, usrs->background_style);
+  /* background_style's "Custom (Upload)" entry (16) shares the same
+     variant-22 slot as the homepage's Custom (Upload) option, one file on
+     disk — the 16..21 range is already used by homepage preset photos. */
+  renderer_set_background_variant(
+      usr->r, env->ctx,
+      usrs->background_style == 16 ? 22 : usrs->background_style);
   usr->r->global.bd_color[0] = usrs->bd_color[0];
   usr->r->global.bd_color[1] = usrs->bd_color[1];
   usr->r->global.bd_color[2] = usrs->bd_color[2];

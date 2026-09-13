@@ -294,6 +294,7 @@ void user_settings_default(user_settings* usr_settings) {
   memset(usr_settings->ratings_settings_reserved, 0,
          sizeof usr_settings->ratings_settings_reserved);
   usr_settings->ratings_owner_token[0] = 0;
+  usr_settings->ratings_admin_reply_seen_ms = 0;
   memset(usr_settings->leaderboard_title_settings_reserved, 0,
          sizeof usr_settings->leaderboard_title_settings_reserved);
   usr_settings->leaderboard_title_color[0] = 1.0f;
@@ -564,10 +565,10 @@ void read_user_settings(user_settings* usr_settings) {
   if (loaded.own_marker_shape < 0 || loaded.own_marker_shape > 2)
     loaded.own_marker_shape = 0;
   if (!isfinite(loaded.ntl_marker_size) || loaded.ntl_marker_size < 2.0f ||
-      loaded.ntl_marker_size > 14.0f)
+      loaded.ntl_marker_size > 28.0f)
     loaded.ntl_marker_size = 5.0f;
   if (!isfinite(loaded.own_marker_size) || loaded.own_marker_size < 2.0f ||
-      loaded.own_marker_size > 14.0f)
+      loaded.own_marker_size > 28.0f)
     loaded.own_marker_size = 5.5f;
   for (int c = 0; c < 4; ++c) {
     if (!isfinite(loaded.ntl_marker_color[c]) ||
@@ -637,7 +638,7 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.show_ntl_tags = !!loaded.show_ntl_tags;
   loaded.show_vlither_tags = !!loaded.show_vlither_tags;
 
-  if (loaded.background_style < 0 || loaded.background_style > 15)
+  if (loaded.background_style < 0 || loaded.background_style > 16)
     loaded.background_style = 0;
   if (loaded.cursor_size < 24 || loaded.cursor_size > 128)
     loaded.cursor_size = 48;
@@ -660,7 +661,7 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.boost_arrow_anim = false;
   if (loaded.arrow_style < 0 || loaded.arrow_style >= ARROW_STYLE_COUNT)
     loaded.arrow_style = 0;
-  if (loaded.homepage_background < 0 || loaded.homepage_background > 6)
+  if (loaded.homepage_background < 0 || loaded.homepage_background > 7)
     loaded.homepage_background = 5;
   if (!isfinite(loaded.homepage_blur) || loaded.homepage_blur < 0.0f ||
       loaded.homepage_blur > 100.0f)

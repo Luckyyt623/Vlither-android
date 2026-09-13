@@ -8,6 +8,9 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
 import android.app.NativeActivity
+import android.app.NotificationManager
+import android.app.NotificationChannel
+import android.app.Notification
 import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -99,8 +102,10 @@ class GameActivity : NativeActivity() {
         private const val CUSTOM_ARROW_REQUEST = 4403
         private const val SETTINGS_BACKUP_CREATE_REQUEST = 4404
         private const val SETTINGS_BACKUP_OPEN_REQUEST = 4405
+        private const val CUSTOM_BACKGROUND_REQUEST = 4406
         private const val SETTINGS_FILE_NAME = "user.dat"
         private const val CUSTOM_ARROW_FILE_NAME = "custom_arrow_image"
+        private const val CUSTOM_BACKGROUND_FILE_NAME = "custom_background_image"
         private const val BACKUP_MANIFEST_ENTRY = "manifest.txt"
         private const val BACKUP_SETTINGS_ENTRY = "user.dat"
         private const val BACKUP_ARROW_ENTRY = "custom_arrow_image"
@@ -273,6 +278,39 @@ class GameActivity : NativeActivity() {
                 true
             } catch (e: Exception) {
                 Log.e(TAG, "Could not open custom-arrow picker", e)
+                false
+            }
+        }
+
+        @JvmStatic
+        fun openTagsStore(activity: Activity, url: String): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    val intent = Intent(activity, TagsStoreActivity::class.java).apply {
+                        putExtra(TagsStoreActivity.EXTRA_URL, url)
+                    }
+                    activity.startActivity(intent)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open Tags Store", e)
+                false
+            }
+        }
+
+        @JvmStatic
+        fun requestCustomBackground(activity: Activity): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                    }
+                    activity.startActivityForResult(intent, CUSTOM_BACKGROUND_REQUEST)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open custom-background picker", e)
                 false
             }
         }
@@ -581,7 +619,40 @@ class GameActivity : NativeActivity() {
 
         /** Prepare microphone permission before open-mic voice starts.
          *  The explicit Enable Voice action owns the Android permission prompt. */
+        
         @JvmStatic
+        fun showLocalNotification(activity: Activity, titleUtf8: ByteArray, bodyUtf8: ByteArray) {
+            val title = String(titleUtf8, Charsets.UTF_8)
+            val body = String(bodyUtf8, Charsets.UTF_8)
+            val nm = activity.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val channelId = "vlither_reviews"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        channelId,
+                        "Vlither reviews",
+                        NotificationManager.IMPORTANCE_DEFAULT
+                    ).apply {
+                        description = "Replies from the developer on your review"
+                    }
+                )
+            }
+            val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(activity, channelId)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(activity)
+            }
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(Notification.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .build()
+            nm.notify(("review-" + title).hashCode() and 0x7fffffff, notification)
+        }
+
+@JvmStatic
         fun prepareVoice(activity: Activity) {
             val game = activity as? GameActivity ?: return
             if (game.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -1759,6 +1830,30 @@ class GameActivity : NativeActivity() {
         if (requestCode == SETTINGS_BACKUP_OPEN_REQUEST) {
             if (resultCode == Activity.RESULT_OK)
                 data?.data?.let { restoreSettingsBackup(it) }
+            return
+        }
+        if (requestCode == CUSTOM_BACKGROUND_REQUEST && resultCode == Activity.RESULT_OK) {
+            val bgUri = data?.data ?: return
+            try {
+                contentResolver.openInputStream(bgUri)?.use { input ->
+                    FileOutputStream(filesDir.resolve(CUSTOM_BACKGROUND_FILE_NAME)).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            total += read
+                            if (total > 12 * 1024 * 1024)
+                                throw IllegalArgumentException("Image exceeds 12 MB")
+                            output.write(buffer, 0, read)
+                        }
+                        output.flush()
+                    }
+                }
+            } catch (e: Exception) {
+                filesDir.resolve(CUSTOM_BACKGROUND_FILE_NAME).delete()
+                Log.e(TAG, "Could not save custom background", e)
+            }
             return
         }
         if (requestCode != CUSTOM_ARROW_REQUEST || resultCode != Activity.RESULT_OK)

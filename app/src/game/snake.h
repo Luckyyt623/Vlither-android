@@ -65,6 +65,15 @@ typedef struct snake {
   float vlither_tag_follow_ang;
   float vlither_tag_follow_mtm;
 
+  /* Spring-damper state for the Vlither tag's antenna tip — gives it an
+     organic, floppy wobble (like a real chain of points) without being
+     frame-rate dependent the way a fixed per-frame damping factor would be. */
+  float vlither_tag_tip_x;
+  float vlither_tag_tip_y;
+  float vlither_tag_tip_vx;
+  float vlither_tag_tip_vy;
+  float vlither_tag_tip_mtm;
+
   float fxs[GD_EEZ];
   float fys[GD_EEZ];
   float fchls[GD_EEZ];
@@ -79,6 +88,7 @@ typedef struct snake {
   bool dead;
   bool ntl_tag_follow_ready;
   bool vlither_tag_follow_ready;
+  bool vlither_tag_tip_ready;
 
   body_part* pts;
   gpt* gptz;

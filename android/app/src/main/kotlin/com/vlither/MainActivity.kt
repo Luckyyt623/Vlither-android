@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.3"
+        private const val CURRENT_VERSION   = "4.7.4"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,18 +209,23 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 4.7.3
-What’s New
-Snakey Rain — control bots in-game (name, skin, boost, modes)
-Chat UI — cleaner Vlither & NTL chat with a glass-style message bar
-Stability — fewer random disconnects (more fixes coming)
+     Update 4.7.4
 
-Thanks for playing Vlither Android.
-Changes by Lucky
+        What's New:
+
+        •Now you can upload background in game backgrounds and on homepage background.
+        •Tags are more fixable now.
+        • Developer can replay your comment.
+        •Tag store is added.
+
+       
+
+        Thanks for using Vlither Android!
+        Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.3")
+            .setTitle("What's New in v4.7.4")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

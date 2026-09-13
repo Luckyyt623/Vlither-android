@@ -13,7 +13,13 @@ void android_jni_request_ad(void);
 void android_jni_notify_game_ready(void);
 
 void android_jni_open_url(const char* url);
+/* Opens `url` in an in-app WebView (TagsStoreActivity) with a close button,
+   instead of leaving to the system browser like android_jni_open_url(). */
+void android_jni_open_webview(const char* url);
 bool android_jni_request_custom_arrow(void);
+/* Opens the system image picker to choose a custom background image, used
+   for both the homepage and in-game "Custom (Upload)" background option. */
+bool android_jni_request_custom_background(void);
 bool android_jni_request_settings_backup(void);
 bool android_jni_request_settings_restore(void);
 /* Decode an Android asset (including WebP) to malloc-owned RGBA bytes. */
@@ -32,6 +38,8 @@ bool android_jni_schedule_event_notification(const char* event_id,
                                              const char* server_ip,
                                              long long start_at_ms);
 void android_jni_cancel_event_notification(const char* event_id);
+void android_jni_show_local_notification(const char* title,
+                                         const char* body);
 
 const char* android_jni_get_clipboard_text(void);
 

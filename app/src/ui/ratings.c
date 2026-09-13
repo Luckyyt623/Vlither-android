@@ -13,11 +13,14 @@ static char editor_message[VLITHER_RATING_MESSAGE_MAX + 1];
 static bool editor_synced = false;
 static int pending_report = -1;
 static bool report_popup_requested = false;
+static char reply_draft[VLITHER_RATING_REPLY_TEXT_MAX + 1];
 
 void ui_ratings_panel_open(void) {
   editor_synced = false;
   pending_report = -1;
   report_popup_requested = false;
+  reply_draft[0] = 0;
+  vlither_ratings_mark_admin_replies_seen();
   vlither_ratings_refresh();
 }
 
@@ -128,7 +131,55 @@ static void draw_reviews(float scale) {
     igPushTextWrapPos(0.0f);
     igTextWrapped("%s", vlither_ratings_message_at(i));
     igPopTextWrapPos();
-    if (!vlither_ratings_is_mine_at(i)) {
+
+    /* Reply thread is public — every player can read admin/player replies. */
+    int rc = vlither_ratings_reply_count_at(i);
+    for (int r = 0; r < rc; ++r) {
+      const char *role = vlither_ratings_reply_role_at(i, r);
+      bool is_admin = role && !strcmp(role, "admin");
+      igIndent(12.0f * scale);
+      igPushStyleColor_Vec4(ImGuiCol_ChildBg,
+                            is_admin ? (ImVec4){0.12f, 0.22f, 0.34f, 0.55f}
+                                     : (ImVec4){0.16f, 0.17f, 0.20f, 0.45f});
+      igPushStyleVar_Float(ImGuiStyleVar_ChildRounding, 10.0f * scale);
+      char child_id[32];
+      snprintf(child_id, sizeof child_id, "##reply_%d_%d", i, r);
+      igBeginChild_Str(child_id, (ImVec2){-1.0f, 0}, ImGuiChildFlags_AutoResizeY,
+                       ImGuiWindowFlags_NoScrollbar);
+      if (is_admin) {
+        igTextColored((ImVec4){0.20f, 0.78f, 1.0f, 1.0f}, "Lucky");
+        igSameLine(0, 6);
+        igTextColored((ImVec4){0.35f, 0.85f, 0.55f, 1.0f}, "Developer");
+      } else {
+        igTextColored((ImVec4){0.88f, 0.90f, 0.96f, 1.0f}, "%s",
+                      vlither_ratings_nickname_at(i));
+      }
+      char rdate[48];
+      format_review_date(vlither_ratings_reply_time_ms_at(i, r), rdate,
+                         sizeof rdate);
+      igSameLine(0, 8);
+      igTextDisabled("%s", rdate);
+      igPushTextWrapPos(0.0f);
+      igTextWrapped("%s", vlither_ratings_reply_message_at(i, r));
+      igPopTextWrapPos();
+      igEndChild();
+      igPopStyleVar(1);
+      igPopStyleColor(1);
+      igUnindent(12.0f * scale);
+    }
+
+    if (vlither_ratings_is_mine_at(i) && vlither_ratings_can_reply_at(i)) {
+      igSpacing();
+      igSetNextItemWidth(-1.0f);
+      igInputTextWithHint("##reply_draft", "Reply to developer...", reply_draft,
+                          sizeof reply_draft, ImGuiInputTextFlags_None, NULL,
+                          NULL);
+      if (vlither_ratings_loading()) igBeginDisabled(true);
+      if (igButton("Send reply", (ImVec2){120.0f * scale, 0})) {
+        if (vlither_ratings_reply(reply_draft)) reply_draft[0] = 0;
+      }
+      if (vlither_ratings_loading()) igEndDisabled();
+    } else if (!vlither_ratings_is_mine_at(i)) {
       if (vlither_ratings_loading()) igBeginDisabled(true);
       if (igButton("Report##review", (ImVec2){118.0f * scale, 0})) {
         pending_report = i;

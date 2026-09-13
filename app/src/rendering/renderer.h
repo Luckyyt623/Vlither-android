@@ -50,6 +50,10 @@ typedef struct renderer {
   int bg_variant;
   int bg_custom_variant;
   int bg_failed_variant;
+  /* File mtime/size fingerprint of the user-uploaded background (variant 22)
+     so a re-upload while already on that variant is detected and reloaded —
+     the plain bg_custom_variant cache check alone can't see file changes. */
+  long long bg_custom_signature;
   texture* boost_button_tex;
   VkDescriptorSet boost_button_ds;
   texture* arrow_atlas_tex;

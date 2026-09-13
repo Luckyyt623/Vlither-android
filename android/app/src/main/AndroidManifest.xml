@@ -86,6 +86,17 @@
                 android:value="vlither" />
         </activity>
 
+        <!-- TagsStoreActivity: in-app browser for the website's Tags Store,
+             launched from the C title screen via android_jni_open_webview() -->
+        <activity
+            android:name=".TagsStoreActivity"
+            android:label="Vlither Tags Store"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        </activity>
+
         <receiver
             android:name=".EventNotificationReceiver"
             android:exported="false" />

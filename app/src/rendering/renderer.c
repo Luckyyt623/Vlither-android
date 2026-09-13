@@ -455,13 +455,45 @@ renderer* renderer_create(tenv* env) {
 
 void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
   if (!r || !ctx) return;
-  if (variant < 0 || variant > 21) variant = 0;
+  if (variant < 0 || variant > 22) variant = 0;
   if (variant == r->bg_failed_variant) {
     r->active_bg_tex = r->bg_tex;
     r->bg_variant = 0;
     return;
   }
-  if (r->bg_variant == variant && r->active_bg_tex) return;
+
+  /* The user-uploaded slot (22) needs a cheap stat() every call to notice a
+     fresh re-upload even while variant stays 22 across frames — a plain
+     "already on this variant" check can't see file changes by itself. Done
+     up front so the common "nothing changed" case still exits before any
+     of the expensive GPU work below. */
+  char custom_bg_path[640] = {0};
+  bool custom_bg_have_file = false;
+  long long custom_bg_signature = 0;
+  if (variant == 22) {
+#ifdef ANDROID
+    const char* files = android_get_files_dir();
+    if (files && files[0])
+      snprintf(custom_bg_path, sizeof custom_bg_path,
+               "%s/custom_background_image", files);
+#endif
+    struct stat st;
+    custom_bg_have_file =
+        custom_bg_path[0] && stat(custom_bg_path, &st) == 0 && st.st_size > 0;
+    if (custom_bg_have_file) {
+      custom_bg_signature = ((long long)st.st_mtime << 32) ^
+                            ((long long)st.st_mtim.tv_nsec << 12) ^
+                            (long long)st.st_size;
+    }
+  }
+  bool custom_bg_unchanged =
+      custom_bg_have_file && r->bg_tex_custom && r->bg_custom_variant == 22 &&
+      custom_bg_signature == r->bg_custom_signature;
+
+  if (variant == 22 && r->bg_variant == 22 && r->active_bg_tex &&
+      (custom_bg_unchanged || !custom_bg_have_file))
+    return;
+  if (variant != 22 && r->bg_variant == variant && r->active_bg_tex) return;
 
   static const char* custom_paths[] = {
       "app/res/textures/background_tiles_alt.png",
@@ -489,7 +521,29 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
 
   texture* desired = r->bg_tex;
   texture* new_custom = NULL;
-  if (variant >= 1) {
+  if (variant == 22) {
+    /* User-uploaded background, picked from local storage via the
+       "Custom (Upload)" option on the homepage and in-game background
+       pickers. Shared by both — one uploaded image, one file on disk. */
+    if (custom_bg_unchanged) {
+      desired = r->bg_tex_custom;
+    } else if (custom_bg_have_file) {
+      new_custom = create_mipmap_texture(ctx, custom_bg_path);
+      if (new_custom) {
+        desired = new_custom;
+        r->bg_failed_variant = -1;
+        r->bg_custom_signature = custom_bg_signature;
+      } else {
+        r->bg_failed_variant = variant;
+        desired = r->bg_tex;
+        variant = 0;
+      }
+    } else {
+      r->bg_failed_variant = variant;
+      desired = r->bg_tex;
+      variant = 0;
+    }
+  } else if (variant >= 1) {
     if (r->bg_tex_custom && r->bg_custom_variant == variant) {
       desired = r->bg_tex_custom;
     } else {

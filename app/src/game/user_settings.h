@@ -310,6 +310,7 @@ typedef struct user_settings {
      on this device; the Vlither backend stores a one-way hash. */
   uint8_t ratings_settings_reserved[16];
   char ratings_owner_token[65];
+  long long ratings_admin_reply_seen_ms;
 
   /* v4.1 extension: the centred "Vlither Leaderboard" title has its own
      colour, independent of the player-row colour style. */

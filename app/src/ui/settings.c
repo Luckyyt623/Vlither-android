@@ -299,8 +299,9 @@ void ui_settings(tenv* env) {
                           "Classic", "Dark tiles", "USA Star", "Stained Glass",
                           "Snakey", "Seigaiha", "Rizz", "Red Cube",
                           "Purple Cube", "Paint", "Leaves", "Kitties",
-                          "Hex Ice", "Hex B", "Blue Cube", "Asanoha"},
-                      16, -1);
+                          "Hex Ice", "Hex B", "Blue Cube", "Asanoha",
+                          "Custom (Upload)"},
+                      17, -1);
       igCheckbox("##smooth zoom", &usrs->smooth_zoom);
       igSetNextItemWidth(-1);
       igSliderFloat("##zoom step", &usrs->zoom_step, 0.05f, 0.5f, "%.2f",
@@ -360,6 +361,14 @@ void ui_settings(tenv* env) {
       igIndent(-style->WindowPadding.x);
       igEndTable();
     }
+#ifdef ANDROID
+    igSpacing();
+    if (igButton("Upload background from gallery", (ImVec2){-1, 0}))
+      if (android_jni_request_custom_background()) {
+        usrs->background_style = 16;
+        save_user_settings(usrs);
+      }
+#endif
     igSpacing();
     igTextWrapped("FPS limit is a maximum, not a forced refresh rate. Actual FPS cannot exceed your phone's active display refresh rate. Android Auto mode may keep the screen at 60 Hz; select 90/120/144 Hz in the phone's Display settings to use a matching Vlither limit.");
     igTextDisabled("VSync can also cap rendering to the current display mode.");
