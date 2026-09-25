@@ -220,6 +220,7 @@ class MainActivity : Activity() {
         • Added the "2016 Background" style.
         • Ping now shows your actual current ping instead of a rolling average.
         • Head dot now fixed.
+        • Voice chat removed
 
         Thanks for using Vlither Android!
         Changes made by Lucky
