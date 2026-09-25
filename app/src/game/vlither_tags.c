@@ -19,15 +19,12 @@
 #define VLITHER_TAG_BACKEND_URL "http://139.84.170.60:10000"
 #define VLITHER_TAG_MAX_ENTRIES 256
 #define VLITHER_TAG_RECONNECT_SECONDS 4.0
-#define VLITHER_TAG_HEARTBEAT_SECONDS 2.0
+#define VLITHER_TAG_HEARTBEAT_SECONDS 5.0
 #define VLITHER_TAG_HTTP_TIMEOUT_SECONDS 15.0
 #define VLITHER_TAG_MAX_ATLAS_BYTES (16u * 1024u * 1024u)
 #define VLITHER_WS_BACKPRESSURE_BYTES (64u * 1024u)
 #define VLITHER_CHAT_HISTORY_MAX 80
 #define VLITHER_CHAT_PLAYER_MAX 128
-#define VLITHER_VOICE_ROOM_MAX 32
-#define VLITHER_VOICE_MEMBER_MAX 24
-#define VLITHER_VOICE_FRAME_MAX 2048
 #define VLITHER_EVENT_MAX 24
 
 /* These badge glyphs are present in Vlither's bundled Liberation Sans font,
@@ -76,36 +73,13 @@ typedef struct vlither_chat_player {
   char map_name[MAX_NICKNAME_LEN + 1];
   char server[96];
   char version[16];
-  char voice_room_id[25];
   char profile_color[7];
   char profile_emoji[8];
   int snake_id;
   float x, y;
   int fps, ping;
   long long sos_until_ms;
-  bool voice_enabled;
-  bool voice_muted;
-  bool voice_deafened;
 } vlither_chat_player;
-
-typedef struct vlither_voice_member {
-  char client_id[65];
-  char nick[64];
-  bool host;
-  bool muted;
-  bool deafened;
-} vlither_voice_member;
-
-typedef struct vlither_voice_room {
-  char id[25];
-  char name[48];
-  char host_client_id[65];
-  bool locked;
-  int members;
-  int max_players;
-  vlither_voice_member member_list[VLITHER_VOICE_MEMBER_MAX];
-  int member_count;
-} vlither_voice_room;
 
 typedef struct vlither_event {
   char id[65];
@@ -158,31 +132,10 @@ typedef struct vlither_tags_state {
   char event_status[192];
   long long event_server_now_ms;
 
-  bool voice_enabled;
-  bool voice_muted;
-  bool voice_deafened;
-  bool voice_muted_before_deafen;
-  bool voice_capture_requested;
-  double voice_capture_refresh_at;
-  bool voice_in_room;
-  bool voice_room_host;
-  char voice_room_id[25];
-  char voice_room_name[48];
-  char voice_status[160];
-  vlither_voice_room voice_rooms[VLITHER_VOICE_ROOM_MAX];
-  int voice_room_count;
-  vlither_voice_member voice_members[VLITHER_VOICE_MEMBER_MAX];
-  int voice_member_count;
-  unsigned long long voice_tx_frames;
-  unsigned long long voice_rx_frames;
-  int voice_listener_count;
   long long local_sos_until_ms;
 } vlither_tags_state;
 
 static vlither_tags_state S;
-
-static void voice_apply_audio_state(void);
-static bool send_voice_status(void);
 
 static void set_status(const char *text) {
   if (!text) text = "";
@@ -190,33 +143,10 @@ static void set_status(const char *text) {
   S.status[sizeof S.status - 1] = 0;
 }
 
-static void set_voice_status(const char *text) {
-  if (!text) text = "";
-  strncpy(S.voice_status, text, sizeof S.voice_status - 1);
-  S.voice_status[sizeof S.voice_status - 1] = 0;
-}
-
 static snake *local_snake(void) {
   if (!S.env || !S.env->usr) return NULL;
   game_data *g = &S.env->usr->gdata;
   return get_snake(g, g->data.snake_id);
-}
-
-static void voice_password_hash_hex(char out[65], const char *password) {
-  if (!out) return;
-  out[0] = 0;
-  if (!password || !password[0]) return;
-  unsigned char digest[32];
-  mg_sha256_ctx ctx;
-  mg_sha256_init(&ctx);
-  mg_sha256_update(&ctx, (const unsigned char *)password, strlen(password));
-  mg_sha256_final(digest, &ctx);
-  static const char hex[] = "0123456789abcdef";
-  for (int i = 0; i < 32; ++i) {
-    out[i * 2] = hex[(digest[i] >> 4) & 15];
-    out[i * 2 + 1] = hex[digest[i] & 15];
-  }
-  out[64] = 0;
 }
 
 static void json_escape(char *dst, size_t dst_size, const char *src) {
@@ -466,6 +396,38 @@ static void parse_chat_message(struct mg_str json, const char *base_path) {
                       profile_color, profile_emoji);
 }
 
+static void parse_presence_player(struct mg_str item, vlither_chat_player *p) {
+  memset(p, 0, sizeof *p);
+  copy_json_string(item, "$.nickname", p->nick, sizeof p->nick, "Vlither");
+  copy_json_string(item, "$.clientId", p->client_id,
+                   sizeof p->client_id, "");
+  copy_json_string(item, "$.mapName", p->map_name,
+                   sizeof p->map_name, "");
+  copy_json_string(item, "$.server", p->server,
+                   sizeof p->server, "_GAME_MENU_");
+  copy_json_string(item, "$.version", p->version,
+                   sizeof p->version, "?");
+  copy_json_string(item, "$.profileColor", p->profile_color,
+                   sizeof p->profile_color, "");
+  copy_json_string(item, "$.profileEmoji", p->profile_emoji,
+                   sizeof p->profile_emoji, "");
+  p->snake_id = (int)mg_json_get_long(item, "$.snakeId", -1);
+  double number = 0.0;
+  p->x = mg_json_get_num(item, "$.x", &number) ? (float)number : 0.0f;
+  p->y = mg_json_get_num(item, "$.y", &number) ? (float)number : 0.0f;
+  p->fps = (int)mg_json_get_long(item, "$.fps", -1);
+  p->ping = (int)mg_json_get_long(item, "$.ping", -1);
+  p->sos_until_ms = mg_json_get_num(item, "$.sosUntil", &number)
+                        ? (long long)number : 0;
+}
+
+static int find_presence_player(const char *client_id) {
+  if (!client_id || !client_id[0]) return -1;
+  for (int i = 0; i < S.player_count; ++i)
+    if (!strcmp(S.players[i].client_id, client_id)) return i;
+  return -1;
+}
+
 static void parse_presence(struct mg_str json) {
   memset(S.players, 0, sizeof S.players);
   S.player_count = 0;
@@ -474,36 +436,41 @@ static void parse_presence(struct mg_str json) {
   size_t offset = 0;
   while (S.player_count < VLITHER_CHAT_PLAYER_MAX &&
          (offset = mg_json_next(players, offset, NULL, &item)) != 0) {
-    vlither_chat_player *p = &S.players[S.player_count++];
-    memset(p, 0, sizeof *p);
-    copy_json_string(item, "$.nickname", p->nick, sizeof p->nick, "Vlither");
-    copy_json_string(item, "$.clientId", p->client_id,
-                     sizeof p->client_id, "");
-    copy_json_string(item, "$.mapName", p->map_name,
-                     sizeof p->map_name, "");
-    copy_json_string(item, "$.server", p->server,
-                     sizeof p->server, "_GAME_MENU_");
-    copy_json_string(item, "$.version", p->version,
-                     sizeof p->version, "?");
-    copy_json_string(item, "$.voiceRoomId", p->voice_room_id,
-                     sizeof p->voice_room_id, "");
-    copy_json_string(item, "$.profileColor", p->profile_color,
-                     sizeof p->profile_color, "");
-    copy_json_string(item, "$.profileEmoji", p->profile_emoji,
-                     sizeof p->profile_emoji, "");
-    mg_json_get_bool(item, "$.voiceEnabled", &p->voice_enabled);
-    mg_json_get_bool(item, "$.voiceMuted", &p->voice_muted);
-    mg_json_get_bool(item, "$.voiceDeafened", &p->voice_deafened);
-    if (p->voice_deafened) p->voice_muted = true;
-    p->snake_id = (int)mg_json_get_long(item, "$.snakeId", -1);
-    double number = 0.0;
-    p->x = mg_json_get_num(item, "$.x", &number) ? (float)number : 0.0f;
-    p->y = mg_json_get_num(item, "$.y", &number) ? (float)number : 0.0f;
-    p->fps = (int)mg_json_get_long(item, "$.fps", -1);
-    p->ping = (int)mg_json_get_long(item, "$.ping", -1);
-    p->sos_until_ms = mg_json_get_num(item, "$.sosUntil", &number)
-                          ? (long long)number : 0;
+    parse_presence_player(item, &S.players[S.player_count++]);
+  }
+}
 
+static void parse_presence_delta(struct mg_str json) {
+  struct mg_str upserts = mg_json_get_tok(json, "$.upserts");
+  struct mg_str item = {0};
+  size_t offset = 0;
+  while ((offset = mg_json_next(upserts, offset, NULL, &item)) != 0) {
+    vlither_chat_player incoming;
+    parse_presence_player(item, &incoming);
+    if (!incoming.client_id[0]) continue;
+
+    int index = find_presence_player(incoming.client_id);
+    if (index >= 0) {
+      S.players[index] = incoming;
+    } else if (S.player_count < VLITHER_CHAT_PLAYER_MAX) {
+      S.players[S.player_count++] = incoming;
+    }
+  }
+
+  struct mg_str removed = mg_json_get_tok(json, "$.removed");
+  offset = 0;
+  while ((offset = mg_json_next(removed, offset, NULL, &item)) != 0) {
+    char *client_id = mg_json_get_str(item, "$");
+    if (!client_id) continue;
+    int index = find_presence_player(client_id);
+    mg_free(client_id);
+    if (index < 0) continue;
+    if (index + 1 < S.player_count) {
+      memmove(&S.players[index], &S.players[index + 1],
+              (size_t)(S.player_count - index - 1) * sizeof S.players[0]);
+    }
+    --S.player_count;
+    memset(&S.players[S.player_count], 0, sizeof S.players[0]);
   }
 }
 
@@ -590,156 +557,6 @@ static void parse_events(struct mg_str json) {
   S.event_status[sizeof S.event_status - 1] = 0;
 }
 
-static void parse_voice_rooms(struct mg_str json) {
-  memset(S.voice_rooms, 0, sizeof S.voice_rooms);
-  S.voice_room_count = 0;
-  for (int i = 0; i < VLITHER_VOICE_ROOM_MAX; ++i) {
-    char base[64], path[96];
-    snprintf(base, sizeof base, "$.rooms[%d]", i);
-    snprintf(path, sizeof path, "%s.id", base);
-    char *id = mg_json_get_str(json, path);
-    if (!id) break;
-    vlither_voice_room *room = &S.voice_rooms[S.voice_room_count++];
-    memset(room, 0, sizeof *room);
-    strncpy(room->id, id, sizeof room->id - 1);
-    mg_free(id);
-    snprintf(path, sizeof path, "%s.name", base);
-    copy_json_string(json, path, room->name, sizeof room->name, "Voice Room");
-    snprintf(path, sizeof path, "%s.hostClientId", base);
-    copy_json_string(json, path, room->host_client_id,
-                     sizeof room->host_client_id, "");
-    snprintf(path, sizeof path, "%s.locked", base);
-    bool locked = false;
-    mg_json_get_bool(json, path, &locked);
-    room->locked = locked;
-    snprintf(path, sizeof path, "%s.members", base);
-    room->members = (int)mg_json_get_long(json, path, 0);
-    snprintf(path, sizeof path, "%s.maxPlayers", base);
-    room->max_players = (int)mg_json_get_long(json, path, 12);
-    for (int j = 0; j < VLITHER_VOICE_MEMBER_MAX; ++j) {
-      char member_base[96];
-      snprintf(member_base, sizeof member_base, "%s.memberList[%d]", base, j);
-      snprintf(path, sizeof path, "%s.nickname", member_base);
-      char *nick = mg_json_get_str(json, path);
-      if (!nick) break;
-      vlither_voice_member *member = &room->member_list[room->member_count++];
-      strncpy(member->nick, nick[0] ? nick : "Vlither",
-              sizeof member->nick - 1);
-      mg_free(nick);
-      snprintf(path, sizeof path, "%s.clientId", member_base);
-      copy_json_string(json, path, member->client_id,
-                       sizeof member->client_id, "");
-      snprintf(path, sizeof path, "%s.host", member_base);
-      mg_json_get_bool(json, path, &member->host);
-      snprintf(path, sizeof path, "%s.muted", member_base);
-      mg_json_get_bool(json, path, &member->muted);
-      snprintf(path, sizeof path, "%s.deafened", member_base);
-      mg_json_get_bool(json, path, &member->deafened);
-      if (member->deafened) member->muted = true;
-    }
-  }
-}
-
-static void parse_voice_state(struct mg_str json) {
-  bool was_deafened = S.voice_deafened;
-  /* Voice enabled is a local, persistent player preference. A delayed state
-     packet from the backend must not turn it off after a refresh/reconnect;
-     only vlither_voice_set_enabled(), called by the player's UI, may change
-     this value. */
-  if (S.env && S.env->usr)
-    S.voice_enabled = S.env->usr->usrs.voice_chat_enabled;
-  bool muted = S.voice_muted;
-  bool deafened = S.voice_deafened;
-  mg_json_get_bool(json, "$.muted", &muted);
-  mg_json_get_bool(json, "$.deafened", &deafened);
-  S.voice_deafened = deafened;
-  S.voice_muted = muted || deafened;
-  if (!deafened) S.voice_muted_before_deafen = S.voice_muted;
-  char *room_id = mg_json_get_str(json, "$.room.id");
-  S.voice_in_room = room_id && room_id[0];
-  S.voice_room_host = false;
-  S.voice_room_id[0] = 0;
-  S.voice_room_name[0] = 0;
-  memset(S.voice_members, 0, sizeof S.voice_members);
-  S.voice_member_count = 0;
-  if (S.voice_in_room) {
-    strncpy(S.voice_room_id, room_id, sizeof S.voice_room_id - 1);
-    S.voice_room_id[sizeof S.voice_room_id - 1] = 0;
-    copy_json_string(json, "$.room.name", S.voice_room_name,
-                     sizeof S.voice_room_name, "Voice Room");
-    bool host = false;
-    mg_json_get_bool(json, "$.room.host", &host);
-    S.voice_room_host = host;
-
-    for (int i = 0; i < VLITHER_VOICE_MEMBER_MAX; ++i) {
-      char base[80], path[112];
-      snprintf(base, sizeof base, "$.room.memberList[%d]", i);
-      snprintf(path, sizeof path, "%s.nickname", base);
-      char *nick = mg_json_get_str(json, path);
-      if (!nick) break;
-      vlither_voice_member *member =
-          &S.voice_members[S.voice_member_count++];
-      strncpy(member->nick, nick[0] ? nick : "Vlither",
-              sizeof member->nick - 1);
-      mg_free(nick);
-      snprintf(path, sizeof path, "%s.clientId", base);
-      copy_json_string(json, path, member->client_id,
-                       sizeof member->client_id, "");
-      snprintf(path, sizeof path, "%s.host", base);
-      mg_json_get_bool(json, path, &member->host);
-      snprintf(path, sizeof path, "%s.muted", base);
-      mg_json_get_bool(json, path, &member->muted);
-      snprintf(path, sizeof path, "%s.deafened", base);
-      mg_json_get_bool(json, path, &member->deafened);
-      if (member->deafened) member->muted = true;
-    }
-  }
-  if (room_id) mg_free(room_id);
-  char *message = mg_json_get_str(json, "$.message");
-  if (message) {
-    strncpy(S.voice_status, message, sizeof S.voice_status - 1);
-    S.voice_status[sizeof S.voice_status - 1] = 0;
-    mg_free(message);
-  } else if (!S.voice_enabled) {
-    strncpy(S.voice_status, "Voice chat is off.", sizeof S.voice_status - 1);
-  } else if (S.voice_in_room) {
-    snprintf(S.voice_status, sizeof S.voice_status, "Room: %s",
-             S.voice_room_name[0] ? S.voice_room_name : "Voice Room");
-  } else {
-    strncpy(S.voice_status, "Proximity voice is active.",
-            sizeof S.voice_status - 1);
-  }
-  S.voice_status[sizeof S.voice_status - 1] = 0;
-#ifdef ANDROID
-  if (S.voice_deafened && !was_deafened)
-    android_jni_voice_stop_playback();
-#endif
-  voice_apply_audio_state();
-}
-
-static void handle_voice_binary(struct mg_str data) {
-#ifdef ANDROID
-  if (!S.voice_enabled || S.voice_deafened) return;
-  const unsigned char *bytes = (const unsigned char *)data.buf;
-  if (!bytes || data.len < 8 || bytes[0] != 0x56 || bytes[1] != 1 ||
-      bytes[2] != 2) return;
-  unsigned int gain_byte = bytes[3];
-  size_t id_len = bytes[4];
-  if (id_len < 1 || id_len > 64 || data.len <= 5 + id_len) return;
-  size_t pcm_len = data.len - 5 - id_len;
-  if (pcm_len < 2 || pcm_len > VLITHER_VOICE_FRAME_MAX || (pcm_len & 1u))
-    return;
-  char speaker[65];
-  memcpy(speaker, bytes + 5, id_len);
-  speaker[id_len] = 0;
-  S.voice_rx_frames++;
-  android_jni_voice_play_pcm(speaker, bytes + 5 + id_len, pcm_len,
-                             (float)gain_byte / 255.0f);
-#else
-  (void)data;
-#endif
-}
-
 static void handle_ws_json(struct mg_str json) {
   char *type = mg_json_get_str(json, "$.type");
   if (!type) return;
@@ -772,6 +589,11 @@ static void handle_ws_json(struct mg_str json) {
     else {
       S.player_count = 0;
     }
+  } else if (!strcmp(type, "presence_delta")) {
+    if (vlither_chat_joined()) parse_presence_delta(json);
+    else {
+      S.player_count = 0;
+    }
   } else if (!strcmp(type, "events")) {
     parse_events(json);
   } else if (!strcmp(type, "event_error")) {
@@ -784,20 +606,6 @@ static void handle_ws_json(struct mg_str json) {
     if (S.ws && S.ws_open) {
       static const char refresh[] = "{\"type\":\"events_get\"}";
       mg_ws_send(S.ws, refresh, sizeof refresh - 1, WEBSOCKET_OP_TEXT);
-    }
-  } else if (!strcmp(type, "voice_rooms")) {
-    if (vlither_chat_joined()) parse_voice_rooms(json);
-  } else if (!strcmp(type, "voice_state")) {
-    if (vlither_chat_joined()) parse_voice_state(json);
-  } else if (!strcmp(type, "voice_tx_status")) {
-    if (vlither_chat_joined())
-      S.voice_listener_count = (int)mg_json_get_long(json, "$.listeners", 0);
-  } else if (!strcmp(type, "voice_error")) {
-    char *message = mg_json_get_str(json, "$.message");
-    if (message) {
-      strncpy(S.voice_status, message, sizeof S.voice_status - 1);
-      S.voice_status[sizeof S.voice_status - 1] = 0;
-      mg_free(message);
     }
   } else if (!strcmp(type, "state")) {
     clear_snake_mappings();
@@ -845,9 +653,7 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
     set_status("Vlither services connected.");
   } else if (ev == MG_EV_WS_MSG) {
     struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
-    if ((wm->flags & 0x0f) == WEBSOCKET_OP_BINARY)
-      { if (vlither_chat_joined()) handle_voice_binary(wm->data); }
-    else
+    if ((wm->flags & 0x0f) != WEBSOCKET_OP_BINARY)
       handle_ws_json(wm->data);
   } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
     if (S.ws == c) {
@@ -855,14 +661,6 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
       S.ws_open = false;
       S.hello_sent = false;
       S.player_count = 0;
-      S.voice_listener_count = 0;
-#ifdef ANDROID
-      /* Do not keep recording or playing a stale queue while relay is down.
-         Open mic resumes automatically after the socket reconnects. */
-      android_jni_voice_set_capture(false);
-      S.voice_capture_requested = false;
-      android_jni_voice_stop_playback();
-#endif
       S.next_connect = mg_millis() / 1000.0 + VLITHER_TAG_RECONNECT_SECONDS;
       clear_snake_mappings();
       set_status("Vlither services reconnecting...");
@@ -925,16 +723,11 @@ static void send_identity(const char *type) {
                    "\"mapName\":\"%s\",\"sosUntil\":%lld,"
                    "\"version\":\"%s\",\"x\":%.1f,\"y\":%.1f,"
                    "\"fps\":%d,\"ping\":%d,\"chatJoined\":%s,"
-                   "\"profileColor\":\"%s\",\"profileEmoji\":\"%s\","
-                   "\"voiceEnabled\":%s,"
-                   "\"voiceMuted\":%s,\"voiceDeafened\":%s}",
+                   "\"profileColor\":\"%s\",\"profileEmoji\":\"%s\"}",
                    type, client, server, snake_id, nick, map_name,
                    S.local_sos_until_ms, version, x, y, fps, ping,
                    chat_joined ? "true" : "false",
-                   profile_color, profile_emoji,
-                   (chat_joined && S.voice_enabled) ? "true" : "false",
-                   (S.voice_muted || S.voice_deafened) ? "true" : "false",
-                   S.voice_deafened ? "true" : "false");
+                   profile_color, profile_emoji);
   if (n > 0 && n < (int)sizeof json) {
     mg_ws_send(S.ws, json, (size_t)n, WEBSOCKET_OP_TEXT);
     S.hello_sent = true;
@@ -1129,14 +922,8 @@ static bool redeem_code(const char *code) {
 void vlither_tags_init(tenv *env) {
   memset(&S, 0, sizeof S);
   S.env = env;
-  if (env && env->usr)
-    S.voice_enabled = env->usr->usrs.voice_chat_enabled;
   set_status("Enter your Vlither tag activation code.");
   strncpy(S.event_status, "Loading events...", sizeof S.event_status - 1);
-  strncpy(S.voice_status,
-          S.voice_enabled ? "Voice chat will reconnect automatically."
-                          : "Voice chat is off.",
-          sizeof S.voice_status - 1);
   mg_mgr_init(&S.mgr);
   S.ready = true;
 }
@@ -1146,34 +933,6 @@ void vlither_tags_update(tenv *env) {
   if (env) S.env = env;
   mg_mgr_poll(&S.mgr, 0);
 
-  /* Open mic follows the voice status instead of the visible screen. This is
-     what lets a room keep working while the panel is closed or gameplay is
-     active. Muting/deafening and socket loss still stop capture immediately. */
-  voice_apply_audio_state();
-#ifdef ANDROID
-  if (vlither_chat_joined() && S.voice_enabled && !S.voice_muted && !S.voice_deafened &&
-      S.ws && S.ws_open) {
-    unsigned char pcm[VLITHER_VOICE_FRAME_MAX];
-    size_t pcm_len = 0;
-    int sent = 0;
-    /* Drain only the audio needed for this rendered frame.  Eight JNI calls
-       in one frame produced catch-up bursts after a hitch; the Android queue
-       already drops its oldest frame when full, keeping voice live. */
-    while (sent < 2 && S.ws->send.len < VLITHER_WS_BACKPRESSURE_BYTES &&
-           android_jni_voice_poll_capture(
-                           pcm, sizeof pcm, &pcm_len)) {
-      if (pcm_len >= 2 && pcm_len <= VLITHER_VOICE_FRAME_MAX && !(pcm_len & 1u)) {
-        unsigned char packet[VLITHER_VOICE_FRAME_MAX + 4];
-        packet[0] = 0x56; packet[1] = 1; packet[2] = 1; packet[3] = 0;
-        memcpy(packet + 4, pcm, pcm_len);
-        size_t queued = mg_ws_send(S.ws, packet, pcm_len + 4,
-                                   WEBSOCKET_OP_BINARY);
-        if (queued > pcm_len + 4) S.voice_tx_frames++;
-      }
-      ++sent;
-    }
-  }
-#endif
   double now = mg_millis() / 1000.0;
   if (S.http && S.http_started > 0 &&
       now - S.http_started > VLITHER_TAG_HTTP_TIMEOUT_SECONDS) {
@@ -1225,11 +984,6 @@ void vlither_tags_update(tenv *env) {
 
 void vlither_tags_destroy(tenv *env) {
   if (!S.ready) return;
-#ifdef ANDROID
-  android_jni_voice_set_capture(false);
-  S.voice_capture_requested = false;
-  android_jni_voice_stop_playback();
-#endif
   tcontext *ctx = env ? env->ctx : (S.env ? S.env->ctx : NULL);
   if (S.atlas_ds) igImplVulkan_RemoveTexture(S.atlas_ds);
   if (S.atlas_tex && ctx) destroy_texture(ctx, S.atlas_tex);
@@ -1382,20 +1136,6 @@ bool vlither_chat_player_sos(int index) {
   return index >= 0 && index < S.player_count &&
          S.players[index].sos_until_ms > (long long)time(NULL) * 1000LL;
 }
-bool vlither_chat_player_voice_enabled(int index) {
-  return index >= 0 && index < S.player_count && S.players[index].voice_enabled;
-}
-bool vlither_chat_player_voice_muted(int index) {
-  return index >= 0 && index < S.player_count &&
-         (S.players[index].voice_muted || S.players[index].voice_deafened);
-}
-bool vlither_chat_player_voice_deafened(int index) {
-  return index >= 0 && index < S.player_count && S.players[index].voice_deafened;
-}
-const char *vlither_chat_player_voice_room_id(int index) {
-  return index >= 0 && index < S.player_count
-             ? S.players[index].voice_room_id : "";
-}
 
 int vlither_profile_emoji_count(void) {
   return VLITHER_PROFILE_EMOJI_COUNT;
@@ -1498,17 +1238,6 @@ void vlither_chat_set_joined(bool joined) {
     S.player_count = 0;
     clear_chat_messages();
     clear_snake_mappings();
-    S.voice_in_room = false;
-    S.voice_room_id[0] = 0;
-    S.voice_room_name[0] = 0;
-    S.voice_room_count = 0;
-    S.voice_member_count = 0;
-    S.voice_listener_count = 0;
-#ifdef ANDROID
-    android_jni_voice_set_capture(false);
-    S.voice_capture_requested = false;
-    android_jni_voice_stop_playback();
-#endif
     set_status("Left Vlither Chat.");
   }
   if (S.ws_open) send_identity("heartbeat");
@@ -1626,306 +1355,6 @@ bool vlither_event_set_interested(int index, bool interested) {
            interested ? "Interested saved. Event reminder requested."
                       : "Interest removed and reminder cancelled.");
   return true;
-}
-
-static bool send_voice_json(const char *json) {
-  if (!vlither_chat_joined() || !S.ready || !S.ws || !S.ws_open || !json ||
-      !json[0]) return false;
-  /* A room command must never overtake the first identity packet. The backend
-     cannot attach voice state to this socket until hello has been sent. */
-  if (!S.hello_sent) send_identity("hello");
-  if (!S.hello_sent) return false;
-  mg_ws_send(S.ws, json, strlen(json), WEBSOCKET_OP_TEXT);
-  return true;
-}
-
-bool vlither_voice_enabled(void) {
-  return vlither_chat_joined() && S.voice_enabled;
-}
-bool vlither_voice_in_room(void) {
-  return vlither_chat_joined() && S.voice_in_room;
-}
-bool vlither_voice_room_host(void) { return S.voice_room_host; }
-bool vlither_voice_muted(void) { return S.voice_muted || S.voice_deafened; }
-bool vlither_voice_deafened(void) { return S.voice_deafened; }
-const char *vlither_voice_room_id(void) { return S.voice_room_id; }
-const char *vlither_voice_room_name(void) { return S.voice_room_name; }
-const char *vlither_voice_status(void) { return S.voice_status; }
-int vlither_voice_room_count(void) { return S.voice_room_count; }
-const char *vlither_voice_room_id_at(int index) {
-  return index >= 0 && index < S.voice_room_count ? S.voice_rooms[index].id : "";
-}
-const char *vlither_voice_room_name_at(int index) {
-  return index >= 0 && index < S.voice_room_count ? S.voice_rooms[index].name : "";
-}
-bool vlither_voice_room_locked_at(int index) {
-  return index >= 0 && index < S.voice_room_count ? S.voice_rooms[index].locked : false;
-}
-int vlither_voice_room_members_at(int index) {
-  return index >= 0 && index < S.voice_room_count ? S.voice_rooms[index].members : 0;
-}
-int vlither_voice_room_max_at(int index) {
-  return index >= 0 && index < S.voice_room_count ? S.voice_rooms[index].max_players : 0;
-}
-int vlither_voice_room_member_count_at(int room_index) {
-  return room_index >= 0 && room_index < S.voice_room_count
-             ? S.voice_rooms[room_index].member_count
-             : 0;
-}
-const char *vlither_voice_room_member_name_at(int room_index,
-                                              int member_index) {
-  if (room_index < 0 || room_index >= S.voice_room_count) return "";
-  vlither_voice_room *room = &S.voice_rooms[room_index];
-  return member_index >= 0 && member_index < room->member_count
-             ? room->member_list[member_index].nick
-             : "";
-}
-bool vlither_voice_room_member_host_at(int room_index, int member_index) {
-  if (room_index < 0 || room_index >= S.voice_room_count) return false;
-  vlither_voice_room *room = &S.voice_rooms[room_index];
-  return member_index >= 0 && member_index < room->member_count
-             ? room->member_list[member_index].host
-             : false;
-}
-bool vlither_voice_room_member_muted_at(int room_index, int member_index) {
-  if (room_index < 0 || room_index >= S.voice_room_count) return false;
-  vlither_voice_room *room = &S.voice_rooms[room_index];
-  return member_index >= 0 && member_index < room->member_count
-             ? room->member_list[member_index].muted
-             : false;
-}
-bool vlither_voice_room_member_deafened_at(int room_index, int member_index) {
-  if (room_index < 0 || room_index >= S.voice_room_count) return false;
-  vlither_voice_room *room = &S.voice_rooms[room_index];
-  return member_index >= 0 && member_index < room->member_count
-             ? room->member_list[member_index].deafened
-             : false;
-}
-int vlither_voice_member_count(void) { return S.voice_member_count; }
-const char *vlither_voice_member_name_at(int index) {
-  return index >= 0 && index < S.voice_member_count
-             ? S.voice_members[index].nick
-             : "";
-}
-bool vlither_voice_member_host_at(int index) {
-  return index >= 0 && index < S.voice_member_count
-             ? S.voice_members[index].host
-             : false;
-}
-bool vlither_voice_member_muted_at(int index) {
-  return index >= 0 && index < S.voice_member_count
-             ? S.voice_members[index].muted
-             : false;
-}
-bool vlither_voice_member_deafened_at(int index) {
-  return index >= 0 && index < S.voice_member_count
-             ? S.voice_members[index].deafened
-             : false;
-}
-
-unsigned long long vlither_voice_tx_frames(void) { return S.voice_tx_frames; }
-unsigned long long vlither_voice_rx_frames(void) { return S.voice_rx_frames; }
-int vlither_voice_listener_count(void) { return S.voice_listener_count; }
-int vlither_voice_audio_state(void) {
-#ifdef ANDROID
-  return android_jni_voice_audio_state();
-#else
-  return 0;
-#endif
-}
-
-bool vlither_voice_set_enabled(bool enabled) {
-  if (!vlither_chat_joined()) {
-    set_voice_status("Join Vlither Chat to use voice.");
-    return false;
-  }
-  /* Persist only an explicit player action. Server state packets never write
-     this setting, so refreshing or reconnecting cannot silently disable
-     Voice Chat. */
-  if (S.env && S.env->usr) {
-    user_settings *us = &S.env->usr->usrs;
-    if (us->voice_chat_enabled != enabled) {
-      us->voice_chat_enabled = enabled;
-      save_user_settings(us);
-    }
-  }
-  S.voice_enabled = enabled;
-  S.voice_listener_count = 0;
-  if (enabled) {
-    S.voice_muted = false;
-    S.voice_deafened = false;
-    S.voice_muted_before_deafen = false;
-  }
-#ifdef ANDROID
-  if (enabled) {
-    /* Voice is open-mic. Request permission as part of the explicit Enable
-       action, then start capture as soon as Android grants it. */
-    android_jni_voice_prepare();
-  } else {
-    android_jni_voice_set_capture(false);
-    S.voice_capture_requested = false;
-    android_jni_voice_stop_playback();
-  }
-#endif
-  char json[160];
-  snprintf(json, sizeof json,
-           "{\"type\":\"voice_enable\",\"enabled\":%s,"
-           "\"muted\":%s,\"deafened\":%s}",
-           enabled ? "true" : "false",
-           vlither_voice_muted() ? "true" : "false",
-           S.voice_deafened ? "true" : "false");
-  bool ok = send_voice_json(json);
-  if (enabled) {
-    strncpy(S.voice_status, "Voice enabled. Open mic is active.",
-            sizeof S.voice_status - 1);
-    send_voice_json("{\"type\":\"voice_rooms\"}");
-  } else {
-    S.voice_in_room = false;
-    S.voice_room_id[0] = 0;
-    S.voice_room_name[0] = 0;
-    S.voice_member_count = 0;
-    memset(S.voice_members, 0, sizeof S.voice_members);
-    strncpy(S.voice_status, "Voice chat is off.", sizeof S.voice_status - 1);
-  }
-  S.voice_status[sizeof S.voice_status - 1] = 0;
-  voice_apply_audio_state();
-  return ok;
-}
-
-bool vlither_voice_refresh_rooms(void) {
-  return send_voice_json("{\"type\":\"voice_rooms\"}");
-}
-
-bool vlither_voice_create_room(const char *name, const char *password) {
-  if (!S.voice_enabled) {
-    set_voice_status("Enable Voice Chat before creating a room.");
-    return false;
-  }
-  if (!S.ws || !S.ws_open) {
-    set_voice_status("Voice server is reconnecting. Try again in a moment.");
-    return false;
-  }
-
-  while (name && isspace((unsigned char)*name)) ++name;
-  size_t name_len = name ? strlen(name) : 0;
-  while (name_len > 0 && isspace((unsigned char)name[name_len - 1]))
-    --name_len;
-  if (name_len == 0) {
-    set_voice_status("Enter a room name.");
-    return false;
-  }
-  if (name_len > 36) name_len = 36;
-  char clean_name[37], ename[128], pass_hash[65];
-  memcpy(clean_name, name, name_len);
-  clean_name[name_len] = 0;
-  json_escape(ename, sizeof ename, clean_name);
-  voice_password_hash_hex(pass_hash, password ? password : "");
-  char json[384];
-  int n = snprintf(json, sizeof json,
-                   "{\"type\":\"voice_create\",\"name\":\"%s\","
-                   "\"passwordHash\":\"%s\",\"maxPlayers\":12}",
-                   ename, pass_hash);
-  bool sent = n > 0 && n < (int)sizeof json && send_voice_json(json);
-  set_voice_status(sent ? "Creating voice room..."
-                        : "Could not send the room request. Reconnect and try again.");
-  return sent;
-}
-
-bool vlither_voice_join_room(const char *room_id, const char *password) {
-  if (!S.voice_enabled) {
-    set_voice_status("Enable Voice Chat before joining a room.");
-    return false;
-  }
-  if (!S.ws || !S.ws_open) {
-    set_voice_status("Voice server is reconnecting. Try again in a moment.");
-    return false;
-  }
-  if (!room_id || !room_id[0]) {
-    set_voice_status("Select a voice room first.");
-    return false;
-  }
-  char eroom[64], pass_hash[65];
-  json_escape(eroom, sizeof eroom, room_id);
-  voice_password_hash_hex(pass_hash, password ? password : "");
-  char json[320];
-  int n = snprintf(json, sizeof json,
-                   "{\"type\":\"voice_join\",\"roomId\":\"%s\","
-                   "\"passwordHash\":\"%s\"}", eroom, pass_hash);
-  bool sent = n > 0 && n < (int)sizeof json && send_voice_json(json);
-  set_voice_status(sent ? "Joining voice room..."
-                        : "Could not send the join request. Reconnect and try again.");
-  return sent;
-}
-
-bool vlither_voice_leave_room(void) {
-  return send_voice_json("{\"type\":\"voice_leave\"}");
-}
-
-static bool send_voice_status(void) {
-  char json[128];
-  int n = snprintf(json, sizeof json,
-                   "{\"type\":\"voice_status\",\"muted\":%s,"
-                   "\"deafened\":%s}",
-                   vlither_voice_muted() ? "true" : "false",
-                   S.voice_deafened ? "true" : "false");
-  return n > 0 && n < (int)sizeof json && send_voice_json(json);
-}
-
-static void voice_apply_audio_state(void) {
-#ifdef ANDROID
-  /* Keep the Android recorder self-healing while open mic is active.
-     A periodic TRUE refresh restarts an OEM AudioRecord that died without
-     requiring the player to toggle voice off/on. FALSE stops immediately. */
-  bool should_capture = vlither_chat_joined() && S.voice_enabled &&
-                        !vlither_voice_muted() &&
-                        !S.voice_deafened && S.ws && S.ws_open;
-  double now = mg_millis() / 1000.0;
-  if (!should_capture) {
-    if (S.voice_capture_requested)
-      android_jni_voice_set_capture(false);
-    S.voice_capture_requested = false;
-    S.voice_capture_refresh_at = 0.0;
-  } else if (!S.voice_capture_requested || now >= S.voice_capture_refresh_at) {
-    /* A low-frequency refresh lets Kotlin restart a dead OEM AudioRecord
-       without making a JNI call on every rendered frame. */
-    android_jni_voice_set_capture(true);
-    S.voice_capture_requested = true;
-    S.voice_capture_refresh_at = now + 0.5;
-  }
-#endif
-}
-
-bool vlither_voice_set_muted(bool muted) {
-  if (!S.voice_enabled) return false;
-  if (S.voice_deafened) {
-    /* Remember the requested mic state for when speaker audio is restored.
-       Effective mute remains on for the whole deafen period. */
-    S.voice_muted_before_deafen = muted;
-    S.voice_muted = true;
-  } else {
-    S.voice_muted = muted;
-    S.voice_muted_before_deafen = muted;
-  }
-  voice_apply_audio_state();
-  return send_voice_status();
-}
-
-bool vlither_voice_set_deafened(bool deafened) {
-  if (!S.voice_enabled) return false;
-  if (S.voice_deafened == deafened) return true;
-  if (deafened) {
-    S.voice_muted_before_deafen = S.voice_muted;
-    S.voice_muted = true;
-    S.voice_deafened = true;
-#ifdef ANDROID
-    android_jni_voice_stop_playback();
-#endif
-  } else {
-    S.voice_deafened = false;
-    S.voice_muted = S.voice_muted_before_deafen;
-  }
-  voice_apply_audio_state();
-  return send_voice_status();
 }
 
 void vlither_tags_draw(tenv *env, snake *o, float alpha,

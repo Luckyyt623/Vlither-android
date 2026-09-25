@@ -1,7 +1,10 @@
 #include "server.h"
 
 #include "../user.h"
+#include "../game/ntl_team.h"
+#include "../game/oef.h"
 #include "callback.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -95,6 +98,7 @@ void server_poll(tenv* env) {
      render thread or changing normal packet latency. */
   uint64_t previous_rx = gdata->network_rx_bytes;
   for (int i = 0; i < 4; ++i) {
+    ping_note_poll(gdata);
     mg_mgr_poll(&gdata->network_manager, 0);
     if (gdata->closed || !gdata->connection) break;
     uint64_t current_rx = gdata->network_rx_bytes;
@@ -102,6 +106,7 @@ void server_poll(tenv* env) {
     previous_rx = current_rx;
   }
 #else
+  ping_note_poll(gdata);
   mg_mgr_poll(&gdata->network_manager, 0);
 #endif
 }
@@ -140,6 +145,84 @@ const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT] = {
   "Brazil Battledome",
   "Japan Battledome",
 };
+
+/* Servers that receive the persistent client-ID message right after the
+   riddle answer. Kept separate from CUSTOM_SERVER_IPS above (that list
+   drives the visible server picker; this one only gates the ID handshake).
+   Strings must match the "ip:port" format stored in usrs->server_address.
+   TODO: noaha's spec says this list "can update on reload like the tags" —
+   i.e. fetched remotely rather than hardcoded. No endpoint for that was
+   given, so for now it's a compiled-in list; swap in a fetch (mirroring
+   how ntl_tags.c pulls its catalog) once there's a URL for it. */
+#define BD_ID_SERVER_COUNT 10
+static const char* BD_ID_SERVER_IPS[BD_ID_SERVER_COUNT] = {
+  "81.169.165.225:444",
+  "81.169.165.225:446",
+  "45.77.5.207:444",
+  "45.77.5.207:443",
+  "139.84.170.60:444",
+  "139.84.170.60:443",
+  "45.76.102.107:444",
+  "45.76.102.107:443",
+  "216.128.169.33:444",
+  "216.128.169.33:443",
+};
+
+bool server_is_bd_id_target(const char* server_address) {
+  if (!server_address) return false;
+  for (int i = 0; i < BD_ID_SERVER_COUNT; i++) {
+    if (strcmp(server_address, BD_ID_SERVER_IPS[i]) == 0) return true;
+  }
+  return false;
+}
+
+/* !idforce toggle: dev-only override to send the ID packet to any server
+   regardless of BD_ID_SERVER_IPS. Deliberately not part of user_settings
+   (and so never saved) — it resets to off every launch, matching spec. */
+static bool g_bd_id_force = false;
+
+bool server_bd_id_should_send(const char* server_address) {
+  return g_bd_id_force || server_is_bd_id_target(server_address);
+}
+
+bool server_bd_id_handle_command(tenv* env, const char* input) {
+  if (!input) return false;
+  while (isspace((unsigned char)*input)) ++input;
+
+  if (!strncmp(input, "!idlist", 7) &&
+      (!input[7] || isspace((unsigned char)input[7]))) {
+    char msg[300];
+    snprintf(msg, sizeof msg, "Player-ID servers (%s):", g_bd_id_force
+             ? "idforce is ON, sending to all" : "sending to these only");
+    ntl_team_system_message(msg);
+    for (int i = 0; i < BD_ID_SERVER_COUNT; i++)
+      ntl_team_system_message(BD_ID_SERVER_IPS[i]);
+    return true;
+  }
+
+  if (!strncmp(input, "!idforce", 8) &&
+      (!input[8] || isspace((unsigned char)input[8]))) {
+    g_bd_id_force = !g_bd_id_force;
+    ntl_team_system_message(
+        g_bd_id_force
+            ? "Player-ID packet: forced on for every server (dev mode, not saved)."
+            : "Player-ID packet: back to using the server list only.");
+    return true;
+  }
+
+  if (!strncmp(input, "!id", 3) &&
+      (!input[3] || isspace((unsigned char)input[3]))) {
+    if (!env || !env->usr) return true;
+    ensure_bd_client_id(&env->usr->usrs);
+    char msg[64];
+    snprintf(msg, sizeof msg, "Your player ID: %s",
+             env->usr->usrs.bd_client_id);
+    ntl_team_system_message(msg);
+    return true;
+  }
+
+  return false;
+}
 
 static void server_list_seed_custom(game_data* gdata) {
   gdata->server_list.count = 0;

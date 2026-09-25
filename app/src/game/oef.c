@@ -2,9 +2,87 @@
 #include "../android_glfw_shim.h"
 #endif
 #include "oef.h"
+#include <math.h>
 #include "ntl_team.h"
 
 #include "../user.h"
+
+/* High-resolution ms clock for ping timing. ctm is only refreshed once per
+   frame, so timing pings with it would quantise RTT to the frame time. */
+static double ping_clock_ms(void) { return glfwGetTime() * 1000.0; }
+
+void ping_mark_sent(game_data* gdata) {
+  gdata->data.ping_sent_ms = ping_clock_ms();
+}
+
+void ping_note_poll(game_data* gdata) {
+  gdata->data.poll_prev_ms = gdata->data.poll_cur_ms;
+  gdata->data.poll_cur_ms = ping_clock_ms();
+}
+
+void ping_mark_received(game_data* gdata) {
+  /* Pong with no ping in flight (e.g. stray/duplicate): nothing to measure. */
+  if (gdata->data.ping_sent_ms <= 0) return;
+
+  double now = ping_clock_ms();
+  double sent = gdata->data.ping_sent_ms;
+  gdata->data.ping_sent_ms = 0;
+
+  /* NTL runs in a browser, which hands a pong to the page the instant it
+     arrives. Here the socket is only read once per rendered frame, so the
+     pong is seen up to one frame late, and a frame hitch (texture load, TLS
+     handshake, ...) can make it arrive hundreds of ms late even though the
+     network was fine. Bracket the real round trip instead of trusting the
+     read time: the pong was NOT waiting at the previous poll (lower bound)
+     and had arrived by now (upper bound). */
+  double upper = now - sent;
+  double lower = gdata->data.poll_prev_ms - sent;
+  if (lower < 0) lower = 0;
+  if (lower > upper) lower = upper;
+
+  double est;
+  if (upper - lower <= 34.0) {
+    /* Normal frame: take the middle of the (<= 1 frame) window. */
+    est = (lower + upper) * 0.5;
+  } else if (gdata->data.ping_avg_stamp > 0) {
+    /* Long stall on our side: keep the previous ping if it fits the window,
+       otherwise the closest edge, so the stall doesn't show up as lag. */
+    est = (double)gdata->data.ping;
+    if (est < lower) est = lower;
+    if (est > upper) est = upper;
+  } else {
+    est = lower; /* no history yet */
+  }
+
+  int rtt = (int)round(est);
+  if (rtt < 0) rtt = 0;
+
+  /* Current ping: the displayed number only moves once a second (like NTL),
+     not on every pong (~every 250 ms) — updating 4x a second is what was
+     reading as "floating" here even though each value was accurate. Between
+     updates, samples are only collected; the visible number is written once,
+     when the second rolls over. */
+  gdata->data.ping_accum_sum += rtt;
+  gdata->data.ping_accum_count++;
+  if (now - gdata->data.ping_avg_stamp > 1000) {
+    int avg_rtt = (int)round(gdata->data.ping_accum_sum /
+                             gdata->data.ping_accum_count);
+    gdata->data.ping = gdata->data.ping_avg_stamp > 0
+                            ? (gdata->data.ping + avg_rtt) / 2
+                            : avg_rtt;
+    gdata->data.ping_avg_stamp = now;
+    gdata->data.ping_accum_sum = 0;
+    gdata->data.ping_accum_count = 0;
+  }
+
+  /* Peak ping: worst RTT inside a 10 second window (same as NTL). */
+  if (now - gdata->data.ping_peak_stamp > 10000) {
+    gdata->data.ping_peak = rtt;
+    gdata->data.ping_peak_stamp = now;
+  } else if (rtt > gdata->data.ping_peak) {
+    gdata->data.ping_peak = rtt;
+  }
+}
 
 void time_step(tenv* env) {
   tuser_data* usr = env->usr;

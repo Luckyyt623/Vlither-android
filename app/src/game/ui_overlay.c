@@ -204,7 +204,7 @@ void ui_overlay(tenv* env) {
     igSameLine(0, -1);
     igTextColored(
         (ImVec4){ping_col[0], ping_col[1], ping_col[2], 0.6 * lag_norm},
-        "%d ms", gdata->data.ping);
+        "%d(%d) ms", gdata->data.ping, gdata->data.ping_peak);
 
     igTextColored((ImVec4){1, 1, 1, 0.3}, "\ue99c");
     igSameLine(0, -1);

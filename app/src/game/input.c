@@ -6,6 +6,7 @@
 
 #include "../user.h"
 #include "ntl_team.h"
+#include "oef.h"
 
 /* Read by redraw.c. This is a held state (physical or custom on-screen W),
    unlike Vlither's toggle hotkeys, so Skinless Peek feels like NTL. */
@@ -27,6 +28,7 @@ void input(tenv* env) {
     if (gdata->data.ctm - gdata->data.last_ping_mtm > 250) {
       gdata->data.last_ping_mtm = gdata->data.ctm;
       gdata->data.wfpr = true;
+      ping_mark_sent(gdata);
       mg_ws_send(connection, (uint8_t[]){251}, 1, WEBSOCKET_OP_BINARY);
     }
   }
@@ -290,14 +292,6 @@ void input(tenv* env) {
 
   gdata->data.ms_zoom =
       GLM_MAX(MAX_ZOOM_OUT, GLM_MIN(gdata->data.ms_zoom, MAX_ZOOM_IN));
-
-  /* V owns the voice-controls overlay. Check both a physical keyboard and a
-     custom on-screen V key before fake key presses are cleared below. */
-  bool voice_key_pressed =
-      (physical_keys_enabled &&
-       tkeyboard_key_pressed(env->kb, GLFW_KEY_V)) ||
-      (GLFW_KEY_V < 512 && gdata->data.fake_key_pressed[GLFW_KEY_V]);
-  if (voice_key_pressed) ntl_team_handle_voice_key();
 
   ImGuiIO *input_io = igGetIO_Nil();
   bool typing = input_io && input_io->WantTextInput;

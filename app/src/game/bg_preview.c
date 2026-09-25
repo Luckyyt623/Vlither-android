@@ -86,6 +86,7 @@ static void bg_preview_bot_input(tenv* env) {
     if (gdata->data.ctm - gdata->data.last_ping_mtm > 250) {
       gdata->data.last_ping_mtm = gdata->data.ctm;
       gdata->data.wfpr = true;
+      ping_mark_sent(gdata);
       mg_ws_send(connection, (uint8_t[]){251}, 1, WEBSOCKET_OP_BINARY);
     }
   }

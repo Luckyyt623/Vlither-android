@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.4"
+        private const val CURRENT_VERSION   = "4.7.5"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -209,23 +209,24 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-     Update 4.7.4
+     Update 4.7.5
 
         What's New:
 
-        •Now you can upload background in game backgrounds and on homepage background.
-        •Tags are more fixable now.
-        • Developer can replay your comment.
-        •Tag store is added.
-
-       
+        • Added a randomly generated, 16-character player ID, created the first time you launch the app. It's for custom-server events, so your score can be tracked correctly no matter what nickname or skin you use.
+           - On eligible servers, it's sent as packet 67 (16 bytes), right after the riddle answer and before your nickname/skin.
+           - Three new chat commands: !id (shows your player ID to copy and give to an event host), !idlist (shows which servers currently use this), !idforce (dev use — sends your ID to any server; not saved).
+        • You can now make your own nickname always visible in-game.
+        • Added the "2016 Background" style.
+        • Ping now shows your actual current ping instead of a rolling average.
+        • Head dot now fixed.
 
         Thanks for using Vlither Android!
         Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.4")
+            .setTitle("What's New in v4.7.5")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

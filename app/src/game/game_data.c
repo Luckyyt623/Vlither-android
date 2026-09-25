@@ -564,8 +564,15 @@ void game_data_reset(tenv* env) {
   gdata->data.fr = 0;
   gdata->data.frames = 0;
   gdata->data.fps = 0;
-  gdata->data.cping = 0;
   gdata->data.ping = 0;
+  gdata->data.ping_peak = 0;
+  gdata->data.ping_sent_ms = 0;
+  gdata->data.poll_prev_ms = 0;
+  gdata->data.poll_cur_ms = 0;
+  gdata->data.ping_avg_stamp = 0;
+  gdata->data.ping_accum_sum = 0;
+  gdata->data.ping_accum_count = 0;
+  gdata->data.ping_peak_stamp = 0;
   gdata->data.lb_pos = 0;
   gdata->data.score = 0;
   gdata->data.rank = 0;
@@ -580,7 +587,6 @@ void game_data_reset(tenv* env) {
 
   memset(gdata->data.lb.entries, 0,
          NUM_LEADERBOARD_ENTRIES * sizeof(gdata->data.lb.entries[0]));
-  memset(gdata->data.pings, 0, sizeof(int) * PING_SAMPLE_COUNT);
 
   for (int row = 0; row < gdata->data.mmsz; row++) {
     memset(gdata->data.mm_data + row * MAX_MINIMAP_SIZE, 0, gdata->data.mmsz);

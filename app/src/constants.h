@@ -19,7 +19,6 @@
 #define MAX_MINIMAP_SIZE 512
 #define ARROW_STYLE_COUNT 9
 #define TIMEOUT 8
-#define PING_SAMPLE_COUNT 8
 #define GOOD_PING 30
 #define BAD_PING 60
 #define NUM_LEADERBOARD_ENTRIES 10
@@ -74,7 +73,9 @@ typedef enum screen {
   CONTROLS = 4,
   NTL_PANEL = 5,
   KEYBOARD_EDITOR = 6,
-  VOICE_PANEL = 7,
+  /* 7 was VOICE_PANEL, retired along with Vlither Voice. Left unused rather
+     than reassigned so no stored/serialized screen number silently changes
+     meaning. */
   EVENTS_PANEL = 8,
   RATINGS_PANEL = 9
 } screen;

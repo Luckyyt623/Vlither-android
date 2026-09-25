@@ -50,7 +50,7 @@ typedef struct renderer {
   int bg_variant;
   int bg_custom_variant;
   int bg_failed_variant;
-  /* File mtime/size fingerprint of the user-uploaded background (variant 22)
+  /* File mtime/size fingerprint of the user-uploaded background (variant 23)
      so a re-upload while already on that variant is detected and reloaded —
      the plain bg_custom_variant cache check alone can't see file changes. */
   long long bg_custom_signature;
@@ -63,10 +63,6 @@ typedef struct renderer {
   long long custom_arrow_signature;
   texture* discord_tex;
   VkDescriptorSet discord_ds;
-  /* All four Vlither Voice states share one atlas/descriptor. This keeps the
-     Android Vulkan texture count low and avoids partial icon-load failures. */
-  texture* voice_status_atlas_tex;
-  VkDescriptorSet voice_status_atlas_ds;
 
   VkSampler linear_sampler;
   VkSampler nearest_sampler;

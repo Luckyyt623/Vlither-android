@@ -166,6 +166,8 @@ void ui_settings(tenv* env) {
       igAlignTextToFramePadding();
       igText("Show Vlither tags");
       igAlignTextToFramePadding();
+      igText("Show own nickname");
+      igAlignTextToFramePadding();
       igText("Background style");
       igAlignTextToFramePadding();
       igText("Smooth zoom");
@@ -197,6 +199,8 @@ void ui_settings(tenv* env) {
       igText("Reset minimap position");
       igAlignTextToFramePadding();
       igText("Instant restart");
+      igAlignTextToFramePadding();
+      igText("Instant death");
       igAlignTextToFramePadding();
       igText("Restart with right click");
       igAlignTextToFramePadding();
@@ -293,6 +297,9 @@ void ui_settings(tenv* env) {
       igCheckbox("##show NTL tags", &usrs->show_ntl_tags);
       igCheckbox("##show Vlither tags", &usrs->show_vlither_tags);
       igEndDisabled();
+      igCheckbox("##show own nickname ingame", &usrs->show_own_nickname_ingame);
+      if (igIsItemHovered(0))
+        igSetTooltip("Shows your own nickname above your snake in-game, the same way other players' names are shown. Requires the Show Names hotkey to be active.");
       igSetNextItemWidth(-1);
       igCombo_Str_arr("##background style", &usrs->background_style,
                       (const char*[]){
@@ -300,8 +307,8 @@ void ui_settings(tenv* env) {
                           "Snakey", "Seigaiha", "Rizz", "Red Cube",
                           "Purple Cube", "Paint", "Leaves", "Kitties",
                           "Hex Ice", "Hex B", "Blue Cube", "Asanoha",
-                          "Custom (Upload)"},
-                      17, -1);
+                          "2016 Background", "Custom (Upload)"},
+                      18, -1);
       igCheckbox("##smooth zoom", &usrs->smooth_zoom);
       igSetNextItemWidth(-1);
       igSliderFloat("##zoom step", &usrs->zoom_step, 0.05f, 0.5f, "%.2f",
@@ -336,6 +343,9 @@ void ui_settings(tenv* env) {
         usrs->minimap_rel_y = 0.78f;
       }
       igCheckbox("##instant restart", &usrs->instant_restart);
+      igCheckbox("##instant death", &usrs->instant_death);
+      if (igIsItemHovered(0))
+        igSetTooltip("Skips the after-death spectator view and returns to the homepage right away. Instant restart above takes priority if both are on.");
       igCheckbox("##restart rc", &usrs->restart_rc);
       igCheckbox("##quit mc", &usrs->quit_mc);
 #ifdef ANDROID
@@ -365,7 +375,7 @@ void ui_settings(tenv* env) {
     igSpacing();
     if (igButton("Upload background from gallery", (ImVec2){-1, 0}))
       if (android_jni_request_custom_background()) {
-        usrs->background_style = 16;
+        usrs->background_style = 17;
         save_user_settings(usrs);
       }
 #endif

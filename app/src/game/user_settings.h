@@ -208,10 +208,12 @@ typedef struct user_settings {
   bool vlither_show_player_stats;
   bool ntl_show_player_stats;
 
-  /* v3.0 extension: keep the player's explicit Voice Chat on/off choice
-     across game refreshes and app restarts. This bool reuses the first byte
-     of the original v3.0 reserve, so the binary layout and all later settings
-     remain compatible with existing user.dat files. */
+  /* v3.0 extension: previously the player's Voice Chat on/off choice and
+     whether the in-game voice status icons were hidden. Vlither Voice has
+     been removed, so neither field is read or written anymore — both stay
+     declared, unused, purely to keep every later version's offsetof-based
+     binary layout (v3.1 through v4.7) compatible with existing user.dat
+     files. Do not repurpose or remove them. */
   bool voice_chat_enabled;
   uint8_t voice_settings_reserved[15];
   bool voice_status_icons_hidden;
@@ -345,10 +347,35 @@ typedef struct user_settings {
   int snakey_rain_max_bots;
   char snakey_rain_bot_name[25];
   char snakey_rain_bot_skin[128];
+
+  /* v4.6 extension: persistent 16-char client identifier ("player ID") sent
+     once per connection to Battledome ID-target servers (see
+     server_is_bd_id_target/server_bd_id_should_send), right after the
+     riddle answer and before the nick/skin combo packet. 8 random bytes
+     hex-encoded to 16 lowercase hex characters — same convention as
+     ntl_client_id above — generated once via ensure_bd_client_id() and
+     reused for this install's lifetime. Sent on the wire as-is (16 ASCII
+     bytes), and is exactly what !id prints for copy-paste. */
+  uint8_t bd_id_settings_reserved[16];
+  char bd_client_id[17];
+
+  /* v4.7 extension: instant-death (skip the post-death spectator view and
+     return to the homepage immediately) and showing your own snake's
+     nickname above your head in-game, matching how other players' names
+     already display. Reserve a clean boundary so an older user.dat's tail
+     padding cannot enable or disable either unexpectedly. */
+  uint8_t instant_death_settings_reserved[16];
+  bool instant_death;
+  bool show_own_nickname_ingame;
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);
 void read_user_settings(user_settings* usr_settings);
 void save_user_settings(user_settings* usr_settings);
+
+/* Generates a 16-char hex bd_client_id the first time it's needed (on
+   install it's empty; this fills it in) and persists it immediately.
+   Idempotent — safe to call on every use, mirrors ntl_ensure_client_id. */
+void ensure_bd_client_id(user_settings* usr_settings);
 
 #endif

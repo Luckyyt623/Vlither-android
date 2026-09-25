@@ -7,9 +7,11 @@
 #endif
 #include "callback.h"
 
+#include "server.h"
 #include "../game/food.h"
 #include "../game/snake.h"
 #include "../game/ntl_tags.h"
+#include "../game/oef.h"
 #include "../game/snakey_rain.h"
 #include "../user.h"
 #ifdef ANDROID
@@ -148,6 +150,19 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     uint8_t secret[27] = {0};
     decode_secret(a, a_len, secret);
     mg_ws_send(c, secret, 27, WEBSOCKET_OP_BINARY);
+
+    /* Battledome client identifier: a persistent 16-char ID (8 random bytes
+       hex-encoded), created once and reused for this install's lifetime.
+       Per noaha's v9.68 spec, sent as [67][16 ID bytes] right after the
+       riddle answer and before the nick/skin combo packet below. Gated to
+       BD ID-target servers, or any server if !idforce is on. */
+    if (server_bd_id_should_send(usrs->server_address)) {
+      ensure_bd_client_id(usrs);
+      uint8_t bd_msg[1 + 16];
+      bd_msg[0] = BD_ID_OPCODE;
+      memcpy(bd_msg + 1, usrs->bd_client_id, 16);
+      mg_ws_send(c, bd_msg, sizeof bd_msg, WEBSOCKET_OP_BINARY);
+    }
 
     int nick_len = strlen(usrs->nickname);
     uint8_t* ba = NULL;
@@ -897,8 +912,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     }
   } else if (cmd == 'p') {
     gdata->data.wfpr = false;
-    gdata->data.pings[gdata->data.cping] = gdata->data.ctm - gdata->data.last_ping_mtm;
-    gdata->data.cping = (gdata->data.cping + 1) % PING_SAMPLE_COUNT;
+    ping_mark_received(gdata);
     if (gdata->data.lagging) {
       gdata->data.etm *= gdata->data.lag_mult;
       gdata->data.lagging = false;
@@ -1355,6 +1369,13 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
 
     if (usrs->instant_restart) {
       gdata->restart_req = true;
+      c->is_closing = true;
+    } else if (usrs->instant_death) {
+      /* Skip the after-death spectator/follow view entirely and drop
+         straight to the homepage — mirrors the manual Quit path (see
+         game_loop's HOTKEY_QUIT handling) rather than reconnecting. */
+      gdata->suppress_reconnect = true;
+      gdata->restart_req = false;
       c->is_closing = true;
     }
   }

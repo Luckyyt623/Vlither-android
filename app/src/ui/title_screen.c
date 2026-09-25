@@ -84,17 +84,17 @@ static void apply_homepage_background(tenv* env) {
     return;
   }
 
-  /* Gameplay owns variants 0..15. Homepage scenes are 16..21 and share the
+  /* Gameplay owns variants 0..16. Homepage scenes are 17..22 and share the
      same one-texture lazy slot, so only the currently selected photo lives in
      GPU memory. The user-uploaded image (selected == 7) is a separate slot,
-     variant 22, shared with the in-game "Custom (Upload)" background. */
+     variant 23, shared with the in-game "Custom (Upload)" background. */
   int homepage_variant;
   float brightness;
   if (selected == 7) {
-    homepage_variant = 22;
+    homepage_variant = 23;
     brightness = 1.0f; /* it's the user's own photo — don't dim it */
   } else {
-    homepage_variant = 15 + selected;
+    homepage_variant = 16 + selected;
     static const float scene_brightness[] = {
         1.00f, 0.68f, 0.74f, 0.76f, 0.76f, 0.88f, 0.72f};
     brightness = scene_brightness[selected];
@@ -844,20 +844,13 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
                   frame_height * 5);
-  if (igButton("Voice Chat", (ImVec2){logo_size})) {
-    usr->gdata.curr_screen = VOICE_PANEL;
-  }
-
-  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
-                  frame_height * 6);
   if (igButton("Tags store", (ImVec2){logo_size})) {
     android_jni_open_webview("https://vlitherandroid.onrender.com/store");
   }
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 8 +
-                  frame_height * 7);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
+                  frame_height * 6);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);

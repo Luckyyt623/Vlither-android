@@ -2,11 +2,14 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <thermite.h>
+
+#include "../external/mongoose.h"
 
 #ifdef ANDROID
 #include "../android_path.h"
@@ -325,6 +328,42 @@ void user_settings_default(user_settings* usr_settings) {
   strcpy(usr_settings->snakey_rain_bot_skin,
          "uuuuuuuauuuuuuaauuuuuaaauuuuaaaauuuaaaaauuaaaaaauaaaaaaa"
          "uuaaaaaauuuaaaaauuuuaaaauuuuuaaauuuuuuaa");
+
+  memset(usr_settings->bd_id_settings_reserved, 0,
+         sizeof usr_settings->bd_id_settings_reserved);
+  usr_settings->bd_client_id[0] = 0;
+
+  memset(usr_settings->instant_death_settings_reserved, 0,
+         sizeof usr_settings->instant_death_settings_reserved);
+  usr_settings->instant_death = true;
+  usr_settings->show_own_nickname_ingame = false;
+}
+
+static bool bd_client_id_is_valid(const char* id) {
+  if (!id || strlen(id) != 16) return false;
+  for (int i = 0; i < 16; ++i) {
+    char c = id[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+  }
+  return true;
+}
+
+void ensure_bd_client_id(user_settings* usr_settings) {
+  if (!usr_settings || bd_client_id_is_valid(usr_settings->bd_client_id))
+    return;
+
+  unsigned char random_bytes[8] = {0};
+  if (!mg_random(random_bytes, sizeof random_bytes)) {
+    uint64_t fallback = mg_millis() ^ (uintptr_t)usr_settings;
+    for (int i = 0; i < 8; ++i)
+      random_bytes[i] = (unsigned char)(fallback >> (i * 8));
+  }
+  snprintf(usr_settings->bd_client_id, sizeof usr_settings->bd_client_id,
+           "%02x%02x%02x%02x%02x%02x%02x%02x", random_bytes[0],
+           random_bytes[1], random_bytes[2], random_bytes[3],
+           random_bytes[4], random_bytes[5], random_bytes[6],
+           random_bytes[7]);
+  save_user_settings(usr_settings);
 }
 
 void write_default_settings(user_settings* usr_settings) {
@@ -412,11 +451,24 @@ void read_user_settings(user_settings* usr_settings) {
       offsetof(user_settings, friends_panel_settings_reserved);
   size_t v45_prefix =
       offsetof(user_settings, snakey_rain_settings_reserved);
+  size_t v46_prefix =
+      offsetof(user_settings, bd_id_settings_reserved);
+  size_t v47_prefix =
+      offsetof(user_settings, instant_death_settings_reserved);
   bool migrate_single_mode_features =
       (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v47_prefix)
+    /* Preserve every v4.6 Battledome client-ID value while leaving the new
+       instant-death and own-nickname options on their defaults. */
+    bytes_to_read = v47_prefix;
+  else if ((size_t)file_size >= v46_prefix)
+    /* Preserve every v4.5 Snakey Rain preference while leaving the new
+       Battledome client ID ungenerated until the player first connects to a
+       BD ID-target server. */
+    bytes_to_read = v46_prefix;
   else if ((size_t)file_size >= v45_prefix)
     /* Preserve every v4.4 value while keeping Snakey Rain disabled until the
        player explicitly opts in from the homepage. */
@@ -610,6 +662,14 @@ void read_user_settings(user_settings* usr_settings) {
   }
   if (!valid_ntl_client_id) loaded.ntl_client_id[0] = 0;
 
+  loaded.bd_client_id[16] = 0;
+  bool valid_bd_client_id = strlen(loaded.bd_client_id) == 16;
+  for (int i = 0; valid_bd_client_id && i < 16; ++i) {
+    char c = loaded.bd_client_id[i];
+    valid_bd_client_id = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+  }
+  if (!valid_bd_client_id) loaded.bd_client_id[0] = 0;
+
   loaded.ntl_tag_password_md5[32] = 0;
   bool valid_tag_hash = !loaded.ntl_tag_password_md5[0] ||
                         strlen(loaded.ntl_tag_password_md5) == 32;
@@ -638,7 +698,7 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.show_ntl_tags = !!loaded.show_ntl_tags;
   loaded.show_vlither_tags = !!loaded.show_vlither_tags;
 
-  if (loaded.background_style < 0 || loaded.background_style > 16)
+  if (loaded.background_style < 0 || loaded.background_style > 17)
     loaded.background_style = 0;
   if (loaded.cursor_size < 24 || loaded.cursor_size > 128)
     loaded.cursor_size = 48;
@@ -817,6 +877,9 @@ void read_user_settings(user_settings* usr_settings) {
     strcpy(loaded.snakey_rain_bot_skin,
            "uuuuuuuauuuuuuaauuuuuaaauuuuaaaauuuaaaaauuaaaaaauaaaaaaa"
            "uuaaaaaauuuaaaaauuuuaaaauuuuuaaauuuuuuaa");
+
+  loaded.instant_death = !!loaded.instant_death;
+  loaded.show_own_nickname_ingame = !!loaded.show_own_nickname_ingame;
 
   *usr_settings = loaded;
 }

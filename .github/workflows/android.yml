@@ -28,6 +28,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install NDK and CMake
         run: |
@@ -115,7 +117,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-               REPO="Luckyyt623/Vlither_android"
+                  REPO="Luckyyt623/Vlither_android"
           TAG="v${VERSION}"
           RELEASE_NAME="Vlither v${VERSION}"
 

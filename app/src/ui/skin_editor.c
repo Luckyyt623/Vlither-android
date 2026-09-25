@@ -31,7 +31,7 @@ static void apply_skin_editor_background(tenv *env) {
     r->global.bg_blur = 0.0f;
     return;
   }
-  int variant = 15 + selected;
+  int variant = 16 + selected;
   renderer_set_background_variant(r, env->ctx, variant);
   if (r->bg_variant != variant || !r->active_bg_tex) {
     r->global.bg_opacity = 0.0f;

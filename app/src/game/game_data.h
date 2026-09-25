@@ -186,8 +186,8 @@ typedef struct game_data {
     int vfrb;
     int frames;
     int fps;
-    int cping;
-    int ping;
+    int ping;      /* NTL-style current ping (ms) */
+    int ping_peak; /* NTL-style peak ping over ~10 s (ms), shown in ( ) */
     int score;
     int lb_pos;
     int rank;
@@ -200,7 +200,15 @@ typedef struct game_data {
     float* fmlts;
     float* fpsls;
 
-    float pings[PING_SAMPLE_COUNT];
+    /* NTL ping system timestamps (glfwGetTime() in ms, double so they keep
+       sub-ms precision on long sessions). */
+    double ping_sent_ms;
+    double poll_prev_ms; /* start of the previous network poll */
+    double poll_cur_ms;  /* start of the current network poll */
+    double ping_avg_stamp;
+    double ping_accum_sum;
+    int ping_accum_count;
+    double ping_peak_stamp;
     float xfas[GD_EEZ];
     float afas[GD_AFC];
     float vfas[GD_VFC];

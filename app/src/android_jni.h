@@ -67,17 +67,6 @@ typedef struct android_ime_event {
 bool android_jni_poll_ime_event(android_ime_event* out_event);
 void android_jni_release_ime_event(android_ime_event* event);
 
-/* Vlither Voice Android bridge. PCM is signed 16-bit little-endian, mono,
-   16 kHz. Capture packets are queued by Kotlin and drained by the native
-   Mongoose/WebSocket loop on the render thread. */
-bool android_jni_voice_poll_capture(unsigned char* out, size_t cap, size_t* out_len);
-void android_jni_voice_prepare(void);
-int android_jni_voice_audio_state(void);
-void android_jni_voice_set_capture(bool active);
-void android_jni_voice_play_pcm(const char* speaker_id, const unsigned char* pcm,
-                                size_t len, float gain);
-void android_jni_voice_stop_playback(void);
-
 /* Local gameplay capture. The native client supplies persisted choices and
    whether a real (non-preview) server session is active. Android handles the
    MediaProjection consent/foreground service and MediaStore output. */

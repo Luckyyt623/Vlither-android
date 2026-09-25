@@ -257,7 +257,7 @@ void redraw(tenv* env) {
                 score_rep);
         sprintf(nk_label_buff, "%s%s", o->nk, score_rep_str);
 
-        if (o->id != gdata->data.snake_id) {
+        if (o->id != gdata->data.snake_id || usrs->show_own_nickname_ingame) {
           float ntx = o->xx + o->fx;
           float nty = o->yy + o->fy;
 
@@ -1640,12 +1640,12 @@ void redraw(tenv* env) {
   usr->r->global.zoom = gdata->data.gsc;
   usr->r->global.grd = gdata->data.grd;
   usr->r->global.bd_radius = gdata->data.flux_grd;
-  /* background_style's "Custom (Upload)" entry (16) shares the same
-     variant-22 slot as the homepage's Custom (Upload) option, one file on
-     disk — the 16..21 range is already used by homepage preset photos. */
+  /* background_style's "Custom (Upload)" entry (17) shares the same
+     variant-23 slot as the homepage's Custom (Upload) option, one file on
+     disk — the 17..22 range is already used by homepage preset photos. */
   renderer_set_background_variant(
       usr->r, env->ctx,
-      usrs->background_style == 16 ? 22 : usrs->background_style);
+      usrs->background_style == 17 ? 23 : usrs->background_style);
   usr->r->global.bd_color[0] = usrs->bd_color[0];
   usr->r->global.bd_color[1] = usrs->bd_color[1];
   usr->r->global.bd_color[2] = usrs->bd_color[2];
@@ -1668,20 +1668,28 @@ void redraw(tenv* env) {
     if (me && me->iiv && !me->dead) {
       float head_alpha = me->alive_amt * (1.0f - me->dead_amt);
       if (head_alpha > 0.01f) {
-        /* Put the marker on the forehead, centered just beyond/above the two
-           eyes in the snake's own facing direction. Eye centers sit about
-           6*sc forward from the head center; this 11.5*sc offset keeps the
-           dot visibly above that eye pair while remaining on the head. */
-        float forehead_offset = 11.5f * me->sc;
+        /* Put the marker right at the front tip of the head, just proud of
+           the surface, in the snake's own facing direction. The head is a
+           capsule of radius 14.5*sc centred on hx,hy (same radius the body
+           segments use — see lsz = 29*ssc a bit further down), so an offset
+           of exactly that radius lands the dot on the surface; a hair more
+           (15.5*sc) floats it just above/ahead of the tip instead of
+           sitting on top of it. */
+        float forehead_offset = 15.5f * me->sc;
         float dot_wx = me->xx + me->fx + cosf(me->ehang) * forehead_offset;
         float dot_wy = me->yy + me->fy + sinf(me->ehang) * forehead_offset;
         float head_x = mww2 + (dot_wx - gdata->data.view_xx) *
                                   gdata->data.gsc;
         float head_y = mhh2 + (dot_wy - gdata->data.view_yy) *
                                   gdata->data.gsc;
-        /* Keep a constant screen-space size. Boosting (and the related
-           snake/zoom scaling) must never make the head dot grow. */
-        const float head_dot_radius_px = 3.75f;
+        /* World-space size (like Frontier's pointer dot): the dot is a small
+           fixed fraction of the snake's own thickness, so it scales with
+           zoom the same way the snake does — bigger in raw pixels when
+           zoomed in, but still reading as a small dot next to the now-much
+           bigger head, and smaller (but present) when zoomed out. Clamped so
+           it never vanishes at max zoom-out or balloons at max zoom-in. */
+        float head_dot_radius_px =
+            GLM_MAX(1.5f, GLM_MIN(2.2f * me->sc * gdata->data.gsc, 9.0f));
         ImDrawList_AddCircleFilled(
             igGetWindowDrawList(), (ImVec2){head_x, head_y}, head_dot_radius_px,
             igColorConvertFloat4ToU32(
@@ -1710,17 +1718,10 @@ void redraw(tenv* env) {
     gdata->data.fps_ltm = gdata->data.ctm;
   }
 
-  float sum = 0;
-  for (int i = 0; i < PING_SAMPLE_COUNT; i++) {
-    sum += gdata->data.pings[i];
-  }
-  sum /= PING_SAMPLE_COUNT;
-
-  gdata->data.ping_follow = glm_lerp(gdata->data.ping_follow,
-                                     GLM_MAX(GOOD_PING, GLM_MIN(sum, BAD_PING)),
-                                     0.1f * gdata->data.vfr);
-
-  if (gdata->data.cping == PING_SAMPLE_COUNT - 1) {
-    gdata->data.ping = (int)roundf(sum);
-  }
+  /* gdata->data.ping / ping_peak are maintained per pong by
+     ping_mark_received() (NTL ping system); this only smooths the colour. */
+  gdata->data.ping_follow = glm_lerp(
+      gdata->data.ping_follow,
+      GLM_MAX(GOOD_PING, GLM_MIN((float)gdata->data.ping, BAD_PING)),
+      0.1f * gdata->data.vfr);
 }
