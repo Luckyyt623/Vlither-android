@@ -31,6 +31,13 @@ typedef struct {
     float zslider_y;
     float zslider_offset;
 
+    /* Double-tap-and-hold-to-boost: a fallback for when the round boost
+       button isn't shown (portrait — see ui_overlay.c). Tracks the most
+       recent primary-finger touch-down so the next one can be recognized as
+       a double tap; only used/populated on Android. */
+    int64_t last_tap_ms;
+    float   last_tap_x, last_tap_y;
+
 } touch_state;
 
 #ifdef ANDROID

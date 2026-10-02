@@ -307,7 +307,7 @@ void input(tenv* env) {
        (shader_key >= 0 && shader_key < 512 &&
         gdata->data.fake_key_pressed[shader_key]));
   if (shader_pressed) {
-    usrs->shader_cycle_index = (usrs->shader_cycle_index + 1) % 3;
+    usrs->shader_cycle_index = (usrs->shader_cycle_index + 1) % 4;
     usrs->modes[0].render_mode = usrs->shader_cycle_index;
     usrs->modes[1].render_mode = usrs->shader_cycle_index;
     save_user_settings(usrs);

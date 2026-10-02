@@ -191,6 +191,11 @@ void android_main(struct android_app* app) {
     android_set_files_dir(app->activity->internalDataPath);
     DLOG("files_dir: %s", app->activity->internalDataPath);
 
+    /* Pick up the saved Auto/Landscape/Portrait choice before any window or
+     * swapchain exists, so the very first logical size is already right. */
+    DLOG("screen orientation mode: %d",
+         android_jni_get_screen_orientation_mode());
+
     tenv env;
     memset(&env, 0, sizeof(tenv));
 
@@ -221,6 +226,10 @@ void android_main(struct android_app* app) {
         return;
     }
     DLOG("Vulkan context created");
+    /* The swapchain picks the real logical size (portrait or landscape);
+     * make the window's copy match before anything reads it. */
+    env.wnd->size[0] = env.ctx->size[0];
+    env.wnd->size[1] = env.ctx->size[1];
 
     DLOG("calling tinit");
     tinit(&env);
@@ -240,6 +249,8 @@ void android_main(struct android_app* app) {
             if (!env.ctx->swapchain_ok &&
                 env.wnd->size[0] > 0 && env.wnd->size[1] > 0) {
                 tcontext_resize(env.ctx, env.wnd->size, env.config.vsync);
+                env.wnd->size[0] = env.ctx->size[0];
+                env.wnd->size[1] = env.ctx->size[1];
                 tresize(&env);
                 DLOG("swapchain rebuilt: %dx%d",
                      env.wnd->size[0], env.wnd->size[1]);
@@ -250,6 +261,25 @@ void android_main(struct android_app* app) {
         twindow_poll_input(env.wnd);
 
         if (!env.config.running) break;
+
+        /* Safety net for rotation: resize/config events can arrive in either
+         * order relative to the activity's orientation updating, so every
+         * half second or so confirm the swapchain still matches the surface
+         * and rebuild it if not. */
+        {
+            static int s_orient_check = 0;
+            if (++s_orient_check >= 30) {
+                s_orient_check = 0;
+                if (tcontext_orientation_stale(env.ctx)) {
+                    tcontext_resize(env.ctx, env.wnd->size, env.config.vsync);
+                    env.wnd->size[0] = env.ctx->size[0];
+                    env.wnd->size[1] = env.ctx->size[1];
+                    tresize(&env);
+                    DLOG("orientation re-sync: %dx%d",
+                         env.wnd->size[0], env.wnd->size[1]);
+                }
+            }
+        }
 
         struct timespec frame_start;
         clock_gettime(CLOCK_MONOTONIC, &frame_start);

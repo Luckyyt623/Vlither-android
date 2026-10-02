@@ -17,9 +17,13 @@ import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Movie
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -79,6 +83,14 @@ class GameActivity : NativeActivity() {
         private const val SETTINGS_FILE_NAME = "user.dat"
         private const val CUSTOM_ARROW_FILE_NAME = "custom_arrow_image"
         private const val CUSTOM_BACKGROUND_FILE_NAME = "custom_background_image"
+        private const val CUSTOM_BACKGROUND_GIF_DIR_NAME = "custom_background_gif"
+        private const val CUSTOM_BACKGROUND_GIF_MANIFEST_NAME = "manifest.txt"
+        /* Kept low because the native renderer has no texture-array support: every
+           frame swap is a full descriptor-set rewrite (see bg_gif_frames in
+           renderer.h), so this is a deliberate trade-off, not a quality choice. */
+        private const val CUSTOM_BACKGROUND_GIF_MAX_FRAMES = 24
+        private const val CUSTOM_BACKGROUND_GIF_MIN_FRAME_MS = 80
+        private const val CUSTOM_BACKGROUND_GIF_MAX_DIMENSION = 480
         private const val BACKUP_MANIFEST_ENTRY = "manifest.txt"
         private const val BACKUP_SETTINGS_ENTRY = "user.dat"
         private const val BACKUP_ARROW_ENTRY = "custom_arrow_image"
@@ -199,6 +211,57 @@ class GameActivity : NativeActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "Could not decode downloaded image", e)
                 null
+            }
+        }
+
+        /* Screen orientation preference: 1 = Landscape (default),
+           2 = Portrait. Stored in SharedPreferences so the
+           launcher (MainActivity) and the game share one choice, and set from
+           the native homepage through JNI. */
+        private const val DISPLAY_PREFS_NAME = "vlither_display_prefs"
+        private const val PREF_ORIENTATION_MODE = "orientation_mode"
+
+        private fun requestedOrientationFor(mode: Int): Int = when (mode) {
+            2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+
+        @JvmStatic
+        fun readOrientationMode(context: Context): Int {
+            val mode = context.getSharedPreferences(DISPLAY_PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(PREF_ORIENTATION_MODE, 1)
+            // 0 was the removed "Auto" mode; old saves fall back to landscape.
+            return if (mode == 2) 2 else 1
+        }
+
+        /** Applies the saved preference to an activity (call from onCreate). */
+        @JvmStatic
+        fun applySavedOrientation(activity: Activity) {
+            try {
+                activity.requestedOrientation =
+                    requestedOrientationFor(readOrientationMode(activity))
+            } catch (e: Exception) {
+                Log.e(TAG, "applySavedOrientation failed", e)
+            }
+        }
+
+        @JvmStatic
+        fun getScreenOrientationMode(activity: Activity): Int =
+            readOrientationMode(activity)
+
+        @JvmStatic
+        fun setScreenOrientationMode(activity: Activity, mode: Int): Boolean {
+            val safeMode = if (mode == 2) 2 else 1
+            return try {
+                activity.getSharedPreferences(DISPLAY_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putInt(PREF_ORIENTATION_MODE, safeMode).apply()
+                activity.runOnUiThread {
+                    activity.requestedOrientation = requestedOrientationFor(safeMode)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not change screen orientation", e)
+                false
             }
         }
 
@@ -1220,6 +1283,7 @@ class GameActivity : NativeActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applySavedOrientation(this)
         super.onCreate(savedInstanceState)
         @Suppress("DEPRECATION")
         window.setFlags(
@@ -1242,6 +1306,82 @@ class GameActivity : NativeActivity() {
         Log.d(TAG, "GameActivity created – loading overlay shown")
     }
 
+    /**
+     * Saves a picked background image to disk for native variant 23
+     * ("Custom (Upload)"), shared by the homepage and the skin editor.
+     *
+     * If the file decodes as a GIF with more than one frame, it's sampled
+     * down to a small, fixed-rate sequence of PNG frames plus a manifest
+     * (frame count + per-frame milliseconds) instead of being copied
+     * verbatim — the native side has no GIF decoder and no texture-array
+     * support, so this is the only practical way to get it animating there.
+     * Anything else (a normal photo, or a GIF with a single frame) is saved
+     * exactly as before: a byte-for-byte copy that the native mipmap loader
+     * decodes itself.
+     *
+     * Whichever kind wins, the other kind's leftovers are deleted so a stale
+     * animation can't keep shadowing a freshly uploaded photo, or vice
+     * versa — the native side always prefers the GIF manifest when present.
+     */
+    private fun saveCustomBackground(bytes: ByteArray) {
+        val gifDir = filesDir.resolve(CUSTOM_BACKGROUND_GIF_DIR_NAME)
+        val staticFile = filesDir.resolve(CUSTOM_BACKGROUND_FILE_NAME)
+
+        val movie = try {
+            Movie.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            null
+        }
+
+        if (movie != null && movie.duration() > 0 && movie.width() > 0 && movie.height() > 0) {
+            gifDir.deleteRecursively()
+            gifDir.mkdirs()
+            try {
+                val duration = movie.duration()
+                val frameMs = maxOf(
+                    CUSTOM_BACKGROUND_GIF_MIN_FRAME_MS,
+                    (duration + CUSTOM_BACKGROUND_GIF_MAX_FRAMES - 1) / CUSTOM_BACKGROUND_GIF_MAX_FRAMES
+                )
+                val frameCount = maxOf(2, minOf(CUSTOM_BACKGROUND_GIF_MAX_FRAMES, duration / frameMs))
+
+                val longSide = maxOf(movie.width(), movie.height())
+                val scale = if (longSide > CUSTOM_BACKGROUND_GIF_MAX_DIMENSION)
+                    CUSTOM_BACKGROUND_GIF_MAX_DIMENSION.toFloat() / longSide else 1f
+                val outW = maxOf(1, (movie.width() * scale).toInt())
+                val outH = maxOf(1, (movie.height() * scale).toInt())
+
+                for (i in 0 until frameCount) {
+                    val t = (i * frameMs).coerceAtMost(duration - 1)
+                    movie.setTime(t)
+                    val bitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bitmap)
+                    canvas.scale(scale, scale)
+                    movie.draw(canvas, 0f, 0f)
+                    val framePath = gifDir.resolve("frame_%03d.png".format(i))
+                    FileOutputStream(framePath).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    }
+                    bitmap.recycle()
+                }
+
+                FileOutputStream(gifDir.resolve(CUSTOM_BACKGROUND_GIF_MANIFEST_NAME)).use { out ->
+                    out.write("$frameCount $frameMs\n".toByteArray())
+                }
+
+                staticFile.delete()
+                Log.d(TAG, "Saved animated custom background: $frameCount frames @ ${frameMs}ms")
+                return
+            } catch (e: Exception) {
+                gifDir.deleteRecursively()
+                Log.e(TAG, "Could not decode animated background, falling back to static", e)
+                /* Fall through to the static path below using the original bytes. */
+            }
+        }
+
+        gifDir.deleteRecursively()
+        FileOutputStream(staticFile).use { output -> output.write(bytes) }
+    }
+
     @Deprecated("Activity result compatibility for NativeActivity")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -1262,23 +1402,24 @@ class GameActivity : NativeActivity() {
         if (requestCode == CUSTOM_BACKGROUND_REQUEST && resultCode == Activity.RESULT_OK) {
             val bgUri = data?.data ?: return
             try {
-                contentResolver.openInputStream(bgUri)?.use { input ->
-                    FileOutputStream(filesDir.resolve(CUSTOM_BACKGROUND_FILE_NAME)).use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var total = 0
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            total += read
-                            if (total > 12 * 1024 * 1024)
-                                throw IllegalArgumentException("Image exceeds 12 MB")
-                            output.write(buffer, 0, read)
-                        }
-                        output.flush()
+                val bytes = contentResolver.openInputStream(bgUri)?.use { input ->
+                    val buffer = ByteArrayOutputStream()
+                    val chunk = ByteArray(64 * 1024)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(chunk)
+                        if (read <= 0) break
+                        total += read
+                        if (total > 12 * 1024 * 1024)
+                            throw IllegalArgumentException("Image exceeds 12 MB")
+                        buffer.write(chunk, 0, read)
                     }
-                }
+                    buffer.toByteArray()
+                } ?: return
+                saveCustomBackground(bytes)
             } catch (e: Exception) {
                 filesDir.resolve(CUSTOM_BACKGROUND_FILE_NAME).delete()
+                filesDir.resolve(CUSTOM_BACKGROUND_GIF_DIR_NAME).deleteRecursively()
                 Log.e(TAG, "Could not save custom background", e)
             }
             return

@@ -337,6 +337,15 @@ void user_settings_default(user_settings* usr_settings) {
          sizeof usr_settings->instant_death_settings_reserved);
   usr_settings->instant_death = true;
   usr_settings->show_own_nickname_ingame = false;
+
+  memset(usr_settings->food_origin_scale_settings_reserved, 0,
+         sizeof usr_settings->food_origin_scale_settings_reserved);
+  usr_settings->death_food_scale[0] = 1.0f;
+  usr_settings->death_food_scale[1] = 1.0f;
+  usr_settings->normal_food_scale[0] = 1.0f;
+  usr_settings->normal_food_scale[1] = 1.0f;
+  usr_settings->boost_food_scale[0] = 1.0f;
+  usr_settings->boost_food_scale[1] = 1.0f;
 }
 
 static bool bd_client_id_is_valid(const char* id) {
@@ -455,11 +464,17 @@ void read_user_settings(user_settings* usr_settings) {
       offsetof(user_settings, bd_id_settings_reserved);
   size_t v47_prefix =
       offsetof(user_settings, instant_death_settings_reserved);
+  size_t v48_prefix =
+      offsetof(user_settings, food_origin_scale_settings_reserved);
   bool migrate_single_mode_features =
       (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v48_prefix)
+    /* Preserve every v4.7 instant-death / own-nickname value while leaving
+       the new per-origin food scale options on their defaults (1.0x). */
+    bytes_to_read = v48_prefix;
   else if ((size_t)file_size >= v47_prefix)
     /* Preserve every v4.6 Battledome client-ID value while leaving the new
        instant-death and own-nickname options on their defaults. */
@@ -741,6 +756,18 @@ void read_user_settings(user_settings* usr_settings) {
         loaded.snake_shadow_strength[i] < 0.0f ||
         loaded.snake_shadow_strength[i] > 3.0f)
       loaded.snake_shadow_strength[i] = 1.0f;
+    if (!isfinite(loaded.death_food_scale[i]) ||
+        loaded.death_food_scale[i] < 0.25f ||
+        loaded.death_food_scale[i] > 3.0f)
+      loaded.death_food_scale[i] = 1.0f;
+    if (!isfinite(loaded.normal_food_scale[i]) ||
+        loaded.normal_food_scale[i] < 0.25f ||
+        loaded.normal_food_scale[i] > 3.0f)
+      loaded.normal_food_scale[i] = 1.0f;
+    if (!isfinite(loaded.boost_food_scale[i]) ||
+        loaded.boost_food_scale[i] < 0.25f ||
+        loaded.boost_food_scale[i] > 3.0f)
+      loaded.boost_food_scale[i] = 1.0f;
   }
   if (loaded.shader_cycle_key < GLFW_KEY_0 ||
       loaded.shader_cycle_key > GLFW_KEY_Z)
@@ -748,7 +775,10 @@ void read_user_settings(user_settings* usr_settings) {
   if (loaded.invisible_skin_key < GLFW_KEY_0 ||
       loaded.invisible_skin_key > GLFW_KEY_Z)
     loaded.invisible_skin_key = GLFW_KEY_I;
-  if (loaded.shader_cycle_index < -1 || loaded.shader_cycle_index > 2)
+  for (int rm = 0; rm < 2; rm++)
+    if (loaded.modes[rm].render_mode < 0 || loaded.modes[rm].render_mode > 3)
+      loaded.modes[rm].render_mode = rm ? 1 : 0;
+  if (loaded.shader_cycle_index < -1 || loaded.shader_cycle_index > 3)
     loaded.shader_cycle_index = -1;
   if (!isfinite(loaded.zslider_thickness) ||
       loaded.zslider_thickness < 0.35f || loaded.zslider_thickness > 3.0f)

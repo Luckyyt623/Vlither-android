@@ -21,7 +21,11 @@ static void apply_skin_editor_background(tenv *env) {
   tuser_data *usr = env->usr;
   renderer *r = usr->r;
   int selected = usr->usrs.homepage_background;
-  if (selected < 0 || selected > 6) selected = 5;
+  /* 7 = "Custom (Upload)", the same user photo the homepage shows. This used
+     to clamp at 6 and silently fall back to the Default Galaxy scene (5)
+     whenever a custom background was selected, so the skin editor never
+     matched the homepage's custom background. */
+  if (selected < 0 || selected > 7) selected = 5;
   r->global.bd_opacity = 0.0f;
   r->global.minimap_opacity = 0.0f;
   r->global.bg_color[0] = r->global.bg_color[1] = r->global.bg_color[2] = 1.0f;

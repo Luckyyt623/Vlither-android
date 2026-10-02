@@ -7,6 +7,21 @@
 
 extern bool g_ntl_skin_peek_active;
 
+/* UV rect of one cell of the orb atlas (7 shades x 41 colours). The shade
+   cycles along the body and mirrors back (0..6..0) for every colour except
+   group 36, which repeats 0..6. */
+static inline vec4s redraw_orb_cell_uv(int cg_id, int seg) {
+  int c = (cg_id < 0 || cg_id > 40) ? 40 : cg_id;
+  int shade;
+  if (c == 36) {
+    shade = seg % 7;
+  } else {
+    shade = seg % 14;
+    if (shade >= 7) shade = 13 - shade;
+  }
+  return (vec4s){{shade / 7.0f, c / 41.0f, 1.0f / 7.0f, 1.0f / 41.0f}};
+}
+
 static bool redraw_snake_is_teammate(const snake *o,
                                      const user_settings *usrs) {
   if (!o || !usrs) return false;
@@ -70,7 +85,13 @@ void redraw(tenv* env) {
 
   int mode_index = usrs->hotkeys[HOTKEY_ASSIST].active ? 1 : 0;
   gameplay_mode* mode = usrs->modes + mode_index;
-  bool render_shadows = mode->show_shadows && !usrs->performance_mode;
+  /* Performance mode keeps a light shadow instead of dropping it: it is
+     forced on, drawn on every second segment only (they overlap heavily), and
+     never fainter than a minimum strength even when the preset zeroes it. */
+  bool shadow_thin = usrs->performance_mode;
+  bool render_shadows = mode->show_shadows || usrs->performance_mode;
+  float shadow_k = usrs->snake_shadow_strength[mode_index];
+  if (usrs->performance_mode && shadow_k < 0.6f) shadow_k = 0.6f;
   bool render_food_glow = usrs->food_glow[mode_index] &&
                           !usrs->performance_mode;
 
@@ -112,8 +133,13 @@ void redraw(tenv* env) {
 
       if (fo->rx >= gdata->data.fpx1 && fo->ry >= gdata->data.fpy1 &&
           fo->rx <= gdata->data.fpx2 && fo->ry <= gdata->data.fpy2) {
-        float d =
-            gdata->fsz[fo->cv2] * gdata->data.gsc * fo->rad * mode->food_scale;
+        float origin_scale = fo->origin == FOOD_ORIGIN_DEATH
+                                  ? usrs->death_food_scale[mode_index]
+                              : fo->origin == FOOD_ORIGIN_BOOST
+                                  ? usrs->boost_food_scale[mode_index]
+                                  : usrs->normal_food_scale[mode_index];
+        float d = gdata->fsz[fo->cv2] * gdata->data.gsc * fo->rad *
+                  mode->food_scale * origin_scale;
         vec3s c = {mode->food_color[0], mode->food_color[1],
                    mode->food_color[2]};
 
@@ -146,8 +172,13 @@ void redraw(tenv* env) {
 
       if (fo->rx >= gdata->data.fpx1 && fo->ry >= gdata->data.fpy1 &&
           fo->rx <= gdata->data.fpx2 && fo->ry <= gdata->data.fpy2) {
-        float d =
-            gdata->fsz[fo->cv2] * gdata->data.gsc * fo->rad * mode->food_scale;
+        float origin_scale = fo->origin == FOOD_ORIGIN_DEATH
+                                  ? usrs->death_food_scale[mode_index]
+                              : fo->origin == FOOD_ORIGIN_BOOST
+                                  ? usrs->boost_food_scale[mode_index]
+                                  : usrs->normal_food_scale[mode_index];
+        float d = gdata->fsz[fo->cv2] * gdata->data.gsc * fo->rad *
+                  mode->food_scale * origin_scale;
         vec3s c = gdata->cg_colors[fo->cv];
 
         float fx =
@@ -411,7 +442,32 @@ void redraw(tenv* env) {
         float wwk = 0;
         float nkr = 0;
         float msl = o->msl;
-        float mct = 6 / (mode->qsm * o->sep / 6.0f);
+        /* Pick the body style first: the skinless styles also decide the
+           segment spacing below. */
+        bool is_local_snake = o->id == gdata->data.snake_id;
+        bool is_team_snake = !is_local_snake &&
+                             redraw_snake_is_teammate(o, usrs);
+        int snake_render_mode = mode->render_mode;
+        if (usrs->mode_high_visibility_skins[mode_index] ||
+            usrs->mode_skinless_peek[mode_index]) {
+          if (usrs->mode_skinless_peek[mode_index] &&
+              g_ntl_skin_peek_active)
+            snake_render_mode = 0;
+          else if ((is_local_snake && usrs->mode_own_true_skin[mode_index]) ||
+                   (is_team_snake && usrs->mode_team_true_skin[mode_index]))
+            snake_render_mode = 0;
+          else
+            snake_render_mode = 1;
+        }
+        /* Orb and Flat bodies are made of separate sprites, so keep them at the
+           tightest spacing (qsm 1) whatever the body-parts-spacing slider says;
+           otherwise gaps open up between segments. */
+        float eff_qsm = mode->qsm;
+        if ((snake_render_mode == 1 || snake_render_mode == 2) && eff_qsm > 1.0f)
+          eff_qsm = 1.0f;
+        bool orb_tex_ok = usr->r && usr->r->orb_atlas;
+
+        float mct = 6 / (eff_qsm * o->sep / 6.0f);
 
         float omct = mct;
         float rmct = 1 / mct;
@@ -724,25 +780,9 @@ void redraw(tenv* env) {
         if (o->id == gdata->data.snake_id && usrs->own_skin_invisible)
           skin_alpha = 0.0f;
 
-        bool is_local_snake = o->id == gdata->data.snake_id;
-        bool is_team_snake = !is_local_snake &&
-                             redraw_snake_is_teammate(o, usrs);
-        int snake_render_mode = mode->render_mode;
-        if (usrs->mode_high_visibility_skins[mode_index] ||
-            usrs->mode_skinless_peek[mode_index]) {
-          if (usrs->mode_skinless_peek[mode_index] &&
-              g_ntl_skin_peek_active)
-            snake_render_mode = 0;
-          else if ((is_local_snake && usrs->mode_own_true_skin[mode_index]) ||
-                   (is_team_snake && usrs->mode_team_true_skin[mode_index]))
-            snake_render_mode = 0;
-          else
-            snake_render_mode = 1;
-        }
-
         if (snake_render_mode == 0) {
           float shadow_strength =
-              0.25f * usrs->snake_shadow_strength[mode_index] * skin_alpha;
+              0.25f * shadow_k * skin_alpha;
 
           if (render_shadows) {
 
@@ -773,7 +813,8 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && render_shadows) {
+                if (j >= 4 && render_shadows &&
+                    (!shadow_thin || (((int)j) & 1) == 0)) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -815,7 +856,8 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && render_shadows) {
+                if (j >= 4 && render_shadows &&
+                    (!shadow_thin || (((int)j) & 1) == 0)) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -879,7 +921,7 @@ void redraw(tenv* env) {
                                     gdata->data.pba[(int)j]},
                                    gdata->cg_uvs[BLANK_UV],
                                    {0, 0, 0, a * a * skin_alpha *
-                                                  usrs->snake_shadow_strength[mode_index]}});
+                                                  shadow_k}});
               }
             }
           }
@@ -890,7 +932,8 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && render_shadows) {
+                if (j >= 4 && render_shadows &&
+                    (!shadow_thin || (((int)j) & 1) == 0)) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -910,7 +953,7 @@ void redraw(tenv* env) {
                                         gdata->data.pba[(int)j]},
                                        gdata->cg_uvs[BLANK_UV],
                                        {0, 0, 0, a * a * skin_alpha *
-                                                      usrs->snake_shadow_strength[mode_index]}});
+                                                      shadow_k}});
                   }
                 }
 
@@ -922,6 +965,19 @@ void redraw(tenv* env) {
                 int cg_id = o->cusk_data[(int)j % o->cusk_len];
                 vec3s* cg_col = gdata->cg_colors + cg_id;
 
+                if (orb_tex_ok) {
+                  /* Textured orb for this colour group and shade. */
+                  bp_renderer_push(
+                      usr->r->bpr,
+                      &(bp_instance){
+                          .circle = {fix - (gdata->data.gsc * lsz),
+                                     fiy - (gdata->data.gsc * lsz),
+                                     gdata->data.gsc * 2 * lsz,
+                                     gdata->data.pba[(int)j]},
+                          .uv_rect = redraw_orb_cell_uv(cg_id, (int)j),
+                          .color = {1, 1, 1, a * skinless_a},
+                          .shape = {0, 2}});
+                } else
                 bp_renderer_push(
                     usr->r->bpr,
                     &(bp_instance){
@@ -937,7 +993,8 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && render_shadows) {
+                if (j >= 4 && render_shadows &&
+                    (!shadow_thin || (((int)j) & 1) == 0)) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -957,7 +1014,7 @@ void redraw(tenv* env) {
                                         gdata->data.pba[(int)j]},
                                        gdata->cg_uvs[BLANK_UV],
                                        {0, 0, 0, a * a * skin_alpha *
-                                                      usrs->snake_shadow_strength[mode_index]}});
+                                                      shadow_k}});
                   }
                 }
 
@@ -972,6 +1029,19 @@ void redraw(tenv* env) {
                         ->default_skins[o->cv][1 + ((int)j % default_skin_len)];
                 vec3s* cg_col = gdata->cg_colors + cg_id;
 
+                if (orb_tex_ok) {
+                  /* Textured orb for this colour group and shade. */
+                  bp_renderer_push(
+                      usr->r->bpr,
+                      &(bp_instance){
+                          .circle = {fix - (gdata->data.gsc * lsz),
+                                     fiy - (gdata->data.gsc * lsz),
+                                     gdata->data.gsc * 2 * lsz,
+                                     gdata->data.pba[(int)j]},
+                          .uv_rect = redraw_orb_cell_uv(cg_id, (int)j),
+                          .color = {1, 1, 1, a * skinless_a},
+                          .shape = {0, 2}});
+                } else
                 bp_renderer_push(
                     usr->r->bpr,
                     &(bp_instance){
@@ -1005,7 +1075,7 @@ void redraw(tenv* env) {
                                     gdata->data.pba[(int)j]},
                                    gdata->cg_uvs[BLANK_UV],
                                    {0, 0, 0, a * a * skin_alpha *
-                                                  usrs->snake_shadow_strength[mode_index]}});
+                                                  shadow_k}});
               }
             }
           }
@@ -1016,7 +1086,8 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && render_shadows) {
+                if (j >= 4 && render_shadows &&
+                    (!shadow_thin || (((int)j) & 1) == 0)) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -1036,7 +1107,7 @@ void redraw(tenv* env) {
                                         gdata->data.pba[(int)j]},
                                        gdata->cg_uvs[BLANK_UV],
                                        {0, 0, 0, a * a * skin_alpha *
-                                                      usrs->snake_shadow_strength[mode_index]}});
+                                                      shadow_k}});
                   }
                 }
 
@@ -1063,7 +1134,8 @@ void redraw(tenv* env) {
                 px = gdata->data.pbx[(int)j];
                 py = gdata->data.pby[(int)j];
 
-                if (j >= 4 && render_shadows) {
+                if (j >= 4 && render_shadows &&
+                    (!shadow_thin || (((int)j) & 1) == 0)) {
                   k = j - 4;
                   if (gdata->data.pbu[(int)k] == 2) {
                     ox = tx;
@@ -1104,6 +1176,63 @@ void redraw(tenv* env) {
                         gdata->cg_uvs[BLANK_UV],
                         {cg_col->r, cg_col->g, cg_col->b, a * skinless_a}});
               }
+          }
+        } else if (snake_render_mode == 3) {
+          /* Skinless: the whole body is a single solid colour (the first
+             colour of the skin) drawn as one continuous rounded tube, so
+             there are no segments and no gaps at any zoom or spacing. */
+          int sk_cg = o->cusk && o->cusk_len > 0
+                          ? o->cusk_data[0]
+                          : gdata->default_skins[o->cv][1];
+          vec3s* cg_col = gdata->cg_colors + sk_cg;
+          float tube_w = gdata->data.gsc * 2 * lsz;
+          float tube_a = a * skin_alpha;
+
+          if (render_shadows) {
+            for (j = bp - 1; j >= 4; j--) {
+              if (shadow_thin && (((int)j) & 1)) continue;
+              k = j - 4;
+              if (gdata->data.pbu[(int)k] != 2) continue;
+              float sx = ((gdata->data.pbx[(int)k] - gdata->data.view_xx) *
+                          gdata->data.gsc) + mww2;
+              float sy = ((gdata->data.pby[(int)k] - gdata->data.view_yy) *
+                          gdata->data.gsc) + mhh2;
+              bp_renderer_push(
+                  usr->r->bpr,
+                  &(bp_instance){{sx - (lsz * gdata->data.gsc + 1),
+                                  sy - (lsz * gdata->data.gsc + 1),
+                                  (lsz * gdata->data.gsc + 1) * 2,
+                                  gdata->data.pba[(int)j]},
+                                 gdata->cg_uvs[BLANK_UV],
+                                 {0, 0, 0, a * a * skin_alpha * shadow_k}});
+            }
+          }
+
+          for (j = bp - 1; j >= 1; j--) {
+            if (gdata->data.pbu[(int)j] < 1 && gdata->data.pbu[(int)j - 1] < 1)
+              continue;
+            float x1 = ((gdata->data.pbx[(int)j - 1] - gdata->data.view_xx) *
+                        gdata->data.gsc) + mww2;
+            float y1 = ((gdata->data.pby[(int)j - 1] - gdata->data.view_yy) *
+                        gdata->data.gsc) + mhh2;
+            float x2 = ((gdata->data.pbx[(int)j] - gdata->data.view_xx) *
+                        gdata->data.gsc) + mww2;
+            float y2 = ((gdata->data.pby[(int)j] - gdata->data.view_yy) *
+                        gdata->data.gsc) + mhh2;
+            float ddx = x2 - x1, ddy = y2 - y1;
+            float seg_len = sqrtf(ddx * ddx + ddy * ddy);
+            if (seg_len < 0.01f) continue;
+            /* The capsule's rounded ends overlap the neighbours, which hides
+               every joint. */
+            float cap_len = seg_len + tube_w;
+            float cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f;
+            bp_renderer_push(
+                usr->r->bpr,
+                &(bp_instance){{cx - cap_len * 0.5f, cy - tube_w * 0.5f,
+                                cap_len, atan2f(ddy, ddx)},
+                               gdata->cg_uvs[BLANK_UV],
+                               {cg_col->r, cg_col->g, cg_col->b, tube_a},
+                               {tube_w, 1}});
           }
         }
 

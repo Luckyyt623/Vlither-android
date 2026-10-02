@@ -16,6 +16,13 @@ void android_jni_open_url(const char* url);
 /* Opens `url` in an in-app WebView (TagsStoreActivity) with a close button,
    instead of leaving to the system browser like android_jni_open_url(). */
 void android_jni_open_webview(const char* url);
+/* Screen orientation preference, persisted on the Java side and shared with
+   the launcher: 1 = Landscape (default), 2 = Portrait. Setting it
+   asks Android to rotate the activity; the native swapchain follows from the
+   resulting resize/config events. */
+int  android_jni_get_screen_orientation_mode(void);
+bool android_jni_set_screen_orientation_mode(int mode);
+
 bool android_jni_request_custom_arrow(void);
 /* Opens the system image picker to choose a custom background image, used
    for both the homepage and in-game "Custom (Upload)" background option. */

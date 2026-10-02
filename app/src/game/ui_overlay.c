@@ -19,6 +19,11 @@
 #include "../android_glfw_shim.h"
 #endif
 
+/* Screen-space left edge / bottom edge of the leaderboard from the last
+   frame it was drawn (0 when hidden). Read by ntl_team.c. */
+float g_leaderboard_left_x = 0.0f;
+float g_leaderboard_bottom_y = 0.0f;
+
 static void draw_world_center_marker(tenv* env, float half_width,
                                      float half_height) {
   game_data* gdata = &env->usr->gdata;
@@ -347,6 +352,13 @@ void ui_overlay(tenv* env) {
           igPopFont();
         }
         igEndTable();
+        /* Remember where the leaderboard sits so other HUD panels (the team
+           players list) can avoid landing on top of it — in portrait the two
+           default to the same corner. */
+        ImVec2 lb_end;
+        igGetCursorScreenPos(&lb_end);
+        g_leaderboard_left_x = table_x;
+        g_leaderboard_bottom_y = lb_end.y;
       }
     }
 
@@ -533,6 +545,14 @@ void ui_overlay(tenv* env) {
     float sw        = (float)ctx->size[0];
     float sh        = (float)ctx->size[1];
     float margin    = sw * 0.025f;
+    /* Landscape's short edge is always sh (a phone is never taller than it
+       is wide while in landscape), so sizing the controls off this instead
+       of sh directly is a no-op there — it only changes anything once sh
+       becomes the LONG edge, i.e. in portrait, where using sh unmodified
+       used to make the boost button and joystick balloon to a fraction of
+       the tall dimension instead of the narrow one. */
+    float short_edge = sw < sh ? sw : sh;
+    bool  is_portrait = sh > sw;
 
     /* Reflect every boost source, including right-click/physical keyboard in
        Mouse + Keyboard mode, not only the touchscreen boost button. */
@@ -546,11 +566,11 @@ void ui_overlay(tenv* env) {
 
     float br, bcx, bcy;
     if (usrs->boost_pos_custom) {
-        br  = sh * usrs->boost_rel_size;
+        br  = short_edge * usrs->boost_rel_size;
         bcx = sw * usrs->boost_rel_x;
         bcy = sh * usrs->boost_rel_y;
     } else {
-        br  = sh * 0.125f;
+        br  = short_edge * 0.125f;
         bcx = swapped ? (br + margin) : (sw - br - margin);
         bcy = sh - br - margin;
     }
@@ -560,11 +580,11 @@ void ui_overlay(tenv* env) {
         /* SWF joystick background: 168px artwork scaled to 0.7. The old
            Vlither ring was much larger, so retain saved slider values while
            mapping them to the original Slither visual scale. */
-        jr  = sh * usrs->joy_rel_size * 0.47f;
+        jr  = short_edge * usrs->joy_rel_size * 0.47f;
         jcx = sw * usrs->joy_rel_x;
         jcy = sh * usrs->joy_rel_y;
     } else {
-        jr  = sh * 0.082f;
+        jr  = short_edge * 0.082f;
         jcx = swapped ? (sw - jr - margin) : (jr + margin);
         jcy = sh - jr - margin;
     }
@@ -573,7 +593,12 @@ void ui_overlay(tenv* env) {
       extern bool  g_is_trackpad_mode, g_panel_open;
       extern bool  g_joystick_uses_side, g_joystick_left_side;
       g_boost_cx = bcx; g_boost_cy = bcy;
-      g_boost_r  = mouse_controls_active ? 0.0f : br;
+      /* Same idea as the official mobile client: the round boost button is a
+         landscape-only control. There's no room for it in portrait without
+         crowding the joystick, so it's hidden there and replaced by
+         double-tap-and-hold-to-boost (see twindow_android.c), which works
+         everywhere but is otherwise redundant with the button. */
+      g_boost_r  = (mouse_controls_active || is_portrait) ? 0.0f : br;
       g_joy_cx   = jcx; g_joy_cy   = jcy; g_joy_r   = jr;
       g_is_trackpad_mode = usrs->ctrl_mode_trackpad;
       g_joystick_uses_side = !usrs->ctrl_mode_trackpad && !mouse_controls_active;
@@ -686,7 +711,7 @@ void ui_overlay(tenv* env) {
       }
     }
 
-    if (!mouse_controls_active) {
+    if (!mouse_controls_active && !is_portrait) {
       static float s_boost_a = 0.78f;
       float vfr3 = gdata->data.vfr > 0.0f ? gdata->data.vfr : 1.0f;
       if (boost_on) { s_boost_a += vfr3 * 0.035f; if (s_boost_a > 1.00f) s_boost_a = 1.00f; }

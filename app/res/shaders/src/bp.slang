@@ -19,11 +19,13 @@ struct vs_output {
 
 [[vk::binding(0, 0)]] ConstantBuffer<Global> global;
 [[vk::binding(1, 0)]] Sampler2D tex_atlas;
+// Orb texture atlas (7 shades x 41 colours). Used when shape.y > 1.5.
+[[vk::binding(4, 0)]] Sampler2D tex_orb;
 
 vs_output vs_main(vs_input input) {
   vs_output output;
 
-  bool is_capsule = input.shape.y > 0.5;
+  bool is_capsule = input.shape.y > 0.5 && input.shape.y < 1.5;
   float2 dimensions = is_capsule
                           ? float2(input.circ.z, input.shape.x)
                           : float2(input.circ.z, input.circ.z);
@@ -57,7 +59,7 @@ vs_output vs_main(vs_input input) {
 }
 
 float4 fs_main(vs_output input) {
-  if (input.shape.y > 0.5) {
+  if (input.shape.y > 0.5 && input.shape.y < 1.5) {
     float2 p = (input.uv - 0.5) * (input.dimensions + EDGE_SOFTNESS);
     float radius = input.shape.x * 0.5;
     float segment_half =
@@ -69,7 +71,8 @@ float4 fs_main(vs_output input) {
     return float4(input.color.rgb, input.color.a * alpha);
   }
 
-  float4 c = tex_atlas.Sample(input.uv2).rgba;
+  float4 c = input.shape.y > 1.5 ? tex_orb.Sample(input.uv2).rgba
+                                 : tex_atlas.Sample(input.uv2).rgba;
   float d = length(2 * input.uv - 1);
   float p = length(float2(ddx(d), ddy(d)));
   float a = smoothstep(0.0, EDGE_SOFTNESS, (1 - d) / p);

@@ -367,6 +367,16 @@ typedef struct user_settings {
   uint8_t instant_death_settings_reserved[16];
   bool instant_death;
   bool show_own_nickname_ingame;
+
+  /* v4.8 extension: per-origin food size multipliers. Each stacks with the
+     existing per-mode food_scale (which still scales every food type at
+     once) rather than replacing it: on-screen size = food_scale *
+     the multiplier matching that pellet's origin. Indexed the same way as
+     food_scale, food_glow, etc. (index 0 = Normal mode, 1 = Assist mode). */
+  uint8_t food_origin_scale_settings_reserved[16];
+  float death_food_scale[2];
+  float normal_food_scale[2];
+  float boost_food_scale[2];
 } user_settings;
 
 void user_settings_default(user_settings* usr_settings);

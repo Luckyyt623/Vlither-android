@@ -39,25 +39,25 @@ static void apply_mode_graphics_preset(user_settings *us, int mode_index,
     if (preset == 1) { /* Competitive */
       m->show_background = false;
       m->show_accessories = false;
-      m->show_shadows = false;
+      m->show_shadows = true;
       m->death_effect = false;
       m->food_flicker = false;
       m->food_float = false;
       m->food_type = 1;
       m->render_mode = 1;
       us->food_glow[mode_index] = false;
-      us->snake_shadow_strength[mode_index] = 0.0f;
+      us->snake_shadow_strength[mode_index] = 0.6f;
     } else if (preset == 2) { /* Low */
       m->show_background = false;
       m->show_accessories = false;
-      m->show_shadows = false;
+      m->show_shadows = true;
       m->death_effect = false;
       m->food_flicker = false;
       m->food_float = false;
       m->food_type = 0;
       m->render_mode = 2;
       us->food_glow[mode_index] = false;
-      us->snake_shadow_strength[mode_index] = 0.0f;
+      us->snake_shadow_strength[mode_index] = 0.6f;
     } else { /* Normal / High */
       m->show_background = true;
       m->show_accessories = true;
@@ -450,7 +450,13 @@ void ui_settings(tenv* env) {
         igAlignTextToFramePadding();
         igText("Food shader");
         igAlignTextToFramePadding();
-        igText("Food scale");
+        igText("Food scale (all)");
+        igAlignTextToFramePadding();
+        igText("Normal food scale");
+        igAlignTextToFramePadding();
+        igText("Death food scale");
+        igAlignTextToFramePadding();
+        igText("Boost food scale");
         igAlignTextToFramePadding();
         igText("Food float");
         igAlignTextToFramePadding();
@@ -501,7 +507,7 @@ void ui_settings(tenv* env) {
                       ImGuiSliderFlags_AlwaysClamp);
         igSetNextItemWidth(-1);
         igCombo_Str_arr("##render mode", &mode->render_mode,
-                        (const char*[]){"Texture", "Solid", "Flat"}, 3, -1);
+                        (const char*[]){"Texture", "Orb", "Flat", "Skinless"}, 4, -1);
 
         igCheckbox("##transparent skin", &mode->transparent_skin);
         igBeginDisabled(!mode->transparent_skin);
@@ -534,6 +540,23 @@ void ui_settings(tenv* env) {
         igSetNextItemWidth(-1);
         igSliderFloat("##food scale", &mode->food_scale, 0.25f, 3, "%.2f",
                       ImGuiSliderFlags_AlwaysClamp);
+        if (igIsItemHovered(0))
+          igSetTooltip("Master size for every food type. Stacks with the three scales below (e.g. 2x here + 2x on death food = 4x actual size).");
+        igSetNextItemWidth(-1);
+        igSliderFloat("##normal food scale", &usrs->normal_food_scale[i],
+                      0.25f, 3, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        if (igIsItemHovered(0))
+          igSetTooltip("Size of ordinary ambient food scattered across the map.");
+        igSetNextItemWidth(-1);
+        igSliderFloat("##death food scale", &usrs->death_food_scale[i], 0.25f,
+                      3, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        if (igIsItemHovered(0))
+          igSetTooltip("Size of the food scattered when a snake dies.");
+        igSetNextItemWidth(-1);
+        igSliderFloat("##boost food scale", &usrs->boost_food_scale[i], 0.25f,
+                      3, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        if (igIsItemHovered(0))
+          igSetTooltip("Size of the food dropped behind a boosting snake.");
         igCheckbox("##food float", &mode->food_float);
         igCheckbox("##food flicker", &mode->food_flicker);
         igCheckbox("##food glow", &usrs->food_glow[i]);

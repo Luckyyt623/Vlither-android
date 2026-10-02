@@ -146,6 +146,73 @@ bool android_jni_request_custom_background(void) {
     return result;
 }
 
+/* Implemented in twindow_android.c: tells the window/swapchain code which
+   orientation the activity has been locked to (-1 when it follows the
+   sensor), so the logical size never depends on config-change timing. */
+extern void twindow_android_set_orientation_mode(int mode);
+
+int android_jni_get_screen_orientation_mode(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return 1;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return 1;
+        attached = true;
+    } else if (status != JNI_OK || !env) return 1;
+
+    int mode = 1;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "getScreenOrientationMode", "(Landroid/app/Activity;)I");
+        if (mid && !(*env)->ExceptionCheck(env))
+            mode = (int)(*env)->CallStaticIntMethod(
+                env, cls, mid, g_android_app->activity->clazz);
+    }
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); mode = 1; }
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+    mode = (mode == 2) ? 2 : 1;
+    twindow_android_set_orientation_mode(mode);
+    return mode;
+}
+
+bool android_jni_set_screen_orientation_mode(int mode) {
+    mode = (mode == 2) ? 2 : 1;
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return false;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        attached = true;
+    } else if (status != JNI_OK || !env) return false;
+
+    bool result = false;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "setScreenOrientationMode", "(Landroid/app/Activity;I)Z");
+        if (mid && !(*env)->ExceptionCheck(env))
+            result = (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz, (jint)mode) == JNI_TRUE;
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+    /* Update the hint only after the activity accepted the new lock. The
+       actual rebuild happens when Android delivers the resize event. */
+    if (result) twindow_android_set_orientation_mode(mode);
+    return result;
+}
+
 static bool android_jni_request_settings_action(const char* method_name) {
     if (!method_name || !g_android_app || !g_android_app->activity ||
         !g_android_app->activity->vm || !g_android_app->activity->clazz)

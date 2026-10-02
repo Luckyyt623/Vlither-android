@@ -969,7 +969,8 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
                    .gr = 0.65f + 0.1f * rad,
                    .wsp = (2 * ((float)rand() / RAND_MAX) - 1) * 0.0225f,
                    .sx = sx,
-                   .sy = sy}));
+                   .sy = sy,
+                   .origin = FOOD_ORIGIN_NORMAL}));
     }
   } else if (cmd == 'b' || cmd == 'f') {
     int sx, sy;
@@ -1014,7 +1015,9 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
                           .gr = 0.65f + 0.1f * rad,
                           .wsp = (2 * ((float)rand() / RAND_MAX) - 1) * 0.0225f,
                           .sx = sx,
-                          .sy = sy}));
+                          .sy = sy,
+                          .origin = (cmd == 'b') ? FOOD_ORIGIN_BOOST
+                                                 : FOOD_ORIGIN_DEATH}));
   } else if (cmd == 'c' || cmd == 'C' || cmd == '<') {
     int id;
     int ebid = -1;

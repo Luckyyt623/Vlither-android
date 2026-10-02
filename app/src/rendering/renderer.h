@@ -2,6 +2,7 @@
 #define RENDERER_H
 
 #include <stdalign.h>
+#include <stdint.h>
 
 #include "../constants.h"
 #include "bg_renderer.h"
@@ -43,6 +44,9 @@ typedef struct renderer {
   } global;
 
   texture* tex_atlas;
+  /* Orb-textured snake atlas (Orb render mode). NULL when the asset failed to
+     load; bound to descriptor binding 4 either way. */
+  texture* orb_atlas;
   texture* bg_tex;
   texture* bg_tex_alt;
   texture* bg_tex_custom;
@@ -54,6 +58,22 @@ typedef struct renderer {
      so a re-upload while already on that variant is detected and reloaded —
      the plain bg_custom_variant cache check alone can't see file changes. */
   long long bg_custom_signature;
+  /* Animated variant of the same user-uploaded slot (23): set when the file
+     the person picked was a GIF with more than one frame. All frames are
+     decoded ahead of time (on the Kotlin side, into separate PNGs) and kept
+     resident as their own textures here — there's no texture-array support
+     in this renderer, so each displayed frame is a full descriptor-set
+     rewrite, the same one used for switching backgrounds normally. That is
+     why bg_gif_frame_ms is clamped to a fairly low frame rate: each swap
+     costs a vkDeviceWaitIdle, which is fine a few times a second on a menu
+     screen but would hurt during gameplay. NULL/0 when no GIF is active,
+     in which case bg_tex_custom/bg_custom_signature (above) apply instead. */
+  texture** bg_gif_frames;
+  int bg_gif_frame_count;
+  int bg_gif_frame_ms;
+  int bg_gif_current_frame;
+  uint64_t bg_gif_next_swap_at;
+  long long bg_gif_signature;
   texture* boost_button_tex;
   VkDescriptorSet boost_button_ds;
   texture* arrow_atlas_tex;

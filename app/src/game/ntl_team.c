@@ -2000,6 +2000,21 @@ void ntl_team_draw(tenv *env) {
     float py = vp->WorkPos.y + us->ntl_players_rel_y * vp->WorkSize.y;
     px = ntl_clampf(px, vp->WorkPos.x, vp->WorkPos.x + vp->WorkSize.x - pw);
     py = ntl_clampf(py, vp->WorkPos.y, vp->WorkPos.y + vp->WorkSize.y - ph);
+    {
+      /* The stored layout is a fraction of the screen, so the default
+         top-right spot that sits beside the leaderboard in landscape lands
+         right on top of it in portrait. Drop the panel below the leaderboard
+         instead — only when it would actually overlap, and only in
+         portrait, so landscape and saved custom layouts are untouched. */
+      extern float g_leaderboard_left_x, g_leaderboard_bottom_y;
+      bool portrait_now = vp->WorkSize.y > vp->WorkSize.x;
+      if (portrait_now && g_leaderboard_bottom_y > 0.0f &&
+          px + pw > g_leaderboard_left_x && py < g_leaderboard_bottom_y) {
+        float below = g_leaderboard_bottom_y + 8.0f;
+        float max_py = vp->WorkPos.y + vp->WorkSize.y - ph;
+        py = below < max_py ? below : max_py;
+      }
+    }
     igSetNextWindowPos((ImVec2){px, py}, ImGuiCond_Appearing, (ImVec2){0, 0});
     igSetNextWindowSize((ImVec2){pw, ph}, ImGuiCond_Appearing);
 #else

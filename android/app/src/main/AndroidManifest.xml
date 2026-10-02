@@ -50,7 +50,7 @@
             android:name=".MainActivity"
             android:label="Vlither"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="fullSensor"
             android:exported="true"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 
@@ -74,7 +74,7 @@
             android:name=".GameActivity"
             android:label="Vlither"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="fullSensor"
             android:immersive="true"
             android:exported="false"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
@@ -91,7 +91,7 @@
             android:name=".TagsStoreActivity"
             android:label="Vlither Tags Store"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="fullSensor"
             android:exported="false"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
         </activity>

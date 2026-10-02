@@ -197,8 +197,9 @@ static void draw_homepage_background_picker(tenv* env, float frame_height) {
       save_user_settings(usrs);
     }
   }
-  igTextWrapped("Pick any photo from your phone. It's shared with the "
-                "in-game \"Custom (Upload)\" background too.");
+  igTextWrapped("Pick a photo or a GIF from your phone. GIFs animate; "
+                "it's shared with the skin editor and the in-game "
+                "\"Custom (Upload)\" background too.");
 #endif
   igEndPopup();
 }
@@ -507,6 +508,34 @@ static void draw_privacy_policy_popup(tenv *env) {
 
 void ui_title_screen_init(tenv* env) {}
 
+#ifdef ANDROID
+/* Homepage "Screen" toggle: Landscape <-> Portrait. The choice is stored by
+   the Android side (shared with the launcher) and applied by asking the
+   activity to rotate; the Vulkan swapchain and every layout then follow from
+   the resize event, so nothing here touches rendering directly. */
+static void draw_homepage_orientation_button(tenv* env, float frame_height) {
+  static const char* const names[2] = {"Landscape", "Portrait"};
+  static int mode = 0; /* 0 = landscape, 1 = portrait */
+  static bool mode_known = false;
+  if (!mode_known) {
+    int saved = android_jni_get_screen_orientation_mode(); /* 1 / 2 */
+    mode = saved == 2 ? 1 : 0;
+    mode_known = true;
+  }
+
+  const float edge = homepage_px(16.0f);
+  const float button_w = homepage_px(210.0f);
+  char label[64];
+  snprintf(label, sizeof label, "Screen: %s##homepage_orientation", names[mode]);
+  igSetCursorPos((ImVec2){env->ctx->size[0] - button_w - edge,
+                          edge + frame_height * 3.30f + homepage_px(24.0f)});
+  if (igButton(label, (ImVec2){button_w, frame_height * 1.15f})) {
+    int next = mode ? 0 : 1;
+    if (android_jni_set_screen_orientation_mode(next ? 2 : 1)) mode = next;
+  }
+}
+#endif
+
 void ui_title_screen(tenv* env) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -533,6 +562,9 @@ void ui_title_screen(tenv* env) {
   float frame_height = igGetFrameHeight();
   draw_homepage_background_picker(env, frame_height);
   draw_snakey_rain_homepage(env, frame_height);
+#ifdef ANDROID
+  draw_homepage_orientation_button(env, frame_height);
+#endif
 
 #ifdef ANDROID
   /* Homepage policy entry point and the supplied Discord artwork. The image is

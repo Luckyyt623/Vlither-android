@@ -1,5 +1,8 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+#include "../external/mongoose.h"
 #ifdef ANDROID
 #include <android/log.h>
 #define LOG_TAG "vlither"
@@ -191,6 +194,12 @@ renderer* renderer_create(tenv* env) {
   r->tex_atlas = create_mipmap_texture(ctx, "app/res/textures/tex_atlas_8k.png");
   DLOG("renderer: tex_atlas=%p", (void*)r->tex_atlas);
 
+  /* Orb-textured body atlas for the Orb render mode (small: 336x1968).
+     Failing to load it is not fatal: the mode then falls back to plain
+     coloured circles, and binding 4 reuses the main atlas. */
+  r->orb_atlas = create_mipmap_texture(ctx, "app/res/textures/orb_skin_atlas.png");
+  DLOG("renderer: orb_atlas=%p", (void*)r->orb_atlas);
+
   DLOG("renderer: loading boost button texture");
   r->boost_button_tex = create_mipmap_texture(ctx, "app/res/textures/boost_button.png");
   r->boost_button_ds = VK_NULL_HANDLE;
@@ -208,6 +217,7 @@ renderer* renderer_create(tenv* env) {
     if (r->bg_tex) { destroy_texture(ctx, r->bg_tex); }
     if (r->bg_tex_alt) { destroy_texture(ctx, r->bg_tex_alt); }
     if (r->tex_atlas) { destroy_texture(ctx, r->tex_atlas); }
+    if (r->orb_atlas) { destroy_texture(ctx, r->orb_atlas); }
     if (r->boost_button_tex) { destroy_texture(ctx, r->boost_button_tex); }
     if (r->discord_tex) { destroy_texture(ctx, r->discord_tex); }
     free(r);
@@ -285,7 +295,7 @@ renderer* renderer_create(tenv* env) {
           .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
           .pNext = NULL,
           .flags = 0,
-          .bindingCount = 4,
+          .bindingCount = 5,
           .pBindings =
               (VkDescriptorSetLayoutBinding[]){
                   {.binding = 0,
@@ -302,6 +312,10 @@ renderer* renderer_create(tenv* env) {
                    .descriptorCount = 1,
                    .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
                   {.binding = 3,
+                   .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                   .descriptorCount = 1,
+                   .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+                  {.binding = 4,
                    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                    .descriptorCount = 1,
                    .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}}},
@@ -372,7 +386,7 @@ renderer* renderer_create(tenv* env) {
 
   for (int i = 0; i < ctx->fif; i++)
     vkUpdateDescriptorSets(
-        ctx->device, 4,
+        ctx->device, 5,
         (VkWriteDescriptorSet[]){
             {
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -424,6 +438,20 @@ renderer* renderer_create(tenv* env) {
                     &(VkDescriptorImageInfo){
                         r->nearest_sampler, r->mmr->minimap_tex[i]->view,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = NULL,
+                .dstSet = r->global_set[i],
+                .dstBinding = 4,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .pImageInfo =
+                    &(VkDescriptorImageInfo){
+                        r->linear_sampler,
+                        r->orb_atlas ? r->orb_atlas->view : r->tex_atlas->view,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             }},
         0, NULL);
 
@@ -471,6 +499,127 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
                             ((long long)st.st_mtim.tv_nsec << 12) ^
                             (long long)st.st_size;
     }
+  }
+
+  /* Animated custom background: if the last upload to slot 23 was a GIF, the
+     Kotlin side will have decoded it into custom_background_gif/frame_NNN.png
+     plus a manifest instead of writing custom_background_image. Checked
+     before the "nothing changed" early-return below, since the displayed
+     frame still needs to advance over time even when the file on disk
+     hasn't. Falls through to the ordinary static-image handling further
+     down whenever no such manifest exists. */
+  char gif_dir[600] = {0};
+  bool gif_have_manifest = false;
+  int gif_frame_count = 0;
+  int gif_frame_ms = 0;
+  long long gif_signature = 0;
+  if (variant == 23) {
+#ifdef ANDROID
+    const char* files = android_get_files_dir();
+    if (files && files[0])
+      snprintf(gif_dir, sizeof gif_dir, "%s/custom_background_gif", files);
+#endif
+    if (gif_dir[0]) {
+      char manifest_path[660];
+      snprintf(manifest_path, sizeof manifest_path, "%s/manifest.txt",
+               gif_dir);
+      struct stat gst;
+      if (stat(manifest_path, &gst) == 0 && gst.st_size > 0) {
+        FILE* mf = fopen(manifest_path, "r");
+        if (mf) {
+          int fc = 0, fms = 0;
+          if (fscanf(mf, "%d %d", &fc, &fms) == 2 && fc >= 2 && fc <= 64 &&
+              fms >= 60 && fms <= 2000) {
+            gif_frame_count = fc;
+            gif_frame_ms = fms;
+            gif_have_manifest = true;
+          }
+          fclose(mf);
+        }
+        if (gif_have_manifest)
+          gif_signature = ((long long)gst.st_mtime << 32) ^
+                          ((long long)gst.st_mtim.tv_nsec << 12) ^
+                          (long long)gst.st_size;
+      }
+    }
+  }
+
+  if (gif_have_manifest &&
+      (gif_signature != r->bg_gif_signature || r->bg_gif_frame_count == 0)) {
+    /* Fresh upload (or first time this session): decode every frame up
+       front. This is the only point where loading a GIF costs more than a
+       normal image — after this it's just picking which already-loaded
+       frame texture is current. */
+    for (int i = 0; i < r->bg_gif_frame_count; i++)
+      if (r->bg_gif_frames[i]) destroy_texture(ctx, r->bg_gif_frames[i]);
+    free(r->bg_gif_frames);
+    r->bg_gif_frames = NULL;
+    r->bg_gif_frame_count = 0;
+
+    texture** frames = calloc((size_t)gif_frame_count, sizeof(texture*));
+    bool ok = frames != NULL;
+    for (int i = 0; ok && i < gif_frame_count; i++) {
+      char frame_path[660];
+      snprintf(frame_path, sizeof frame_path, "%s/frame_%03d.png", gif_dir,
+               i);
+      frames[i] = create_mipmap_texture(ctx, frame_path);
+      if (!frames[i]) ok = false;
+    }
+    if (ok) {
+      r->bg_gif_frames = frames;
+      r->bg_gif_frame_count = gif_frame_count;
+      r->bg_gif_frame_ms = gif_frame_ms;
+      r->bg_gif_current_frame = 0;
+      r->bg_gif_next_swap_at = mg_millis() + (uint64_t)gif_frame_ms;
+      r->bg_gif_signature = gif_signature;
+    } else {
+      /* Partial/corrupt decode (e.g. interrupted upload) — drop it and let
+         this call fall through to the static/default background instead of
+         showing a half-built animation. */
+      for (int i = 0; frames && i < gif_frame_count; i++)
+        if (frames[i]) destroy_texture(ctx, frames[i]);
+      free(frames);
+      gif_have_manifest = false;
+    }
+  }
+
+  if (gif_have_manifest && r->bg_gif_frame_count > 0) {
+    uint64_t now = mg_millis();
+    if (now >= r->bg_gif_next_swap_at) {
+      uint64_t behind = now - r->bg_gif_next_swap_at;
+      int advance = 1 + (int)(behind / (uint64_t)r->bg_gif_frame_ms);
+      r->bg_gif_current_frame =
+          (r->bg_gif_current_frame + advance) % r->bg_gif_frame_count;
+      r->bg_gif_next_swap_at = now + (uint64_t)r->bg_gif_frame_ms;
+    }
+    texture* desired = r->bg_gif_frames[r->bg_gif_current_frame];
+    if (r->bg_variant == 23 && r->active_bg_tex == desired) return;
+
+    /* Same in-flight-descriptor hazard as the static-image swap below, so
+       the same device-wide wait applies — see the comment on bg_gif_frames
+       in renderer.h for why that's an acceptable trade-off here. */
+    vkDeviceWaitIdle(ctx->device);
+    for (int i = 0; i < ctx->fif; i++) {
+      VkDescriptorImageInfo image_info = {
+          r->linear_sampler, desired->view,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+      VkWriteDescriptorSet write = {
+          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .pNext = NULL,
+          .dstSet = r->global_set[i],
+          .dstBinding = 2,
+          .dstArrayElement = 0,
+          .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .pImageInfo = &image_info,
+      };
+      vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+    }
+    r->active_bg_tex = desired;
+    r->bg_variant = 23;
+    r->global.bg_size[0] = desired->size[0];
+    r->global.bg_size[1] = desired->size[1];
+    return;
   }
   bool custom_bg_unchanged =
       custom_bg_have_file && r->bg_tex_custom && r->bg_custom_variant == 23 &&
@@ -693,7 +842,11 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
   if (r->discord_tex) destroy_texture(ctx, r->discord_tex);
   destroy_texture(ctx, r->boost_button_tex);
   destroy_texture(ctx, r->tex_atlas);
+  if (r->orb_atlas) destroy_texture(ctx, r->orb_atlas);
   if (r->bg_tex_custom) destroy_texture(ctx, r->bg_tex_custom);
+  for (int i = 0; i < r->bg_gif_frame_count; i++)
+    if (r->bg_gif_frames[i]) destroy_texture(ctx, r->bg_gif_frames[i]);
+  free(r->bg_gif_frames);
   if (r->bg_tex_alt) destroy_texture(ctx, r->bg_tex_alt);
   destroy_texture(ctx, r->bg_tex);
   vkDestroySampler(ctx->device, r->nearest_sampler, NULL);

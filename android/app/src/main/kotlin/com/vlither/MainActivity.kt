@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.5"
+        private const val CURRENT_VERSION   = "4.7.6"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -87,6 +87,7 @@ class MainActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        GameActivity.applySavedOrientation(this)
         super.onCreate(savedInstanceState)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
@@ -209,25 +210,23 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-     Update 4.7.5
+Update 4.7.6
 
-        What's New:
+What's New:
 
-        • Added a randomly generated, 16-character player ID, created the first time you launch the app. It's for custom-server events, so your score can be tracked correctly no matter what nickname or skin you use.
-           - On eligible servers, it's sent as packet 67 (16 bytes), right after the riddle answer and before your nickname/skin.
-           - Three new chat commands: !id (shows your player ID to copy and give to an event host), !idlist (shows which servers currently use this), !idforce (dev use — sends your ID to any server; not saved).
-        • You can now make your own nickname always visible in-game.
-        • Added the "2016 Background" style.
-        • Ping now shows your actual current ping instead of a rolling average.
-        • Head dot now fixed.
-        • Voice chat removed
+• Portrait & Landscape: play in either orientation. Switch anytime from the "Screen" button on the homepage.
+• Portrait controls: hold one finger to steer, tap with a second finger anywhere to boost.
+• New Skinless mode: a clean, solid-colour snake with a smooth body and no gaps.
+• New Orb mode: glossy textured balls for a fresh look.
+• Performance mode now has shadows, so it looks better while staying smooth.
 
-        Thanks for using Vlither Android!
-        Changes made by Lucky
+
+Thanks for using Vlither Android!
+Changes made by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.5")
+            .setTitle("What's New in v4.7.6")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

@@ -169,14 +169,45 @@ static void _android_set_immersive_fullscreen(void) {
     (*vm)->DetachCurrentThread(vm);
 }
 
+/* 1 = portrait, 0 = landscape, -1 = unknown (square / not reported). Read
+ * from the activity's configuration, which the app glue refreshes before it
+ * dispatches APP_CMD_CONFIG_CHANGED. */
+/* Orientation the activity has been locked to from the homepage toggle:
+ * 1 = portrait, 0 = landscape, -1 = free (follow the sensor). While locked,
+ * this is the one source of truth for the logical size, so a resize event
+ * that arrives before the activity's configuration refreshes can no longer
+ * build the swapchain for the wrong orientation. */
+static volatile int g_locked_orientation = -1;
+
+void twindow_android_set_orientation_mode(int mode) {
+    /* mode comes from the Java preference: 1 landscape, 2 portrait */
+    g_locked_orientation = (mode == 2) ? 1 : 0;
+}
+
+int twindow_android_orientation(void) {
+    if (g_locked_orientation >= 0) return g_locked_orientation;
+    if (!g_android_app || !g_android_app->config) return -1;
+    int o = AConfiguration_getOrientation(g_android_app->config);
+    if (o == ACONFIGURATION_ORIENTATION_PORT) return 1;
+    if (o == ACONFIGURATION_ORIENTATION_LAND) return 0;
+    return -1;
+}
+
 static void set_window_size(twindow* wnd, ANativeWindow* win) {
     int w = ANativeWindow_getWidth(win);
     int h = ANativeWindow_getHeight(win);
-    LOGI("Raw window dims: %dx%d", w, h);
-
-    wnd->size[0] = (w >= h) ? w : h;
-    wnd->size[1] = (w >= h) ? h : w;
-    LOGI("Using window size: %dx%d", wnd->size[0], wnd->size[1]);
+    /* The window can report its edges in the display's native orientation
+     * rather than the one on screen, so only the pair of lengths is trusted
+     * here; which is the width comes from the activity's orientation. (This
+     * used to force width >= height, which squeezed portrait.) */
+    int lo = w < h ? w : h;
+    int hi = w < h ? h : w;
+    int orient = twindow_android_orientation();
+    bool portrait = orient == 1 || (orient == -1 && h > w);
+    wnd->size[0] = portrait ? lo : hi;
+    wnd->size[1] = portrait ? hi : lo;
+    LOGI("Window size: raw %dx%d orient=%d -> %dx%d", w, h, orient,
+         wnd->size[0], wnd->size[1]);
 }
 
 typedef struct {
@@ -210,6 +241,8 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
                 if (resuming) {
                     tcontext_recreate_surface(wnd->env->ctx, wnd,
                                               wnd->env->config.vsync);
+                    wnd->size[0] = wnd->env->ctx->size[0];
+                    wnd->size[1] = wnd->env->ctx->size[1];
                     if (wnd->_resize_func) wnd->_resize_func(wnd->env);
                 }
 
@@ -229,16 +262,27 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
 
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONFIG_CHANGED:
+            /* The app glue only refreshes the configuration for
+             * CONFIG_CHANGED. A rotation can deliver WINDOW_RESIZED first, in
+             * which case the orientation read below would still be the old
+             * one and the swapchain got built squeezed. Refresh it here too. */
+            if (app->config && app->activity && app->activity->assetManager)
+                AConfiguration_fromAssetManager(app->config,
+                                                app->activity->assetManager);
             if (app->window) {
                 int old_w = wnd->size[0];
                 int old_h = wnd->size[1];
                 set_window_size(wnd, app->window);
-                if (wnd->size[0] != old_w || wnd->size[1] != old_h) {
-                    if (wnd->env && wnd->env->ctx) {
-                        tcontext_resize(wnd->env->ctx, wnd->size,
-                                        wnd->env->config.vsync);
-                        wnd->_resize_func(wnd->env);
-                    }
+                bool changed = wnd->size[0] != old_w || wnd->size[1] != old_h;
+                if (wnd->env && wnd->env->ctx &&
+                    (changed || tcontext_orientation_stale(wnd->env->ctx))) {
+                    tcontext_resize(wnd->env->ctx, wnd->size,
+                                    wnd->env->config.vsync);
+                    /* The swapchain decides the real size; keep the window's
+                     * copy (touch hit-tests, ImGui display size) identical. */
+                    wnd->size[0] = wnd->env->ctx->size[0];
+                    wnd->size[1] = wnd->env->ctx->size[1];
+                    wnd->_resize_func(wnd->env);
                 }
             }
             break;
@@ -604,6 +648,29 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                     wnd->touch.down        = true;
                     wnd->touch.just_down   = true;
                     wnd->touch.move_ptr_id = pid;
+
+                    /* Double-tap-and-hold-to-boost: only meaningful while
+                       there's no dedicated boost button to hit (g_boost_r is
+                       zeroed in portrait — see ui_overlay.c), so this never
+                       changes how boosting already works in landscape. */
+                    if (g_boost_r <= 0.0f && !wnd->touch.boost_down) {
+                        int64_t event_ms = AMotionEvent_getEventTime(event) / 1000000;
+                        float ddx = x - wnd->touch.last_tap_x;
+                        float ddy = y - wnd->touch.last_tap_y;
+                        bool is_double_tap =
+                            (event_ms - wnd->touch.last_tap_ms) < 400 &&
+                            (ddx * ddx + ddy * ddy) < (92.0f * 92.0f);
+                        if (is_double_tap) {
+                            wnd->touch.boost_x         = x;
+                            wnd->touch.boost_y         = y;
+                            wnd->touch.boost_down      = true;
+                            wnd->touch.boost_just_down = true;
+                            wnd->touch.boost_ptr_id    = pid;
+                        }
+                        wnd->touch.last_tap_ms = event_ms;
+                        wnd->touch.last_tap_x  = x;
+                        wnd->touch.last_tap_y  = y;
+                    }
                 }
                 break;
             }
@@ -641,6 +708,17 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                                      (dbx2*dbx2 + dby2*dby2) <=
                                          (g_boost_r * g_boost_r);
                     if (boost_hit && !wnd->touch.boost_down) {
+                        wnd->touch.boost_x         = x;
+                        wnd->touch.boost_y         = y;
+                        wnd->touch.boost_down      = true;
+                        wnd->touch.boost_just_down = true;
+                        wnd->touch.boost_ptr_id    = pid;
+                    } else if (wnd->touch.down && g_boost_r <= 0.0f &&
+                               !wnd->touch.boost_down) {
+                        /* No round boost button on screen (portrait): the
+                           first finger is already steering (joystick/arrow),
+                           so a second finger touching anywhere just boosts
+                           for as long as it stays down. */
                         wnd->touch.boost_x         = x;
                         wnd->touch.boost_y         = y;
                         wnd->touch.boost_down      = true;

@@ -55,6 +55,7 @@ typedef struct ntl_tags_state {
   int pending_tag_id;
   int preview_tag_id;
   char pending_hash[33];
+  char pending_password[96];
   double auth_started;
   double catalog_started;
   double next_catalog_sync;
@@ -581,8 +582,15 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
         .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
     mg_tls_init(c, &tls);
 
-    /* Match NTL's interactive `!tag id pass` command exactly. The batch
-       endpoint is only used by NTL to re-check its saved tag list. */
+    /* Match NTL's interactive `!tag id pass` command exactly: that command
+       takes the plaintext password, not its MD5 digest (the digest is only
+       used afterwards, as the "sa" identity on the position-mapping
+       websocket). Sending the hash here made every private-tag
+       authorization request fail. The password can contain characters
+       that are unsafe in a URL, so percent-encode it first. */
+    char pass_enc[sizeof S.pending_password * 3 + 8];
+    mg_url_encode(S.pending_password, strlen(S.pending_password),
+                 pass_enc, sizeof pass_enc);
     mg_printf(c,
               "GET " NTL_TAG_AUTH_PATH "?id=%d&pass=%s HTTP/1.1\r\n"
               "Host: " NTL_TAG_HOST "\r\n"
@@ -592,7 +600,9 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
               "Referer: https://slither.io/\r\n"
               "Accept: */*\r\n"
               "Connection: close\r\n\r\n",
-              S.pending_tag_id, S.pending_hash);
+              S.pending_tag_id, pass_enc);
+    /* Don't keep the plaintext around any longer than needed to send it. */
+    memset(S.pending_password, 0, sizeof S.pending_password);
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     char body[128];
@@ -1150,6 +1160,8 @@ bool ntl_tags_request_private(int id, const char *password) {
   }
 
   md5_hex(password, S.pending_hash);
+  strncpy(S.pending_password, password, sizeof S.pending_password - 1);
+  S.pending_password[sizeof S.pending_password - 1] = 0;
   S.pending_tag_id = id;
   S.auth = mg_http_connect(&S.mgr, "https://ntl-slither.com", auth_cb, NULL);
   S.auth_started = mg_millis() / 1000.0;
