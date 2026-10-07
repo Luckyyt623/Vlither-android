@@ -21,6 +21,9 @@
 #endif
 #define NTL_MAX_TEAM 64
 #define NTL_URL_MAX 2048
+/* Protocol version the NTL server expects (extension manifest version).
+   Was 4.1; the extension now reports 9.68 and the server may gate on it. */
+#define NTL_PROTOCOL_VER "9.68"
 #define NTL_POLL_SECONDS 1.0
 #define NTL_RETRY_BASE_SECONDS 1.0
 #define NTL_RETRY_MAX_SECONDS 6.0
@@ -923,12 +926,22 @@ static void cb(struct mg_connection *c, int ev, void *ev_data) {
   if (c != S.request_conn) return;
 
   if (ev == MG_EV_CONNECT) {
-    struct mg_tls_opts tls = {.skip_verification = 1};
+    /* FIX: send SNI. Without .name the TLS ClientHello has no server_name, so
+       a vhost/CDN-fronted ntl-slither.com answers with the wrong cert or
+       drops the handshake -> chat never connects. Every other NTL request
+       (ntl_tags.c) already sets it. */
+    struct mg_tls_opts tls = {.name = mg_str("ntl-slither.com"),
+                              .skip_verification = 1};
     mg_tls_init(c, &tls);
+    /* FIX: look like the extension's XHR (browser UA + slither.io origin).
+       Some front-ends reject unknown non-browser user agents with 403. */
     mg_printf(c,
               "GET %s HTTP/1.1\r\nHost: ntl-slither.com\r\n"
-              "User-Agent: Vlither/4.1\r\n"
-              "Accept: application/json,text/plain,*/*\r\n"
+              "User-Agent: Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36\r\n"
+              "Origin: https://slither.io\r\n"
+              "Referer: https://slither.io/\r\n"
+              "Accept: */*\r\n"
               "Connection: close\r\n\r\n",
               S.request_path);
   } else if (ev == MG_EV_HTTP_MSG) {
@@ -1059,7 +1072,7 @@ static void ntl_poll_request(tenv *env) {
       S.request_path, sizeof S.request_path,
       "/slither/ntlplay-mt.php?auth=%s&tid=%s&nick=%s&score=%d"
       "&valx=%.0f&valy=%.0f&bot=false&sos=%s&food=false&srv=%s"
-      "&sid=%d&msg=%s&rank=%d&dt=%s&cs=%d&tg=%d&ver=4.1&tlm=&di=1000",
+      "&sid=%d&msg=%s&rank=%d&an=false&dt=%s&cs=%d&tg=%d&ver=" NTL_PROTOCOL_VER "&tlm=&di=1000",
       us->ntl_auth_key, us->ntl_team_id, nick, score, x, y,
       (S.sos_until > mg_millis() / 1000.0) ? "true" : "false", srv, sid,
       msg, rank, dt, local ? local->accessory : 0, us->ntl_tag_id);

@@ -17,6 +17,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import java.io.File
 import java.net.HttpURLConnection
@@ -27,7 +28,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.6"
+        private const val CURRENT_VERSION   = "4.7.7"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -68,10 +69,14 @@ class MainActivity : Activity() {
     private lateinit var tvUpdateMsg:   TextView
     private lateinit var btnDownload:   Button
     private lateinit var btnLater:      Button
+    private lateinit var progressUpdate: ProgressBar   // real download progress bar
+    private lateinit var tvProgress:    TextView       // "Downloading 10%  (3.2 / 32 MB)"
+    private var updateAvailable = false
+    private var progressPolling = false
 
     private var latestVersion:  String? = null
     private var apkDownloadUrl: String? = null
-    private var pendingDownloadId: Long = -1L
+    @Volatile private var pendingDownloadId: Long = -1L
     private var receiverRegistered = false
 
     private val executor    = Executors.newSingleThreadExecutor()
@@ -120,6 +125,7 @@ class MainActivity : Activity() {
         val savedId = prefs.getLong(PREF_PENDING_DL_ID, -1L)
         if (savedId == -1L) return
         pendingDownloadId = savedId
+        startProgressPolling(savedId)
         executor.execute { handleDownloadFinished(savedId) }
     }
 
@@ -161,22 +167,112 @@ class MainActivity : Activity() {
     // ── Update checker ─────────────────────────────────────────────────
 
     private fun checkForUpdate() {
+        if (pendingDownloadId == -1L) {
+            tvUpdateMsg.text = "Checking for updates…"
+            btnDownload.isEnabled = false
+        }
         executor.execute {
             try {
                 val latest = fetchText(VERSION_URL).trim()
-                if (latest.isEmpty()) return@execute
+                if (latest.isEmpty()) {
+                    mainHandler.post { showCheckFailed() }
+                    return@execute
+                }
                 val dlUrl = fetchText(DOWNLOAD_URL_FILE).trim()
                 Log.d(TAG, "Latest: $latest  Current: $CURRENT_VERSION")
                 if (isNewerVersion(latest, CURRENT_VERSION)) {
                     latestVersion  = latest
                     apkDownloadUrl = dlUrl
                     mainHandler.post { showUpdatePanel(latest) }
+                } else {
+                    mainHandler.post { showUpToDate() }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Update check failed: ${e.message}")
+                mainHandler.post { showCheckFailed() }
             }
         }
     }
+
+    /** Update panel is ALWAYS visible; these set its idle states. */
+    private fun showUpToDate() {
+        updateAvailable = false
+        if (pendingDownloadId != -1L) return
+        tvUpdateMsg.text = "You're up to date (v$CURRENT_VERSION)"
+        btnDownload.text = "🔄  Check for Update"
+        btnDownload.isEnabled = true
+        btnLater.visibility = View.GONE
+    }
+
+    private fun showCheckFailed() {
+        updateAvailable = false
+        if (pendingDownloadId != -1L) return
+        tvUpdateMsg.text = "Couldn't check for updates"
+        btnDownload.text = "🔄  Check for Update"
+        btnDownload.isEnabled = true
+        btnLater.visibility = View.GONE
+    }
+
+    // ── Real download progress (reads DownloadManager's byte counters) ──
+
+    private fun startProgressPolling(id: Long) {
+        if (progressPolling) return
+        progressPolling = true
+        progressUpdate.visibility = View.VISIBLE
+        tvProgress.visibility = View.VISIBLE
+        btnDownload.text = "Downloading update…"
+        btnDownload.isEnabled = false
+        val poll = object : Runnable {
+            override fun run() {
+                if (!progressPolling || pendingDownloadId != id) { hideProgress(); return }
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                var status = -1; var got = 0L; var total = -1L
+                dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
+                    if (c.moveToFirst()) {
+                        status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                        got    = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                        total  = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                    }
+                }
+                when (status) {
+                    DownloadManager.STATUS_PENDING -> {
+                        progressUpdate.isIndeterminate = true
+                        tvProgress.text = "Starting download…"
+                    }
+                    DownloadManager.STATUS_PAUSED -> {
+                        tvProgress.text = "Download paused — waiting for network…"
+                    }
+                    DownloadManager.STATUS_RUNNING -> {
+                        if (total > 0) {
+                            val pct = (got * 100 / total).toInt().coerceIn(0, 100)
+                            progressUpdate.isIndeterminate = false
+                            progressUpdate.progress = pct
+                            tvProgress.text = "Downloading $pct%  (${fmtMb(got)} / ${fmtMb(total)})"
+                        } else {
+                            progressUpdate.isIndeterminate = true   // size unknown: don't fake a %
+                            tvProgress.text = "Downloading… ${fmtMb(got)}"
+                        }
+                    }
+                    DownloadManager.STATUS_SUCCESSFUL, DownloadManager.STATUS_FAILED, -1 -> {
+                        progressPolling = false
+                        // Receiver normally handles this; cover the missed-broadcast case.
+                        executor.execute { handleDownloadFinished(id) }
+                        return
+                    }
+                }
+                mainHandler.postDelayed(this, 400)
+            }
+        }
+        mainHandler.post(poll)
+    }
+
+    private fun hideProgress() {
+        progressPolling = false
+        progressUpdate.visibility = View.GONE
+        tvProgress.visibility = View.GONE
+    }
+
+    private fun fmtMb(b: Long): String = String.format("%.1f MB", b / 1048576.0)
 
     private fun fetchText(urlStr: String): String {
         val conn = URL(urlStr).openConnection() as HttpURLConnection
@@ -201,8 +297,14 @@ class MainActivity : Activity() {
     }
 
     private fun showUpdatePanel(version: String) {
-        tvUpdateMsg.text = "New update available: v$version"
+        updateAvailable = true
         layoutUpdate.visibility = View.VISIBLE
+        btnLater.visibility = View.VISIBLE
+        if (pendingDownloadId == -1L) {
+            tvUpdateMsg.text = "New update available: v$version"
+            btnDownload.text = "⬇  Download Update"
+            btnDownload.isEnabled = true
+        }
         btnChangelog.visibility = View.VISIBLE
         // Dim play button to hint user about update
         btnPlay.alpha = 0.6f
@@ -214,11 +316,7 @@ Update 4.7.6
 
 What's New:
 
-• Portrait & Landscape: play in either orientation. Switch anytime from the "Screen" button on the homepage.
-• Portrait controls: hold one finger to steer, tap with a second finger anywhere to boost.
-• New Skinless mode: a clean, solid-colour snake with a smooth body and no gaps.
-• New Orb mode: glossy textured balls for a fresh look.
-• Performance mode now has shadows, so it looks better while staying smooth.
+• NTL chat now fixed.
 
 
 Thanks for using Vlither Android!
@@ -257,8 +355,7 @@ Changes made by Lucky
             getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
                 .putLong(PREF_PENDING_DL_ID, id).apply()
 
-            btnDownload.text = "Downloading update..."
-            btnDownload.isEnabled = false
+            startProgressPolling(id)
             android.widget.Toast.makeText(this,
                 "Downloading — the install prompt will open automatically when it's done",
                 android.widget.Toast.LENGTH_LONG).show()
@@ -271,7 +368,9 @@ Changes made by Lucky
     }
 
     /** Called once DownloadManager reports the update APK finished (or on relaunch, if it finished while we were gone). */
+    @Synchronized
     private fun handleDownloadFinished(id: Long) {
+        if (pendingDownloadId != id) return   // already handled (receiver vs. poller)
         val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val cursor = dm.query(DownloadManager.Query().setFilterById(id))
         var status = -1
@@ -300,6 +399,7 @@ Changes made by Lucky
             promptInstall(dm, id)
         } else {
             mainHandler.post {
+                hideProgress()
                 btnDownload.text = "⬇  Download Update"
                 btnDownload.isEnabled = true
                 android.widget.Toast.makeText(this,
@@ -312,6 +412,7 @@ Changes made by Lucky
     /** Opens the system "Install app" screen for the just-downloaded APK. */
     private fun promptInstall(dm: DownloadManager, id: Long) {
         mainHandler.post {
+            hideProgress()
             btnDownload.text = "⬇  Download Update"
             btnDownload.isEnabled = true
             try {
@@ -348,12 +449,7 @@ Changes made by Lucky
         ).also { it.gravity = android.view.Gravity.CENTER }
 
         // Title
-        val tvTitle = TextView(this)
-        tvTitle.text = "VLITHER"
-        tvTitle.textSize = 40f
-        tvTitle.setTextColor(0xFF2BAA60.toInt())
-        tvTitle.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        tvTitle.gravity = android.view.Gravity.CENTER
+        val tvTitle = AnimatedLogoView(this)
         tvTitle.setPadding(0, 0, 0, 48)
 
         val btnParams = LinearLayout.LayoutParams(
@@ -397,7 +493,7 @@ Changes made by Lucky
         // ── Update panel — hidden until update found ──────────────────
         layoutUpdate = LinearLayout(this)
         layoutUpdate.orientation = LinearLayout.VERTICAL
-        layoutUpdate.visibility = View.GONE
+        layoutUpdate.visibility = View.VISIBLE   // always visible on the home page
         layoutUpdate.setPadding(0, 16, 0, 0)
 
         // Divider line
@@ -413,15 +509,31 @@ Changes made by Lucky
         tvUpdateMsg.setTextColor(0xFF5DADE2.toInt())
         tvUpdateMsg.gravity = android.view.Gravity.CENTER
         tvUpdateMsg.setPadding(0, 0, 0, 12)
+        tvUpdateMsg.text = "Checking for updates…"
+
+        progressUpdate = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        progressUpdate.max = 100
+        progressUpdate.visibility = View.GONE
+        progressUpdate.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 24).also { it.setMargins(0, 4, 0, 4) }
+
+        tvProgress = TextView(this)
+        tvProgress.textSize = 13f
+        tvProgress.setTextColor(0xFFADD8E6.toInt())
+        tvProgress.gravity = android.view.Gravity.CENTER
+        tvProgress.visibility = View.GONE
 
         btnDownload = Button(this)
-        btnDownload.text = "⬇  Download Update"
+        btnDownload.text = "🔄  Check for Update"
+        btnDownload.isEnabled = false      // enabled once the check finishes
         btnDownload.textSize = 14f
         btnDownload.setPadding(0, 20, 0, 20)
         btnDownload.layoutParams = btnParams
         btnDownload.setBackgroundColor(0xFF1A5276.toInt())
         btnDownload.setTextColor(0xFFADD8E6.toInt())
-        btnDownload.setOnClickListener { onDownloadClicked() }
+        btnDownload.setOnClickListener {
+            if (updateAvailable) onDownloadClicked() else checkForUpdate()
+        }
 
         btnLater = Button(this)
         btnLater.text = "Later — Play Current Version"
@@ -429,14 +541,17 @@ Changes made by Lucky
         btnLater.setPadding(0, 16, 0, 16)
         btnLater.layoutParams = btnParams
         btnLater.alpha = 0.6f
+        btnLater.visibility = View.GONE    // only meaningful when an update exists
         btnLater.setOnClickListener {
             // Hide update panel and restore play button
-            layoutUpdate.visibility = View.GONE
+            btnLater.visibility = View.GONE
             btnPlay.alpha = 1.0f
         }
 
         layoutUpdate.addView(divider)
         layoutUpdate.addView(tvUpdateMsg)
+        layoutUpdate.addView(progressUpdate)
+        layoutUpdate.addView(tvProgress)
         layoutUpdate.addView(btnDownload)
         layoutUpdate.addView(btnLater)
 
@@ -446,7 +561,18 @@ Changes made by Lucky
         col.addView(btnPlay)
         col.addView(btnChangelog)
         col.addView(layoutUpdate)
-        root.addView(col, colParams)
+        // Scrollable + vertically centred so EVERY button stays reachable
+        // (update panel, landscape, small screens).
+        col.gravity = android.view.Gravity.CENTER_VERTICAL
+        val scroll = android.widget.ScrollView(this)
+        scroll.isFillViewport = true
+        scroll.isVerticalScrollBarEnabled = false
+        scroll.addView(col, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT))
+        root.addView(scroll, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
     }
 
