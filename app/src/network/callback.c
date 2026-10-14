@@ -12,6 +12,7 @@
 #include "../game/snake.h"
 #include "../game/ntl_tags.h"
 #include "../game/oef.h"
+#include "../game/lifetime_stats.h"
 #include "../game/snakey_rain.h"
 #include "../user.h"
 #ifdef ANDROID
@@ -1351,6 +1352,10 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     }
   } else if (cmd == 'k') {
     gdata->data.kills++;
+    if (!gdata->preview_active) {
+      lifetime_stats_add_kill();
+      lifetime_stats_note_match_kills(gdata->data.kills);
+    }
 #ifdef ANDROID
     if (!gdata->preview_active && gdata->curr_screen == PLAYING)
       android_jni_capture_confirmed_kill();
@@ -1368,6 +1373,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       usrs->play_time = gdata->data.play_etm;
 
       save_user_settings(usrs);
+      lifetime_stats_save_if_dirty();
     }
 
     if (usrs->instant_restart) {

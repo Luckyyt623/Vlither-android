@@ -3,6 +3,10 @@
 #include "../user.h"
 #include "../game/ntl_team.h"
 #include "../game/oef.h"
+#include "../game/vlither_tags.h"
+#ifdef ANDROID
+#include "../android_path.h"
+#endif
 #include "callback.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -224,16 +228,74 @@ bool server_bd_id_handle_command(tenv* env, const char* input) {
   return false;
 }
 
+#define CUSTOM_SERVERS_CACHE_FILE "custom_servers.txt"
+
+static FILE* custom_cache_open(const char* mode) {
+#ifdef ANDROID
+  char path[512];
+  android_build_path(path, sizeof(path), CUSTOM_SERVERS_CACHE_FILE);
+  return fopen(path, mode);
+#else
+  return fopen(CUSTOM_SERVERS_CACHE_FILE, mode);
+#endif
+}
+
+static bool custom_ip_valid(const char* ip) {
+  size_t n = ip ? strlen(ip) : 0;
+  if (n < 3 || n > MAX_SERVER_IP_LEN || !strchr(ip, ':')) return false;
+  for (size_t i = 0; i < n; i++)
+    if (!isdigit((unsigned char)ip[i]) && ip[i] != '.' && ip[i] != ':')
+      return false;
+  return true;
+}
+
+/* Adds one entry to the custom block at the front of the list. */
+static bool custom_add(game_data* gdata, const char* name, const char* ip) {
+  int i = gdata->server_list.count;
+  if (i >= MAX_CUSTOM_SERVERS || !custom_ip_valid(ip) || !name || !name[0])
+    return false;
+  snprintf(gdata->server_list.ips[i], MAX_SERVER_IP_LEN + 1, "%s", ip);
+  snprintf(gdata->server_list.names[i], MAX_CUSTOM_NAME_LEN + 1, "%s", name);
+  gdata->server_list.families[i] = 4;
+  gdata->server_list.sids[i] = 0;
+  gdata->server_list.count++;
+  gdata->server_list.custom_count = gdata->server_list.count;
+  return true;
+}
+
+static void custom_cache_save(game_data* gdata) {
+  FILE* f = custom_cache_open("wb");
+  if (!f) return;
+  for (int i = 0; i < gdata->server_list.custom_count; i++)
+    fprintf(f, "%s\t%s\n", gdata->server_list.ips[i],
+            gdata->server_list.names[i]);
+  fclose(f);
+}
+
+static bool custom_cache_load(game_data* gdata) {
+  FILE* f = custom_cache_open("rb");
+  if (!f) return false;
+  char line[200];
+  while (fgets(line, sizeof line, f)) {
+    line[strcspn(line, "\r\n")] = 0;
+    char* tab = strchr(line, '\t');
+    if (!tab) continue;
+    *tab = 0;
+    custom_add(gdata, tab + 1, line);
+  }
+  fclose(f);
+  return gdata->server_list.count > 0;
+}
+
+/* Shown immediately: last list fetched from the admin page, or the built-in
+   list if the app has never reached the backend. */
 static void server_list_seed_custom(game_data* gdata) {
   gdata->server_list.count = 0;
-  for (int i = 0; i < CUSTOM_SERVER_COUNT; i++) {
-    strncpy(gdata->server_list.ips[i], CUSTOM_SERVER_IPS[i], MAX_SERVER_IP_LEN);
-    gdata->server_list.ips[i][MAX_SERVER_IP_LEN] = '\0';
-    gdata->server_list.families[i] = 4;
-    gdata->server_list.sids[i] = 0;
-    gdata->server_list.count++;
-  }
-  gdata->server_list.custom_count = gdata->server_list.count;
+  gdata->server_list.custom_count = 0;
+  if (custom_cache_load(gdata)) return;
+  gdata->server_list.count = 0;
+  for (int i = 0; i < CUSTOM_SERVER_COUNT; i++)
+    custom_add(gdata, CUSTOM_SERVER_NAMES[i], CUSTOM_SERVER_IPS[i]);
 }
 
 static void server_list_parse(const char* data, int len,
@@ -350,6 +412,92 @@ static void sl_do_https(game_data* gdata) {
   mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTPS, sl_http_cb, gdata);
 }
 
+/* ---- Admin-managed custom server list (GET /api/v1/servers) ----------- *
+ * Runs before the official slither.io list so the custom entries (which sit
+ * at the front of the array) are final before official ones are appended.
+ * Any failure or a 4 s timeout falls back to the cached/built-in list. */
+#define CUSTOM_FETCH_TIMEOUT_MS 4000
+
+static void server_list_start_official(game_data* gdata) {
+  mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTP, sl_http_cb, gdata);
+}
+
+static void custom_stage_finish(game_data* gdata) {
+  if (!gdata->server_list.custom_stage) return;
+  gdata->server_list.custom_stage = false;
+  gdata->server_list.custom_conn = NULL;
+  server_list_start_official(gdata);
+}
+
+static void custom_apply_json(game_data* gdata, struct mg_str json) {
+  char names[MAX_CUSTOM_SERVERS][MAX_CUSTOM_NAME_LEN + 1];
+  char ips[MAX_CUSTOM_SERVERS][MAX_SERVER_IP_LEN + 1];
+  int n = 0;
+  for (; n < MAX_CUSTOM_SERVERS; n++) {
+    char path[48];
+    snprintf(path, sizeof path, "$.servers[%d].ip", n);
+    char* ip = mg_json_get_str(json, path);
+    if (!ip) break;
+    snprintf(path, sizeof path, "$.servers[%d].name", n);
+    char* name = mg_json_get_str(json, path);
+    bool ok = name && name[0] && custom_ip_valid(ip);
+    if (ok) {
+      snprintf(ips[n], sizeof ips[n], "%s", ip);
+      snprintf(names[n], sizeof names[n], "%s", name);
+    }
+    mg_free(ip);
+    if (name) mg_free(name);
+    if (!ok) return; /* malformed reply: keep what we already have */
+  }
+  if (n == 0) return; /* never wipe the list because of an empty reply */
+  gdata->server_list.count = 0;
+  gdata->server_list.custom_count = 0;
+  for (int i = 0; i < n; i++) custom_add(gdata, names[i], ips[i]);
+  custom_cache_save(gdata);
+}
+
+static void custom_http_cb(struct mg_connection* c, int ev, void* ev_data) {
+  game_data* gdata = (game_data*)c->fn_data;
+  if (!gdata) return; /* detached after a timeout */
+  if (ev == MG_EV_CONNECT) {
+    const char* base = vlither_backend_base_url();
+    char url[256];
+    snprintf(url, sizeof url, "%s/api/v1/servers", base);
+    if (c->is_tls) {
+      struct mg_tls_opts tls = {.name = mg_url_host(url),
+                                .skip_verification = 1};
+      mg_tls_init(c, &tls);
+    }
+    struct mg_str host = mg_url_host(url);
+    mg_printf(c,
+              "GET /api/v1/servers HTTP/1.1\r\nHost: %.*s\r\n"
+              "User-Agent: Vlither/Servers\r\nAccept: application/json\r\n"
+              "Connection: close\r\n\r\n",
+              (int)host.len, host.buf);
+  } else if (ev == MG_EV_HTTP_MSG) {
+    struct mg_http_message* hm = (struct mg_http_message*)ev_data;
+    bool ok = false;
+    mg_json_get_bool(hm->body, "$.ok", &ok);
+    if (mg_http_status(hm) == 200 && ok) custom_apply_json(gdata, hm->body);
+    c->fn_data = NULL;
+    c->is_draining = 1;
+    custom_stage_finish(gdata);
+  } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+    c->fn_data = NULL;
+    custom_stage_finish(gdata);
+  }
+}
+
+static void custom_stage_start(game_data* gdata) {
+  char url[256];
+  snprintf(url, sizeof url, "%s/api/v1/servers", vlither_backend_base_url());
+  gdata->server_list.custom_stage = true;
+  gdata->server_list.custom_started_ms = mg_millis();
+  gdata->server_list.custom_conn =
+      mg_http_connect(&gdata->server_list.mgr, url, custom_http_cb, gdata);
+  if (!gdata->server_list.custom_conn) custom_stage_finish(gdata);
+}
+
 void server_list_init(tenv* env) {
   game_data* gdata = &((tuser_data*)env->usr)->gdata;
   mg_mgr_init(&gdata->server_list.mgr);
@@ -357,6 +505,8 @@ void server_list_init(tenv* env) {
   gdata->server_list.fetched     = false;
   gdata->server_list.fetch_error = false;
   gdata->server_list.retry_https = false;
+  gdata->server_list.custom_stage = false;
+  gdata->server_list.custom_conn  = NULL;
   gdata->server_list.pinging     = 0;
   gdata->server_list.ping_stop   = 0;
   gdata->server_list.pings_done  = 0;
@@ -383,7 +533,7 @@ void server_list_fetch(tenv* env) {
     gdata->server_list.sids[i]         = 0;
   }
   server_list_seed_custom(gdata);
-  mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTP, sl_http_cb, gdata);
+  custom_stage_start(gdata);
 }
 
 bool server_list_resolve_sid(tenv* env, int sid, char* address,
@@ -404,6 +554,15 @@ bool server_list_resolve_sid(tenv* env, int sid, char* address,
 
 void server_list_poll(tenv* env) {
   game_data* gdata = &((tuser_data*)env->usr)->gdata;
+  if (gdata->server_list.custom_stage &&
+      mg_millis() - gdata->server_list.custom_started_ms >
+          CUSTOM_FETCH_TIMEOUT_MS) {
+    if (gdata->server_list.custom_conn) {
+      gdata->server_list.custom_conn->fn_data = NULL;
+      gdata->server_list.custom_conn->is_closing = 1;
+    }
+    custom_stage_finish(gdata);
+  }
   mg_mgr_poll(&gdata->server_list.mgr, 0);
 }
 

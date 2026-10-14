@@ -3,26 +3,60 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 sbot_dbg g_bot_dbg;
 
 #include "../user.h"
 
+/* ---- NTL MOD parity constants (taken from NTL MOD v9.68 bot) ------------ */
 #define ARC_SIZE (M_PI / 8.0f)
 #define MAXARC 16
 #define SPEED_BASE 5.78f
 #define FRONT_ANGLE (M_PI / 2.0f)
-#define ENCIRCLE_THRESH 0.5625f
-#define ENCIRCLE_ALL_THRESH 0.5625f
-#define ENCIRCLE_DIST_MULT 20.0f
-#define BORDER_PT_RADIUS 20.0f
-#define COLLISION_DELAY 10
-#define ACTION_FRAMES 2
+#define ENCIRCLE_THRESH 0.5f
+#define ENCIRCLE_ALL_THRESH 0.5f
+#define ENCIRCLE_DIST_MULT 30.0f
+#define NTL_RADIUS_MULT 12 /* NTL hard-codes 12; Vlither used the user setting */
+#define SNAKE_WIDTH_MULT 29.2f
+#define NEARBY_BOX 2400.0f /* enemy body points are only considered in this box */
+
+/* Wall: NTL treats a ring at 0.98 * arena radius as the wall (2% early
+   margin), sampled as 251 points of radius 8 spaced 8 units apart (+-1000
+   around the snake), whenever the head is within 3500 of the border. */
+#define WALL_RANGE 3500.0f
+#define WALL_RING_SCALE 0.98f
+#define WALL_PT_RADIUS 8.0f
+#define WALL_HALF_SPAN 1000
+#define WALL_STEP 8
+#define WALL_GROUP 511 /* encircle bucket for wall points (never a snake) */
+
+/* Coil tuning (NTL values) */
+#define COIL_WALL_BIAS_RANGE 1650.0f
+#define ENEMY_BODY_MULT 0.38f
+#define ENEMY_BODY_OD0 0.15f
+#define WALL_OFF_MULT 0.22f
+#define WALL_OD0 0.25f
+#define COIL_MIN_COURSE (-0.8f)
+#define COIL_BODY_PENALTY 0.16f
+#define TO_CIRCLE_I8 25.0f
+#define SELF_CHECK_FRAC 0.85f
+
+/* NTL timing: bot ticks at 25 Hz; retarget after 5 ticks, back off 25 ticks
+   after a collision decision. */
+#define ACTION_MS 200.0
+#define COLLISION_MS 1000.0
+
+/* Vlither's extra predictive border override. NTL does not have it (its dense
+   0.98 ring does the job), so it is off for exact NTL behaviour. */
+#ifndef SBOT_BORDER_EMERGENCY
+#define SBOT_BORDER_EMERGENCY 0
+#endif
 
 #define MAX_BODY_PTS 8192
 #define MAX_HULL_PTS 32
 #define MAX_INSIDE_PTS 512
-#define MAX_COLL_PTS 512
+#define MAX_COLL_PTS 1024
 
 typedef struct {
   float x, y;
@@ -63,7 +97,8 @@ typedef struct {
 
 typedef struct {
   int stage;
-  int delay_frame;
+  bool timer_pending;
+  double timer_at;
   int default_accel;
   int circle_dir;
   bool enable_encircle;
@@ -95,6 +130,14 @@ typedef struct {
 
   float radius_mult;
   float follow_circle_length;
+
+  /* wall info, refreshed every frame in every() */
+  bool near_wall;       /* within WALL_RANGE of the (possibly shrunk) border */
+  float wall_dist;      /* |edge - distance from centre| */
+  float wall_ring_r;    /* radius of the sampled wall ring */
+  float wall_view_ang;  /* angle from arena centre to the head */
+  float wall_dist_grd;  /* |grd - distance from centre| (ignores shrink) */
+  float follow_tx, follow_ty; /* NTL followCircleTarget */
 } bot_state;
 
 static bot_state B;
@@ -126,7 +169,9 @@ static inline int ang_index(float angle) {
   return i == MAXARC ? 0 : i;
 }
 
-static inline float snake_width(float sc) { return roundf(sc * 29.0f); }
+static inline float snake_width(float sc) {
+  return roundf(sc * SNAKE_WIDTH_MULT);
+}
 
 static inline v2 unit_vec(v2 v) {
   float l = sqrtf(v.x * v.x + v.y * v.y);
@@ -234,8 +279,10 @@ static bool circle_intersect(circ c1, circ c2, isect* out) {
 }
 
 static v2 heading_abs(float angle) {
-  return (v2){roundf(B.x + 500.0f * cosf(angle)),
-              roundf(B.y + 500.0f * sinf(angle))};
+  /* NTL: He() aims at head-circle radius; keep a floor so the mouse vector
+     never falls inside the game's dead-zone. Only the direction matters. */
+  float r = fmaxf(B.head_circle.r, 100.0f);
+  return (v2){roundf(B.x + r * cosf(angle)), roundf(B.y + r * sinf(angle))};
 }
 
 static v2 heading_rel(float angle) {
@@ -298,12 +345,11 @@ static void get_collision_points(game_data* gdata) {
   B.coll_pts_n = 0;
   memset(B.coll_angles_set, 0, sizeof(B.coll_angles_set));
 
-  float far_d2 = (B.width * 50.0f) * (B.width * 50.0f);
   int ns = tdarray_length(gdata->data.snakes);
 
   for (int i = 0; i < ns; i++) {
     snake* s = gdata->data.snakes + i;
-    if (s->id == B.id) continue;
+    if (s->id == B.id || s->dead) continue;
 
     float sr = snake_width(s->sc) / 2.0f;
     float smul = fminf(1.0f, s->sp / SPEED_BASE - 1.0f);
@@ -321,8 +367,11 @@ static void get_collision_points(game_data* gdata) {
     for (int j = 0; j < pn; j++) {
       body_part* po = s->pts + j;
       if (po->dying) continue;
+      /* NTL: only body points inside a 2400x2400 box around the head. */
+      if (fabsf(po->xx - B.x) > NEARBY_BOX * 0.5f ||
+          fabsf(po->yy - B.y) > NEARBY_BOX * 0.5f)
+        continue;
       float pd2 = dist2(B.x, B.y, po->xx, po->yy);
-      if (pd2 > far_d2) continue;
       coll_pt bp = {po->xx, po->yy, pd2, sr, i, 1};
       add_coll_angle(&bp);
       float tr = B.head_circle.r + sr;
@@ -331,27 +380,18 @@ static void get_collision_points(game_data* gdata) {
     }
   }
 
-  /* Use the snake head itself, not the interpolated camera position. Follow
-     view and camera lag can otherwise place the sampled wall arc beside the
-     real danger area. */
-  float view_ang = atan2f(B.y - gdata->data.grd,
-                          B.x - gdata->data.grd);
-  float dist_to_ctr = sqrtf(dist2(B.x, B.y, gdata->data.grd, gdata->data.grd));
-  float border_radius = safe_border_radius(gdata);
-  bool near_wall = border_radius > 0.0f &&
-                   (border_radius - dist_to_ctr) < 1000.0f;
-
-  if (near_wall) {
-    float bpw = BORDER_PT_RADIUS * 2.0f;
-    float brad = border_radius + BORDER_PT_RADIUS;
-    for (int k = -12; k <= 12; k++) {
-      float wa = view_ang + (k * bpw) / border_radius;
-      float wx = gdata->data.grd + brad * cosf(wa);
-      float wy = gdata->data.grd + brad * sinf(wa);
+  /* NTL wall: 251 points (r=8, step 8, +-1000) on a ring at 0.98 * arena
+     radius (or the live shrunk radius), only within 3500 of the border. */
+  if (B.near_wall && gdata->data.grd > 0.0f) {
+    const float grd = gdata->data.grd;
+    for (int k = -WALL_HALF_SPAN; k <= WALL_HALF_SPAN; k += WALL_STEP) {
+      float wa = B.wall_view_ang + (float)k / grd;
+      float wx = grd + cosf(wa) * B.wall_ring_r;
+      float wy = grd + sinf(wa) * B.wall_ring_r;
       float wd2 = dist2(B.x, B.y, wx, wy);
-      coll_pt wp = {wx, wy, wd2, BORDER_PT_RADIUS, -1, 2};
-      if (B.coll_pts_n < MAX_COLL_PTS) B.coll_pts[B.coll_pts_n++] = wp;
+      coll_pt wp = {wx, wy, wd2, WALL_PT_RADIUS, WALL_GROUP, 2};
       add_coll_angle(&wp);
+      if (B.coll_pts_n < MAX_COLL_PTS) B.coll_pts[B.coll_pts_n++] = wp;
     }
   }
 
@@ -469,7 +509,7 @@ static bool check_encircle(game_data* gdata) {
   if (high > (int)(MAXARC * ENCIRCLE_THRESH)) {
     heading_best_angle();
     int ns = tdarray_length(gdata->data.snakes);
-    if (high != MAXARC && high_si < ns)
+    if (high != MAXARC && high_si != WALL_GROUP && high_si < ns)
       gdata->bot.output.accel = gdata->data.snakes[high_si].sp > 10.0f;
     else
       gdata->bot.output.accel = (bool)B.default_accel;
@@ -679,19 +719,22 @@ static void follow_circle_self(game_data* gdata) {
 
   float offset_incr = 0.0625f * B.width;
 
-  float enemy_body_od = 0.25f * B.width;
+  float enemy_body_od = ENEMY_BODY_OD0 * B.width;
   float enemy_head_d2 = 64.0f * 64.0f * B.width * B.width;
+  bool enemy_head_inside = false;
 
   int ns = tdarray_length(gdata->data.snakes);
   for (int i = 0; i < ns; i++) {
     snake* sk = gdata->data.snakes + i;
-    if (sk->id == B.id) continue;
+    if (sk->id == B.id || sk->dead) continue;
 
     float ew = snake_width(sk->sc);
     v2 eh = {sk->xx, sk->yy};
     v2 ea = {eh.x + cosf(sk->ang) * B.width, eh.y + sinf(sk->ang) * B.width};
 
-    if (!point_in_poly_large(eh, &inside_poly)) {
+    if (point_in_poly_large(eh, &inside_poly)) {
+      enemy_head_inside = true; /* NTL: relaxes the coil-radius clamp below */
+    } else {
       float d1 = dist2(eh.x, eh.y, target_pt.x, target_pt.y);
       float d2_ = dist2(ea.x, ea.y, target_pt.x, target_pt.y);
       float dm = d1 < d2_ ? d1 : d2_;
@@ -701,13 +744,15 @@ static void follow_circle_self(game_data* gdata) {
     bool offset_set = false;
     float offset = 0.0f;
     poly_box cpolbody;
-    float body_offset = 0.5f * (B.width + ew);
+    float body_offset = ENEMY_BODY_MULT * (B.width + ew);
 
     int pn = tdarray_length(sk->pts);
     for (int j = 0; j < pn; j++) {
       body_part* po = sk->pts + j;
       if (po->dying) continue;
       v2 pt = {po->xx, po->yy};
+      /* NTL ignores enemy body points that already sit inside our coil. */
+      if (point_in_poly_large(pt, &inside_poly)) continue;
 
       while (!offset_set ||
              (enemy_body_od >= -B.width && point_in_poly(pt, &cpolbody))) {
@@ -723,26 +768,18 @@ static void follow_circle_self(game_data* gdata) {
     }
   }
 
-  float dist_to_ctr = sqrtf(dist2(B.x, B.y, gdata->data.grd, gdata->data.grd));
-  float border_radius = safe_border_radius(gdata);
-  bool near_wall = border_radius > 0.0f &&
-                   (border_radius - dist_to_ctr) < 1000.0f;
-  float wall_od = 0.0f;
-
-  if (near_wall) {
-    float view_ang = atan2f(B.y - gdata->data.grd,
-                            B.x - gdata->data.grd);
-    float bpw = BORDER_PT_RADIUS * 2.0f;
-    float brad = border_radius + BORDER_PT_RADIUS;
-    float wall_off = 0.5f * (B.width + BORDER_PT_RADIUS);
+  /* NTL wall handling inside the coil: same 251-point ring as the collision
+     check, pushed out of the danger polygon with offset 0.22*(w + od). */
+  float wall_od = WALL_OD0 * B.width;
+  if (B.near_wall && gdata->data.grd > 0.0f) {
+    const float grd = gdata->data.grd;
     bool offset_set = false;
     float offset = 0.0f;
     poly_box cpolbody;
 
-    for (int k = -2; k <= 2; k++) {
-      float wa = view_ang + (k * bpw) / border_radius;
-      v2 wp = {gdata->data.grd + brad * cosf(wa),
-               gdata->data.grd + brad * sinf(wa)};
+    for (int k = -WALL_HALF_SPAN; k <= WALL_HALF_SPAN; k += WALL_STEP) {
+      float wa = B.wall_view_ang + (float)k / grd;
+      v2 wp = {grd + cosf(wa) * B.wall_ring_r, grd + sinf(wa) * B.wall_ring_r};
 
       while (!offset_set ||
              (wall_od >= -B.width && point_in_poly(wp, &cpolbody))) {
@@ -751,7 +788,7 @@ static void follow_circle_self(game_data* gdata) {
         } else {
           wall_od -= offset_incr;
         }
-        offset = wall_off + wall_od;
+        offset = WALL_OFF_MULT * (B.width + wall_od);
         body_danger_zone(offset, target_pt, close_norm, close_dist, past_target,
                          close_pt, &cpolbody);
       }
@@ -760,7 +797,9 @@ static void follow_circle_self(game_data* gdata) {
 
   float enemy_head_dist = sqrtf(enemy_head_d2);
 
-  float target_course = cur_course + 0.25f;
+  /* NTL only adds the +0.25 outward bias when within 1650 of the wall. */
+  float target_course = cur_course;
+  if (B.wall_dist_grd < COIL_WALL_BIAS_RANGE) target_course += 0.25f;
 
   float head_prox = -1.0f - (2.0f * target_far - enemy_head_dist) / B.width;
   if (head_prox > 0)
@@ -769,25 +808,40 @@ static void follow_circle_self(game_data* gdata) {
     head_prox = -0.500f * head_prox * head_prox;
   target_course = fminf(target_course, head_prox);
 
+  bool body_adj = false;
+  float body_adj_course = 0.0f;
   float adj_body = (enemy_body_od - 0.0625f * B.width) / B.width;
-  target_course = fminf(target_course, target_course + adj_body);
+  if (adj_body < 0.0f) {
+    target_course += adj_body;
+    body_adj = true;
+    body_adj_course = target_course;
+  }
 
-  if (near_wall) {
+  if (B.near_wall) {
     float adj_wall = (wall_od - 0.0625f * B.width) / B.width;
     target_course = fminf(target_course, target_course + adj_wall);
   }
 
+  /* NTL: tail allowance depends on how much the coil faces the follow target
+     (map centre, or a ring point ahead of us when close to the wall). */
   float tail_behind = B.bpts_len - close_t;
-  float allow_tail = B.width * 2.0f;
+  v2 ft = unit_vec((v2){B.follow_tx - B.x, B.follow_ty - B.y});
+  float face = ft.x * close_norm.x + ft.y * close_norm.y;
+  float allow_tail = B.width * (2.0f - 0.5f * face);
   target_course =
       fminf(target_course,
             (tail_behind - allow_tail + (B.width - close_dist)) / B.width);
 
-  target_course =
-      fminf(target_course, (-0.5f * (close_dist - 4.0f * B.width)) / B.width);
+  target_course = fminf(
+      target_course,
+      (-0.5f * (close_dist - (enemy_head_inside ? 1.0f : 4.0f) * B.width)) /
+          B.width);
 
-  target_course = fmaxf(target_course, (-0.75f * close_dist) / B.width);
+  target_course = fmaxf(target_course, (COIL_MIN_COURSE * close_dist) / B.width);
   target_course = fminf(target_course, 1.0f);
+
+  if (body_adj && target_course > body_adj_course)
+    target_course -= COIL_BODY_PENALTY;
 
   v2 goal_dir = {close_tang.x * cosf(target_course) -
                      o * close_tang.y * sinf(target_course),
@@ -805,30 +859,52 @@ static void follow_circle_self(game_data* gdata) {
   }
 }
 
+static snake* find_me(game_data* gdata) {
+  int ns = tdarray_length(gdata->data.snakes);
+  for (int i = 0; i < ns; i++)
+    if (gdata->data.snakes[i].id == B.id) return gdata->data.snakes + i;
+  return NULL;
+}
+
+/* NTL fe(): runs every frame once past the circling threshold. Turns toward
+   the circle direction by pi / max(8, ~~(min(w,100)/100*25)) and switches to
+   coil as soon as the head touches the tail or the first 85% of the body. */
 static void to_circle(game_data* gdata) {
   if (!B.enable_follow_circle) return;
-  int ns = tdarray_length(gdata->data.snakes);
-  snake* me = NULL;
-  for (int i = 0; i < ns; i++)
-    if (gdata->data.snakes[i].id == B.id) {
-      me = gdata->data.snakes + i;
-      break;
-    }
+  snake* me = find_me(gdata);
   if (!me) return;
 
-  int pn = tdarray_length(me->pts), checked = 0;
-  for (int i = 0; i < pn && checked < 20; i++) {
+  int pn = tdarray_length(me->pts);
+  int first = 0;
+  while (first < pn && me->pts[first].dying) first++;
+  if (first >= pn) return;
+
+  float wsz = fminf(B.width, 100.0f);
+  int div = (int)(wsz / 100.0f * TO_CIRCLE_I8);
+  if (div < 8) div = 8;
+
+  gdata->bot.output.accel = (bool)B.default_accel;
+  B.goal = heading_rel(((float)B.circle_dir * (float)M_PI) / (float)div);
+
+  circ tail = {me->pts[first].xx, me->pts[first].yy,
+               (float)(int)(B.head_circle.r / 2.0f)};
+  if (circle_intersect(B.head_circle, tail, NULL)) {
+    B.stage = 2;
+    return;
+  }
+
+  float body_r = (float)(int)(B.width / 2.0f);
+  circ hc = {B.x, B.y, body_r};
+  int limit = (int)ceilf((float)pn * SELF_CHECK_FRAC);
+  for (int i = 0; i < limit && i < pn; i++) {
     body_part* po = me->pts + i;
     if (po->dying) continue;
-    checked++;
-    circ tc = {po->xx, po->yy, B.radius};
-    if (circle_intersect(B.head_circle, tc, NULL)) {
+    circ bc = {po->xx, po->yy, body_r};
+    if (circle_intersect(hc, bc, NULL)) {
       B.stage = 2;
       return;
     }
   }
-  gdata->bot.output.accel = (bool)B.default_accel;
-  B.goal = heading_rel((B.circle_dir * (float)M_PI) / 32.0f);
 }
 
 static void compute_food_goal(game_data* gdata) {
@@ -855,31 +931,29 @@ static void compute_food_goal(game_data* gdata) {
   }
 }
 
-static void delay_action(game_data* gdata) {
-  if (B.delay_frame == -1) return;
-  if (B.delay_frame > 0) {
-    B.delay_frame--;
-    return;
-  }
+static double now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1.0e6;
+}
 
-  int ns = tdarray_length(gdata->data.snakes);
-  bool playing = false;
-  for (int i = 0; i < ns; i++)
-    if (gdata->data.snakes[i].id == B.id && !gdata->data.snakes[i].dead) {
-      playing = true;
-      break;
-    }
+/* NTL Se(): the delayed action. Fires ACTION_MS after the last quiet frame
+   (pushed out to COLLISION_MS whenever a collision/encircle decision is made
+   while it is pending). */
+static void timer_fire(game_data* gdata) {
+  if (!B.timer_pending || now_ms() < B.timer_at) return;
+  B.timer_pending = false;
 
-  if (playing) {
-    if (B.stage == 0) {
-      compute_food_goal(gdata);
-      B.goal = B.has_food ? (v2){B.current_food.x, B.current_food.y}
-                          : (v2){gdata->data.grd, gdata->data.grd};
-    } else if (B.stage == 1) {
-      to_circle(gdata);
-    }
+  snake* me = find_me(gdata);
+  if (!me || me->dead) return;
+
+  if (B.stage == 0) {
+    compute_food_goal(gdata);
+    B.goal = B.has_food ? (v2){B.current_food.x, B.current_food.y}
+                        : (v2){gdata->data.grd, gdata->data.grd};
+  } else if (B.stage == 1) {
+    to_circle(gdata);
   }
-  B.delay_frame = -1;
 }
 
 static int snake_score(game_data* gdata, snake* sk) {
@@ -922,8 +996,30 @@ static void every(game_data* gdata) {
                     B.y + (B.x + B.ca * B.width - B.x), B.width * B.speed_mult};
   B.side_l = (circ){B.x + (B.y + B.sa * B.width - B.y),
                     B.y - (B.x + B.ca * B.width - B.x), B.width * B.speed_mult};
+
+  /* ---- NTL wall bookkeeping ---- */
+  const float grd = gdata->data.grd;
+  float dcx = B.x - grd, dcy = B.y - grd;
+  float dctr = sqrtf(dcx * dcx + dcy * dcy);
+  float safe = safe_border_radius(gdata);
+  bool shrinking = grd > 0.0f && safe > 0.0f && safe < grd - 1.0f;
+  float edge = shrinking ? safe : grd;
+  B.wall_dist = fabsf(edge - dctr);
+  B.wall_dist_grd = fabsf(grd - dctr);
+  B.near_wall = grd > 0.0f && B.wall_dist < WALL_RANGE;
+  B.wall_ring_r = shrinking ? safe : WALL_RING_SCALE * grd;
+  B.wall_view_ang = atan2f(B.y - grd, B.x - grd);
+  if (grd > 0.0f && B.wall_dist_grd < WALL_RANGE) {
+    float fa = B.wall_view_ang + 64.0f * (float)B.circle_dir / grd;
+    B.follow_tx = grd + cosf(fa) * WALL_RING_SCALE * grd;
+    B.follow_ty = grd + sinf(fa) * WALL_RING_SCALE * grd;
+  } else {
+    B.follow_tx = grd;
+    B.follow_ty = grd;
+  }
 }
 
+#if SBOT_BORDER_EMERGENCY
 /* Border safety must outrank every behavioural stage. The original port ran
    check_collision() only outside self-circle stage 2, so a coiling snake could
    keep following its own body while touching the wall. This predictive guard
@@ -963,7 +1059,7 @@ static bool avoid_border_emergency(game_data* gdata) {
                 roundf(B.y - outward_y * retreat)};
   B.stage = 0;
   B.has_food = false;
-  B.delay_frame = -1;
+  B.timer_pending = false;
   gdata->bot.output.accel = false;
 
   g_bot_dbg.avoid_active = true;
@@ -974,12 +1070,14 @@ static bool avoid_border_emergency(game_data* gdata) {
   return true;
 }
 
+#endif
+
 void sbot_init(tenv* env) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
   memset(&B, 0, sizeof(B));
   B.stage = 0;
-  B.delay_frame = -1;
+  B.timer_pending = false;
   B.default_accel = 0;
   B.circle_dir = +1;
   B.enable_encircle = true;
@@ -994,7 +1092,8 @@ void sbot_go(tenv* env) {
   user_settings* usrs = &usr->usrs;
   game_data* gdata = &usr->gdata;
   sbot* bot = &gdata->bot;
-  B.radius_mult = usrs->bot_radius_mult;
+  B.radius_mult = (float)NTL_RADIUS_MULT;
+  (void)usrs->bot_radius_mult; /* NTL parity: fixed multiplier */
   B.follow_circle_length = usrs->bot_follow_circle_score;
 
   g_bot_dbg.avoid_active   = false;
@@ -1003,25 +1102,38 @@ void sbot_go(tenv* env) {
   if (tdarray_length(gdata->data.snakes) == 0) return;
 
   every(gdata);
+  timer_fire(gdata);
 
-  if (B.snake_len < B.follow_circle_length) B.stage = 0;
+  /* NTL go(): below the threshold we grow; above it we run the to-circle
+     check every frame until the head touches the body, then coil. */
+  if (B.enable_follow_circle) {
+    if (B.snake_len < B.follow_circle_length)
+      B.stage = 0;
+    else if (B.stage != 2)
+      to_circle(gdata);
+  } else {
+    B.stage = 2;
+  }
   if (B.has_food && B.stage != 0) B.has_food = false;
 
+#if SBOT_BORDER_EMERGENCY
   if (avoid_border_emergency(gdata)) {
-    /* Emergency goal already selected; never let delayed food/circle actions
-       replace it in the same frame. */
-  } else if (B.stage == 2) {
+    /* emergency goal already selected */
+  } else
+#endif
+  if (B.stage == 2) {
     bot->output.accel = (bool)B.default_accel;
     follow_circle_self(gdata);
   } else if (check_collision(gdata) || check_encircle(gdata)) {
-    if (B.delay_frame != -1) B.delay_frame = COLLISION_DELAY;
+    if (B.timer_pending) B.timer_at = now_ms() + COLLISION_MS;
   } else {
     if (B.snake_len > B.follow_circle_length) B.stage = 1;
-    if (B.delay_frame == -1) B.delay_frame = ACTION_FRAMES;
+    if (!B.timer_pending) {
+      B.timer_pending = true;
+      B.timer_at = now_ms() + ACTION_MS;
+    }
     bot->output.accel = (bool)B.default_accel;
   }
-
-  delay_action(gdata);
 
   bot->output.xm = (B.goal.x - gdata->data.view_xx) * gdata->data.gsc;
   bot->output.ym = (B.goal.y - gdata->data.view_yy) * gdata->data.gsc;

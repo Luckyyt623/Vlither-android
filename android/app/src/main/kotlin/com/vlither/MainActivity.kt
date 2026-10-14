@@ -28,7 +28,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.7"
+        private const val CURRENT_VERSION   = "4.7.8"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -312,19 +312,20 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 4.7.6
+Update 4.7.8
+What's new
+• New skin page: swipe through skins, with Tags, Accessory and Build skin all in one place. It works in portrait and landscape.
+• Joystick Assist: the laser guide now follows your joystick, and a ring on the joystick shows when Assist is on.
+• Bigger joystick: the size slider now goes much higher.
+• Improved bot behaviour.
+• Stats on the homepage: after every game you can see your last score and kills next to your best.
 
-What's New:
-
-• NTL chat now fixed.
-
-
-Thanks for using Vlither Android!
-Changes made by Lucky
+Thanks for playing Vlither Android!
+Changes by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.6")
+            .setTitle("What's New in v4.7.8")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

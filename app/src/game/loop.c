@@ -13,6 +13,7 @@
 #include "oef.h"
 #include "redraw.h"
 #include "ui_overlay.h"
+#include "lifetime_stats.h"
 
 void game_loop(tenv* env) {
   tuser_data* usr = env->usr;
@@ -102,6 +103,7 @@ void game_loop(tenv* env) {
       }
 
       if (gdata->closed) {
+        lifetime_stats_save_if_dirty();
         bool reconnect = gdata->restart_req && !gdata->suppress_reconnect;
         if (reconnect && !gdata->preview_active) {
           usrs->kills = gdata->data.kills;

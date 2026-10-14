@@ -102,6 +102,10 @@ typedef struct game_data {
     uint8_t families[MAX_SERVER_LIST]; /* retained for saved/custom IPv4 data */
     int count;
     int custom_count;
+    char names[MAX_CUSTOM_SERVERS][MAX_CUSTOM_NAME_LEN + 1]; /* custom only */
+    bool custom_stage;               /* fetching the admin-managed list */
+    uint64_t custom_started_ms;
+    struct mg_connection* custom_conn;
     struct mg_mgr mgr;
   } server_list;
 

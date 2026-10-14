@@ -8,6 +8,7 @@
 #include "../user.h"
 #include "../game/vlither_tags.h"
 #include "../game/snakey_rain.h"
+#include "../game/lifetime_stats.h"
 #include "../imgui_setup.h"
 #include "ratings.h"
 #include "../game/vlither_ratings.h"
@@ -661,22 +662,43 @@ void ui_title_screen(tenv* env) {
   int hours = tot_sec / 3600;
   int minutes = (tot_sec % 3600) / 60;
   int seconds = tot_sec % 60;
-  igTextColored((ImVec4){1, 1, 1, 0.5f}, "\ue99e");
-  igSameLine(0, -1);
-  igTextColored((ImVec4){1, 1, 1, 0.5f}, "%d", usrs->score);
-  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f -
-                  (igGetFrameHeight() - style->ItemSpacing.x) * 2);
-  igTextColored((ImVec4){1, 1, 1, 0.5f}, "\ueaeb");
-  igSameLine(0, -1);
-  igTextColored((ImVec4){1, 1, 1, 0.5f}, "%d", usrs->kills);
-  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f -
-                  (igGetFrameHeight() - style->ItemSpacing.x));
-  igTextColored((ImVec4){1, 1, 1, 0.6}, "\ue952");
-  igSameLine(0, -1);
-  igTextColored((ImVec4){1, 1, 1, 0.6}, "%02d:%02d:%02d", hours, minutes,
-                seconds);
+  /* Last match (white) next to the best ever (gold), for score and kills.
+     Shown on the homepage, i.e. after the player is out. */
+  {
+    const float col2_x = ctx->size[0] / 2.0f - logo_size / 2 + logo_size * 0.46f;
+    const ImVec4 last_col = {1, 1, 1, 0.85f};
+    const ImVec4 best_col = {1.0f, 0.80f, 0.25f, 0.95f};
+    int best_score = lifetime_stats_best_length();
+    int best_kills = lifetime_stats_best_match_kills();
+    if (best_score < usrs->score) best_score = usrs->score;
+    if (best_kills < usrs->kills) best_kills = usrs->kills;
+
+    igTextColored((ImVec4){1, 1, 1, 0.5f}, "\ue99e");
+    igSameLine(0, -1);
+    igTextColored(last_col, "LAST %d", usrs->score);
+    igSameLine(col2_x, -1);
+    igTextColored(best_col, "BEST %d", best_score);
+
+    igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+    igSetCursorPosY(ctx->size[1] / 2.0f -
+                    (igGetFrameHeight() - style->ItemSpacing.x) * 2);
+    igTextColored((ImVec4){1, 1, 1, 0.5f}, "\ueaeb");
+    igSameLine(0, -1);
+    igTextColored(last_col, "LAST %d", usrs->kills);
+    igSameLine(col2_x, -1);
+    igTextColored(best_col, "BEST %d", best_kills);
+
+    igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+    igSetCursorPosY(ctx->size[1] / 2.0f -
+                    (igGetFrameHeight() - style->ItemSpacing.x));
+    igTextColored((ImVec4){1, 1, 1, 0.6}, "\ue952");
+    igSameLine(0, -1);
+    igTextColored((ImVec4){1, 1, 1, 0.6}, "%02d:%02d:%02d", hours, minutes,
+                  seconds);
+    igSameLine(col2_x, -1);
+    igTextColored((ImVec4){1, 1, 1, 0.5f}, "ALL KILLS %d",
+                  lifetime_stats_total_kills());
+  }
   igPopFont();
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
@@ -765,7 +787,7 @@ void ui_title_screen(tenv* env) {
         char name_buf[96];
         if (is_custom) {
           snprintf(name_buf, sizeof(name_buf), "\xe2\x98\x85 %s [IPv4]",
-                   CUSTOM_SERVER_NAMES[i]);
+                   gdata->server_list.names[i]);
         } else if (gdata->server_list.sids[i] > 0 &&
                    gdata->server_list.sids[i] <= 9999) {
           snprintf(name_buf, sizeof(name_buf), "SID %04u  %s",

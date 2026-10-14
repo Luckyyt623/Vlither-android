@@ -14,6 +14,7 @@
 #include "../user.h"
 #include "user_settings.h"
 #include "sbot.h"
+#include "lifetime_stats.h"
 #include "ntl_team.h"
 #ifdef ANDROID
 #include "../android_glfw_shim.h"
@@ -138,6 +139,8 @@ void ui_overlay(tenv* env) {
                                           15 -
                                       5) /
                           1;
+      if (!gdata->preview_active)
+        lifetime_stats_note_length(gdata->data.score);
 
       if (usrs->hotkeys[HOTKEY_ASSIST].active) {
 
@@ -156,6 +159,29 @@ void ui_overlay(tenv* env) {
           laser_tx = mww2;
           laser_ty = mhh2;
         }
+        /* Joystick mode has no cursor, so the laser used to collapse onto
+           the screen centre and was invisible. Aim it along the stick (or the
+           snake's heading before the stick has been touched). */
+        bool joystick_laser = !usrs->ctrl_mode_trackpad &&
+                              !(usrs->external_input_mode == 1 &&
+                                env->wnd->hw_mouse_present);
+        if (joystick_laser) {
+          float ang = gdata->touch_ctrl.joy_has_direction
+                          ? gdata->touch_ctrl.joy_angle
+                          : me->ehang;
+          float sx = mww2 + (hx - gdata->data.view_xx) * gdata->data.gsc;
+          float sy = mhh2 + (hy - gdata->data.view_yy) * gdata->data.gsc;
+          float sw_ = (float)ctx->size[0], sh_ = (float)ctx->size[1];
+          float ddx = cosf(ang), ddy = sinf(ang);
+          float tx_ = ddx > 1e-4f ? (sw_ - sx) / ddx
+                                  : (ddx < -1e-4f ? (0.0f - sx) / ddx : 1e9f);
+          float ty_ = ddy > 1e-4f ? (sh_ - sy) / ddy
+                                  : (ddy < -1e-4f ? (0.0f - sy) / ddy : 1e9f);
+          float len = fminf(fminf(tx_, ty_), 0.95f * fminf(sw_, sh_));
+          if (len < 0.0f) len = 0.0f;
+          laser_tx = sx + ddx * len;
+          laser_ty = sy + ddy * len;
+        }
 #else
         float laser_tx = env->ms->pos[0];
         float laser_ty = env->ms->pos[1];
@@ -169,6 +195,17 @@ void ui_overlay(tenv* env) {
                 (ImVec4){usrs->laser_color[0], usrs->laser_color[1],
                          usrs->laser_color[2], usrs->laser_color[3] * a}),
             usrs->laser_thickness);
+#ifdef ANDROID
+        if (!usrs->ctrl_mode_trackpad &&
+            !(usrs->external_input_mode == 1 && env->wnd->hw_mouse_present))
+          ImDrawList_AddCircleFilled(
+              igGetWindowDrawList(), (ImVec2){laser_tx, laser_ty},
+              fmaxf(3.0f, usrs->laser_thickness * 1.6f),
+              igColorConvertFloat4ToU32(
+                  (ImVec4){usrs->laser_color[0], usrs->laser_color[1],
+                           usrs->laser_color[2], usrs->laser_color[3] * a}),
+              16);
+#endif
       }
     }
   }
@@ -616,6 +653,17 @@ void ui_overlay(tenv* env) {
                                IM_COL32(0, 0, 0, (int)(64 * jo)), 64);
       ImDrawList_AddCircleFilled(dl, (ImVec2){jcx, jcy}, jr * 0.77f,
                                IM_COL32(128, 128, 128, (int)(89 * jo)), 64);
+      if (usrs->hotkeys[HOTKEY_ASSIST].active) {
+        /* Visible Assist indicator on the joystick itself, in the laser
+           colour, so it is obvious the mode is on. */
+        float la = usrs->laser_color[3] < 0.6f ? 0.6f : usrs->laser_color[3];
+        ImDrawList_AddCircle(
+            dl, (ImVec2){jcx, jcy}, jr * 0.77f,
+            igColorConvertFloat4ToU32((ImVec4){usrs->laser_color[0],
+                                               usrs->laser_color[1],
+                                               usrs->laser_color[2], la}),
+            64, fmaxf(2.0f, jr * 0.05f));
+      }
 
       float thumb_r = jr * 0.408f;
       float thumb_offset = jr * 0.408f;

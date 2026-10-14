@@ -257,7 +257,7 @@ void ui_controls(tenv* env) {
           igSliderFloat("##joy y", &usrs->joy_rel_y, 0.30f, 0.98f, "%.2f",
                         ImGuiSliderFlags_AlwaysClamp);
           igSetNextItemWidth(-1);
-          igSliderFloat("##joy size", &usrs->joy_rel_size, 0.08f, 0.28f, "%.3f",
+          igSliderFloat("##joy size", &usrs->joy_rel_size, 0.08f, 0.60f, "%.3f",
                         ImGuiSliderFlags_AlwaysClamp);
           igEndDisabled();
           igSetNextItemWidth(-1);
