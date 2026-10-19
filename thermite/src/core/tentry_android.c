@@ -191,8 +191,6 @@ void android_main(struct android_app* app) {
     android_set_files_dir(app->activity->internalDataPath);
     DLOG("files_dir: %s", app->activity->internalDataPath);
 
-    /* Pick up the saved Auto/Landscape/Portrait choice before any window or
-     * swapchain exists, so the very first logical size is already right. */
     DLOG("screen orientation mode: %d",
          android_jni_get_screen_orientation_mode());
 
@@ -226,8 +224,6 @@ void android_main(struct android_app* app) {
         return;
     }
     DLOG("Vulkan context created");
-    /* The swapchain picks the real logical size (portrait or landscape);
-     * make the window's copy match before anything reads it. */
     env.wnd->size[0] = env.ctx->size[0];
     env.wnd->size[1] = env.ctx->size[1];
 
@@ -242,10 +238,6 @@ void android_main(struct android_app* app) {
 
             twindow_poll_input(env.wnd);
             if (g_android_app->destroyRequested) break;
-            /* Re-check swapchain_ok: if we just resumed from background,
-             * handle_app_cmd() already rebuilt the surface + swapchain
-             * from inside twindow_poll_input() above (APP_CMD_INIT_WINDOW).
-             * Doing it again here would be a redundant, wasted rebuild. */
             if (!env.ctx->swapchain_ok &&
                 env.wnd->size[0] > 0 && env.wnd->size[1] > 0) {
                 tcontext_resize(env.ctx, env.wnd->size, env.config.vsync);
@@ -262,10 +254,6 @@ void android_main(struct android_app* app) {
 
         if (!env.config.running) break;
 
-        /* Safety net for rotation: resize/config events can arrive in either
-         * order relative to the activity's orientation updating, so every
-         * half second or so confirm the swapchain still matches the surface
-         * and rebuild it if not. */
         {
             static int s_orient_check = 0;
             if (++s_orient_check >= 30) {

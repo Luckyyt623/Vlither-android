@@ -45,11 +45,6 @@ typedef struct tcontext {
   VkCommandBuffer  transfer_cmd;
   VkFence          transfer_fence;
 
-  /* Separate from transfer_cmd/transfer_fence above (which callers wait on
-     synchronously). This pair backs create_*_async() texture uploads: the
-     submit happens here and the caller returns immediately without
-     blocking; tcontext_poll_async_transfer() reclaims the staging buffer
-     once the GPU actually finishes, checked non-blockingly once a frame. */
   VkCommandBuffer  async_transfer_cmd;
   VkFence          async_transfer_fence;
   bool             async_transfer_pending;
@@ -84,10 +79,7 @@ void           tcontext_end(tcontext* context);
 void           tcontext_wait_idle(tcontext* context);
 void           tcontext_destroy(tcontext* context);
 
-/* Non-blocking: call once per frame (e.g. from main.c's frame loop). Frees
-   the pending async staging buffer once its GPU transfer has finished. */
 void           tcontext_poll_async_transfer(tcontext* context);
-/* True while an async upload's staging buffer is still owned by the GPU. */
 bool           tcontext_async_transfer_busy(tcontext* context);
 
 #endif

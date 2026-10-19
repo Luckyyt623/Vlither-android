@@ -19,8 +19,6 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-/* Compatibility fallbacks for older Android NDK headers. These constants are
-   part of Android's stable native input ABI. */
 #ifndef AINPUT_SOURCE_MOUSE
 #define AINPUT_SOURCE_MOUSE 0x00002002
 #endif
@@ -63,15 +61,10 @@ bool  g_overlay_was_active    = false;
 float g_boost_cx = -9999, g_boost_cy = -9999, g_boost_r = 0;
 float g_joy_cx   = -9999, g_joy_cy   = -9999, g_joy_r   = 0;
 bool  g_is_trackpad_mode = true;
-/* Slither joystick mode accepts a movement finger anywhere on its selected
-   side of the screen, not only inside the artwork's circular base. */
 bool  g_joystick_uses_side = false;
 bool  g_joystick_left_side = true;
 bool  g_panel_open       = false;
 
-/* Implemented by app/src/ui/key_buttons.c. Custom gameplay buttons get a
-   direct native touch path so top-edge taps cannot be stolen by another HUD
-   rectangle or lost between render frames. */
 extern bool ui_key_buttons_native_press(float x, float y, int pointer_id);
 extern bool ui_key_buttons_native_release(int pointer_id);
 extern void ui_key_buttons_native_cancel_all(void);
@@ -169,18 +162,9 @@ static void _android_set_immersive_fullscreen(void) {
     (*vm)->DetachCurrentThread(vm);
 }
 
-/* 1 = portrait, 0 = landscape, -1 = unknown (square / not reported). Read
- * from the activity's configuration, which the app glue refreshes before it
- * dispatches APP_CMD_CONFIG_CHANGED. */
-/* Orientation the activity has been locked to from the homepage toggle:
- * 1 = portrait, 0 = landscape, -1 = free (follow the sensor). While locked,
- * this is the one source of truth for the logical size, so a resize event
- * that arrives before the activity's configuration refreshes can no longer
- * build the swapchain for the wrong orientation. */
 static volatile int g_locked_orientation = -1;
 
 void twindow_android_set_orientation_mode(int mode) {
-    /* mode comes from the Java preference: 1 landscape, 2 portrait */
     g_locked_orientation = (mode == 2) ? 1 : 0;
 }
 
@@ -196,10 +180,6 @@ int twindow_android_orientation(void) {
 static void set_window_size(twindow* wnd, ANativeWindow* win) {
     int w = ANativeWindow_getWidth(win);
     int h = ANativeWindow_getHeight(win);
-    /* The window can report its edges in the display's native orientation
-     * rather than the one on screen, so only the pair of lengths is trusted
-     * here; which is the width comes from the activity's orientation. (This
-     * used to force width >= height, which squeezed portrait.) */
     int lo = w < h ? w : h;
     int hi = w < h ? h : w;
     int orient = twindow_android_orientation();
@@ -225,13 +205,6 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
     switch (cmd) {
         case APP_CMD_INIT_WINDOW:
             if (app->window) {
-                /* If a tcontext already exists, this ISN'T the very first
-                 * window (that one is consumed by the poll loop in
-                 * twindow_create(), before tcontext_create() ever runs).
-                 * It means we just resumed from the background and Android
-                 * has handed us a brand-new ANativeWindow -> the Vulkan
-                 * surface tied to the old one is dead and must be rebuilt,
-                 * not just resized. */
                 bool resuming = (wnd->env && wnd->env->ctx != NULL);
 
                 wnd->native_window = app->window;
@@ -253,19 +226,12 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
         case APP_CMD_TERM_WINDOW:
             g_state.surface_ready = false;
             wnd->native_window    = NULL;
-            /* Stop the render loop from touching Vulkan against a surface
-             * whose window is already gone; it'll come back true inside
-             * tcontext_recreate_surface() once APP_CMD_INIT_WINDOW fires. */
             if (wnd->env && wnd->env->ctx)
                 wnd->env->ctx->swapchain_ok = false;
             break;
 
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONFIG_CHANGED:
-            /* The app glue only refreshes the configuration for
-             * CONFIG_CHANGED. A rotation can deliver WINDOW_RESIZED first, in
-             * which case the orientation read below would still be the old
-             * one and the swapchain got built squeezed. Refresh it here too. */
             if (app->config && app->activity && app->activity->assetManager)
                 AConfiguration_fromAssetManager(app->config,
                                                 app->activity->assetManager);
@@ -278,8 +244,6 @@ static void handle_app_cmd(struct android_app* app, int32_t cmd) {
                     (changed || tcontext_orientation_stale(wnd->env->ctx))) {
                     tcontext_resize(wnd->env->ctx, wnd->size,
                                     wnd->env->config.vsync);
-                    /* The swapchain decides the real size; keep the window's
-                     * copy (touch hit-tests, ImGui display size) identical. */
                     wnd->size[0] = wnd->env->ctx->size[0];
                     wnd->size[1] = wnd->env->ctx->size[1];
                     wnd->_resize_func(wnd->env);
@@ -322,9 +286,6 @@ static void begin_ui_touch(twindow* wnd, float x, float y, int pid) {
 
 static void end_ui_touch(twindow* wnd, int pid) {
     if (pid != wnd->ui_touch.move_ptr_id) return;
-    /* Keep just_down latched until the render pass. A quick Android tap can
-       deliver ACTION_DOWN and ACTION_UP in one input poll; clearing just_down
-       here made small/top on-screen buttons miss the gesture completely. */
     wnd->ui_touch.down = false;
     wnd->ui_touch.just_up = true;
     wnd->ui_touch.move_ptr_id = -1;
@@ -360,8 +321,6 @@ static ImGuiKey android_key_to_imgui(int32_t keycode) {
     }
 }
 
-/* Convert Android hardware-key codes into the GLFW values used by Vlither's
-   existing gameplay and hotkey code. */
 static int android_key_to_glfw(int32_t keycode) {
     if (keycode >= AKEYCODE_A && keycode <= AKEYCODE_Z)
         return GLFW_KEY_A + (keycode - AKEYCODE_A);
@@ -447,10 +406,6 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                        ((keycode == AKEYCODE_ALT_LEFT ||
                          keycode == AKEYCODE_ALT_RIGHT) && is_down);
 
-        /* Physical keyboard state for the gameplay/hotkey layer. Text input
-           and full-screen panels still receive the key through ImGui below,
-           but do not also trigger gameplay actions. Key-up always clears the
-           cached state so a focus/UI transition cannot leave a key stuck. */
         int glfw_key = android_key_to_glfw(keycode);
         if (glfw_key >= 0 && glfw_key < 512) {
             if (is_up) {
@@ -476,8 +431,6 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
             return 1;
         }
 
-        /* Android exposes dedicated copy/cut keys on some hardware keyboards.
-           Translate them to the shortcuts Dear ImGui already understands. */
         if ((keycode == AKEYCODE_COPY || keycode == AKEYCODE_CUT) && is_down) {
             ImGuiIO_AddKeyEvent(io, ImGuiMod_Ctrl, true);
             ImGuiKey command = keycode == AKEYCODE_COPY ? ImGuiKey_C : ImGuiKey_X;
@@ -536,9 +489,6 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
         int32_t action        = AMotionEvent_getAction(event);
         int32_t action_masked = action & AMOTION_EVENT_ACTION_MASK;
 
-        /* A real USB/Bluetooth mouse arrives as an Android motion source too,
-           but it must never enter the touchscreen joystick/trackpad path.
-           Cache its absolute pointer and buttons for Mouse + Keyboard mode. */
         int32_t source = AInputEvent_getSource(event);
         if ((source & AINPUT_SOURCE_MOUSE) == AINPUT_SOURCE_MOUSE) {
             int32_t count = (int32_t)AMotionEvent_getPointerCount(event);
@@ -561,9 +511,6 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                         event, AMOTION_EVENT_AXIS_VSCROLL, 0);
                 }
 
-                /* ImGui should still be usable with the external mouse.
-                   Primary/left click is routed to UI only when the pointer is
-                   over an owned UI region; otherwise gameplay reads it as boost. */
                 wnd->ui_touch.x = x;
                 wnd->ui_touch.y = y;
                 const int mouse_ui_pid = 31;
@@ -649,10 +596,6 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                     wnd->touch.just_down   = true;
                     wnd->touch.move_ptr_id = pid;
 
-                    /* Double-tap-and-hold-to-boost: only meaningful while
-                       there's no dedicated boost button to hit (g_boost_r is
-                       zeroed in portrait — see ui_overlay.c), so this never
-                       changes how boosting already works in landscape. */
                     if (g_boost_r <= 0.0f && !wnd->touch.boost_down) {
                         int64_t event_ms = AMotionEvent_getEventTime(event) / 1000000;
                         float ddx = x - wnd->touch.last_tap_x;
@@ -715,10 +658,6 @@ static int32_t handle_input(struct android_app* app, AInputEvent* event) {
                         wnd->touch.boost_ptr_id    = pid;
                     } else if (wnd->touch.down && g_boost_r <= 0.0f &&
                                !wnd->touch.boost_down) {
-                        /* No round boost button on screen (portrait): the
-                           first finger is already steering (joystick/arrow),
-                           so a second finger touching anywhere just boosts
-                           for as long as it stays down. */
                         wnd->touch.boost_x         = x;
                         wnd->touch.boost_y         = y;
                         wnd->touch.boost_down      = true;
@@ -849,12 +788,6 @@ twindow* twindow_create(tenv* env, trender_func render_func, tresize_func resize
     wnd->env          = env;
     wnd->focused      = true;
 
-    /* calloc() zero-fills the struct, but 0 is also a perfectly normal,
-       commonly-assigned Android pointer id (usually the very first finger
-       of a gesture). If these are left at 0 instead of a real "unset"
-       sentinel, the first-ever touch gesture can be misread as already
-       matching move/boost/zslider before any real assignment happens.
-       Force them to -1 so they can never collide with a live pointer id. */
     wnd->touch.move_ptr_id    = -1;
     wnd->touch.boost_ptr_id   = -1;
     wnd->touch.zslider_ptr_id = -1;

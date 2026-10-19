@@ -31,10 +31,6 @@ typedef struct {
     float zslider_y;
     float zslider_offset;
 
-    /* Double-tap-and-hold-to-boost: a fallback for when the round boost
-       button isn't shown (portrait — see ui_overlay.c). Tracks the most
-       recent primary-finger touch-down so the next one can be recognized as
-       a double tap; only used/populated on Android. */
     int64_t last_tap_ms;
     float   last_tap_x, last_tap_y;
 
@@ -56,9 +52,6 @@ typedef struct twindow {
     touch_state     touch;
     touch_state     ui_touch;
 
-    /* Real USB/Bluetooth mouse + physical-keyboard state on Android.
-       Android reports these devices through AInputEvent instead of GLFW, so
-       keep a small GLFW-compatible state cache for the game layer. */
     bool            hw_mouse_present;
     float           hw_mouse_x;
     float           hw_mouse_y;

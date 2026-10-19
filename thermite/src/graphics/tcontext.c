@@ -644,7 +644,7 @@ void tcontext_poll_async_transfer(tcontext* context) {
   if (!context->async_transfer_pending) return;
   if (vkGetFenceStatus(context->device, context->async_transfer_fence) !=
       VK_SUCCESS)
-    return;  /* GPU still working through it — check again next frame */
+    return;
   vmaDestroyBuffer(context->allocator, context->async_staging_buffer,
                    context->async_staging_memory);
   vkResetFences(context->device, 1, &context->async_transfer_fence);
@@ -652,8 +652,6 @@ void tcontext_poll_async_transfer(tcontext* context) {
 }
 
 void tcontext_destroy(tcontext* context) {
-  /* Don't tear the device down while the GPU still owns the async staging
-     buffer — this is the one place a blocking wait is still correct. */
   if (context->async_transfer_pending) {
     vkWaitForFences(context->device, 1, &context->async_transfer_fence,
                     VK_TRUE, UINT64_MAX);

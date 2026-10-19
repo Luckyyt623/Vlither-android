@@ -192,13 +192,6 @@ void _tcontext_create_device(tcontext* context) {
 
 extern int twindow_android_orientation(void);
 
-/* Size of the surface in the orientation the person is actually looking at
- * it in (width < height in portrait). The surface only tells us the two
- * edge lengths and a rotation; which one is "width" has to come from the
- * activity's orientation, with the Vulkan rotation rule as a fallback.
- * This used to always return the longer edge as width, which was fine while
- * the app was locked to landscape but rendered portrait at the wrong aspect
- * ratio (a landscape buffer squeezed into a portrait window). */
 static void _logical_size_from_caps(const VkSurfaceCapabilitiesKHR* caps, int out[2]) {
     uint32_t ew = caps->currentExtent.width;
     uint32_t eh = caps->currentExtent.height;
@@ -215,9 +208,6 @@ static void _logical_size_from_caps(const VkSurfaceCapabilitiesKHR* caps, int ou
     out[1] = (int)(portrait ? hi : lo);
 }
 
-/* True when the surface's current logical size no longer matches what the
- * swapchain was built for, e.g. after a rotation whose resize event arrived
- * before the activity's orientation had updated. Cheap enough to poll. */
 bool tcontext_orientation_stale(tcontext* context) {
     if (!context || !context->swapchain_ok) return false;
     VkSurfaceCapabilitiesKHR caps;
@@ -532,17 +522,8 @@ tcontext* tcontext_create(twindow* window, bool vsync, int fif) {
     return ctx;
 }
 
-/* render_completes[] holds one semaphore per swapchain image and is indexed
- * by the acquired image. A rotation can hand back a swapchain with a
- * different number of images than the one it replaces; keeping the old array
- * meant indexing past its end (broken/black frames or a crash after the
- * second orientation switch) and destroying the wrong count at shutdown.
- * Call after _tcontext_create_views() has updated context->image_count. */
 static void _tcontext_resize_render_completes(tcontext* context,
                                               uint32_t prev_count) {
-    /* Always rebuilt, not only when the count changes: a present that failed
-     * with OUT_OF_DATE leaves its semaphore signaled and unconsumed, and
-     * signaling it again from the next submit is invalid. */
     for (uint32_t i = 0; i < prev_count; i++)
         vkDestroySemaphore(context->device, context->render_completes[i], NULL);
     free(context->render_completes);
@@ -578,17 +559,6 @@ void tcontext_resize(tcontext* context, const ivec2 size, bool vsync) {
     context->swapchain_ok = true;
 }
 
-/*
- * Used when Android hands us a brand-new ANativeWindow after the previous
- * one was torn down (APP_CMD_TERM_WINDOW -> APP_CMD_INIT_WINDOW, i.e. the
- * app was backgrounded and resumed while the process stayed alive).
- *
- * tcontext_resize() alone is NOT enough here: it only rebuilds the
- * swapchain and reuses context->surface, but that VkSurfaceKHR was created
- * from the OLD ANativeWindow, which no longer exists. We have to destroy
- * it and create a new one bound to the new window, then rebuild the
- * swapchain on top of THAT.
- */
 void tcontext_recreate_surface(tcontext* context, twindow* window, bool vsync) {
     tcontext_wait_idle(context);
 
@@ -605,9 +575,6 @@ void tcontext_recreate_surface(tcontext* context, twindow* window, bool vsync) {
 
     _tcontext_create_surface(context, window);
 
-    /* No valid oldSwapchain to hand the driver: the previous swapchain
-     * belonged to a surface we just destroyed, so a fresh, non-hinted
-     * swapchain is the only correct option here. */
     context->old_swapchain = VK_NULL_HANDLE;
     _tcontext_create_swapchain(context, vsync);
     uint32_t prev_image_count = context->image_count;
@@ -625,11 +592,6 @@ bool tcontext_begin(tcontext* context) {
     VkResult r = vkAcquireNextImageKHR(context->device, context->swapchain,
                                        UINT64_MAX, fr->present_complete,
                                        VK_NULL_HANDLE, &context->current_image);
-    /* The fence must only be reset once a frame will really be submitted
-     * for it. It used to be reset before the acquire, so a rotation that made
-     * the acquire fail left it unsignaled with no work pending, and the next
-     * vkWaitForFences() on this frame slot blocked forever (frozen/black
-     * screen after switching orientation). */
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_ERROR_SURFACE_LOST_KHR) {
         context->swapchain_ok = false;
         return false;
@@ -711,7 +673,7 @@ void tcontext_poll_async_transfer(tcontext* context) {
     if (!context->async_transfer_pending) return;
     if (vkGetFenceStatus(context->device, context->async_transfer_fence) !=
         VK_SUCCESS)
-        return;  /* GPU still working through it — check again next frame */
+        return;
     vmaDestroyBuffer(context->allocator, context->async_staging_buffer,
                      context->async_staging_memory);
     vkResetFences(context->device, 1, &context->async_transfer_fence);
@@ -719,8 +681,6 @@ void tcontext_poll_async_transfer(tcontext* context) {
 }
 
 void tcontext_destroy(tcontext* context) {
-    /* Don't tear the device down while the GPU still owns the async staging
-       buffer — this is the one place a blocking wait is still correct. */
     if (context->async_transfer_pending) {
         vkWaitForFences(context->device, 1, &context->async_transfer_fence,
                         VK_TRUE, UINT64_MAX);
