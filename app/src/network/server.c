@@ -43,11 +43,6 @@ void server_connect(tenv* env) {
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
 
-  /* The server-picker probes are useful only on the homepage.  They used to
-     keep up to 64 connections alive after Play was pressed, competing with
-     the real game WebSocket on mobile data.  Signal the detached probe worker
-     before creating a real gameplay connection; it checks this flag at most
-     50 ms later and discards unfinished results. */
   if (gdata->curr_screen == PLAYING)
     gdata->server_list.ping_stop = 1;
 
@@ -89,17 +84,7 @@ void server_connect(tenv* env) {
 void server_poll(tenv* env) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
-  /* This function runs on the render thread once per frame.  A positive
-     timeout made Mongoose sleep for up to 5 ms whenever the socket was idle,
-     consuming almost a third of a 60 FPS frame budget and causing visible
-     hitching when another manager delivered a packet in the same frame.
-     Rendering is already a high-frequency poll loop, so gameplay polling must
-     always be non-blocking on every platform. */
 #ifdef ANDROID
-  /* Mongoose deliberately reads at most one socket chunk per poll. After a
-     slow render frame, one 16 KiB pass may not drain a busy Slither server's
-     queued burst. A few zero-time passes catch up without ever sleeping the
-     render thread or changing normal packet latency. */
   uint64_t previous_rx = gdata->network_rx_bytes;
   for (int i = 0; i < 4; ++i) {
     ping_note_poll(gdata);
@@ -150,14 +135,6 @@ const char* CUSTOM_SERVER_NAMES[CUSTOM_SERVER_COUNT] = {
   "Japan Battledome",
 };
 
-/* Servers that receive the persistent client-ID message right after the
-   riddle answer. Kept separate from CUSTOM_SERVER_IPS above (that list
-   drives the visible server picker; this one only gates the ID handshake).
-   Strings must match the "ip:port" format stored in usrs->server_address.
-   TODO: noaha's spec says this list "can update on reload like the tags" —
-   i.e. fetched remotely rather than hardcoded. No endpoint for that was
-   given, so for now it's a compiled-in list; swap in a fetch (mirroring
-   how ntl_tags.c pulls its catalog) once there's a URL for it. */
 #define BD_ID_SERVER_COUNT 10
 static const char* BD_ID_SERVER_IPS[BD_ID_SERVER_COUNT] = {
   "81.169.165.225:444",
@@ -180,9 +157,18 @@ bool server_is_bd_id_target(const char* server_address) {
   return false;
 }
 
-/* !idforce toggle: dev-only override to send the ID packet to any server
-   regardless of BD_ID_SERVER_IPS. Deliberately not part of user_settings
-   (and so never saved) — it resets to off every launch, matching spec. */
+bool server_is_custom_server(tenv* env, const char* address) {
+  if (!address || !address[0]) return false;
+  for (int i = 0; i < CUSTOM_SERVER_COUNT; i++)
+    if (strcmp(CUSTOM_SERVER_IPS[i], address) == 0) return true;
+  if (env && env->usr) {
+    game_data* gdata = &env->usr->gdata;
+    for (int i = 0; i < gdata->server_list.custom_count; i++)
+      if (strcmp(gdata->server_list.ips[i], address) == 0) return true;
+  }
+  return server_is_bd_id_target(address);
+}
+
 static bool g_bd_id_force = false;
 
 bool server_bd_id_should_send(const char* server_address) {
@@ -249,7 +235,6 @@ static bool custom_ip_valid(const char* ip) {
   return true;
 }
 
-/* Adds one entry to the custom block at the front of the list. */
 static bool custom_add(game_data* gdata, const char* name, const char* ip) {
   int i = gdata->server_list.count;
   if (i >= MAX_CUSTOM_SERVERS || !custom_ip_valid(ip) || !name || !name[0])
@@ -287,8 +272,6 @@ static bool custom_cache_load(game_data* gdata) {
   return gdata->server_list.count > 0;
 }
 
-/* Shown immediately: last list fetched from the admin page, or the built-in
-   list if the app has never reached the backend. */
 static void server_list_seed_custom(game_data* gdata) {
   gdata->server_list.count = 0;
   gdata->server_list.custom_count = 0;
@@ -321,9 +304,6 @@ static void server_list_parse(const char* data, int len,
     }
   }
 
-  /* NOTE: *count is NOT reset here — the caller may have pre-seeded
-     custom server entries at the start of the array, and this function
-     appends the fetched official servers right after them. */
   if (hb_len > 0 && hb_len % 28 == 0) {
 
     for (int i = 0; i + 27 < hb_len && *count < MAX_SERVER_LIST; i += 28) {
@@ -412,10 +392,6 @@ static void sl_do_https(game_data* gdata) {
   mg_http_connect(&gdata->server_list.mgr, SL_URL_HTTPS, sl_http_cb, gdata);
 }
 
-/* ---- Admin-managed custom server list (GET /api/v1/servers) ----------- *
- * Runs before the official slither.io list so the custom entries (which sit
- * at the front of the array) are final before official ones are appended.
- * Any failure or a 4 s timeout falls back to the cached/built-in list. */
 #define CUSTOM_FETCH_TIMEOUT_MS 4000
 
 static void server_list_start_official(game_data* gdata) {
@@ -447,9 +423,9 @@ static void custom_apply_json(game_data* gdata, struct mg_str json) {
     }
     mg_free(ip);
     if (name) mg_free(name);
-    if (!ok) return; /* malformed reply: keep what we already have */
+    if (!ok) return;
   }
-  if (n == 0) return; /* never wipe the list because of an empty reply */
+  if (n == 0) return;
   gdata->server_list.count = 0;
   gdata->server_list.custom_count = 0;
   for (int i = 0; i < n; i++) custom_add(gdata, names[i], ips[i]);
@@ -458,7 +434,7 @@ static void custom_apply_json(game_data* gdata, struct mg_str json) {
 
 static void custom_http_cb(struct mg_connection* c, int ev, void* ev_data) {
   game_data* gdata = (game_data*)c->fn_data;
-  if (!gdata) return; /* detached after a timeout */
+  if (!gdata) return;
   if (ev == MG_EV_CONNECT) {
     const char* base = vlither_backend_base_url();
     char url[256];
@@ -572,25 +548,10 @@ void server_list_destroy(tenv* env) {
   mg_mgr_free(&gdata->server_list.mgr);
 }
 
-/* ------------------------------------------------------------------ *
- * Server list ping probe.
- *
- * This mirrors the ping calculation used by the official web client:
- * rather than just timing a raw TCP connect() to the server's game
- * port (which only measures handshake latency and can be skewed by
- * SYN-cookie/accept-queue behavior), it opens a real WebSocket to the
- * server's dedicated ping-probe endpoint on port 80 at "/ptc", sends a
- * single application-level ping byte (0x70), waits for the same byte
- * to be echoed back, and repeats that round trip 4 times. The final
- * reported ping is the *minimum* of those 4 samples, which is what the
- * web client does to filter out one-off jitter/queueing delay and
- * report the best achievable latency to that server.
- * ------------------------------------------------------------------ */
-
 #define PING_BATCH    12
-#define PING_TIMEOUT  7000   /* ms, used for IPv4 probes */
-#define PING_SAMPLES  4      /* number of ping/pong round trips sampled */
-#define PING_BYTE     0x70   /* 'p' - single-byte ping payload used by /ptc */
+#define PING_TIMEOUT  7000
+#define PING_SAMPLES  4
+#define PING_BYTE     0x70
 
 typedef struct {
   uint64_t start_ms;
@@ -600,9 +561,6 @@ typedef struct {
   int      result;
 } ping_probe;
 
-/* Battledome servers expose the game port but do not consistently expose the
-   official port-80 /ptc echo endpoint. Measure their TCP handshake directly
-   against the configured game port so their latency is still available. */
 static void sl_ping_tcp_cb(struct mg_connection* c, int ev, void* ev_data) {
   (void)ev_data;
   ping_probe* p = (ping_probe*)c->fn_data;
@@ -651,9 +609,6 @@ static void sl_ping_ws_cb(struct mg_connection* c, int ev, void* ev_data) {
 
   } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
     if (!p->done) {
-      /* Connection dropped before all 4 samples came back. If we got at
-         least one good round trip, report the best of what we have
-         instead of throwing the whole probe away. */
       int best = 9999;
       for (int i = 0; i < p->sample_count; i++)
         if (p->samples[i] < best) best = p->samples[i];

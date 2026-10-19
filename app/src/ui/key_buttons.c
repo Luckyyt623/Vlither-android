@@ -873,9 +873,6 @@ static void draw_editor(tenv *env) {
   s_kb.env = env;
   android_ui_capture_rect(0, 0, sw, sh);
 #endif
-  /* The editor canvas must be on the background layer. Drawing the black
-     rectangle on the foreground layer hides every ImGui window (toolbar, picker
-     and edit panel) even though the custom-drawn keys remain visible. */
   ImDrawList *bg = igGetBackgroundDrawList(igGetMainViewport());
   ImDrawList_AddRectFilled(bg, (ImVec2){0, 0}, (ImVec2){sw, sh},
                            IM_COL32(0, 0, 0, 255), 0, 0);
@@ -884,8 +881,6 @@ static void draw_editor(tenv *env) {
   float mx, my;
   read_pointer(env, &mouse_down, &mouse_clicked, &mouse_released, &mx, &my);
 
-  /* Keep the primary controls in the top-left safe area so they are visible
-     above Android gesture/navigation insets on every aspect ratio. */
   const float panel_x0 = 18.0f;
   const float panel_y0 = 18.0f;
   const float panel_x1 = 286.0f;
@@ -994,8 +989,6 @@ static void draw_editor(tenv *env) {
         continue;
       }
       if (point_in_rect(mx, my, p0.x, p0.y, p1.x, p1.y)) {
-        /* The full button is the edit target. It also becomes the drag target,
-           matching the V2.5 editor behaviour. */
         s_kb.selected_idx = i;
         s_kb.drag_idx = i;
         s_kb.drag_off_x = mx - b->rel_x * sw;

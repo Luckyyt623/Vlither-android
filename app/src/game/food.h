@@ -4,13 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Where a food pellet came from, so its on-screen size can be scaled
-   independently in settings. Not persisted anywhere: food is transient game
-   data rebuilt from the network stream, never saved to disk. */
 typedef enum food_origin {
-  FOOD_ORIGIN_NORMAL = 0, /* ambient food filling a sector ('F' batches) */
-  FOOD_ORIGIN_DEATH = 1,  /* scattered when a snake dies ('f' single-adds) */
-  FOOD_ORIGIN_BOOST = 2,  /* dropped behind a boosting snake ('b') */
+  FOOD_ORIGIN_NORMAL = 0,
+  FOOD_ORIGIN_DEATH = 1,
+  FOOD_ORIGIN_BOOST = 2,
 } food_origin;
 
 typedef struct food {

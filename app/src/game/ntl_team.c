@@ -21,8 +21,6 @@
 #endif
 #define NTL_MAX_TEAM 64
 #define NTL_URL_MAX 2048
-/* Protocol version the NTL server expects (extension manifest version).
-   Was 4.1; the extension now reports 9.68 and the server may gate on it. */
 #define NTL_PROTOCOL_VER "9.68"
 #define NTL_POLL_SECONDS 1.0
 #define NTL_RETRY_BASE_SECONDS 1.0
@@ -49,8 +47,6 @@ typedef struct {
   ntl_member members[NTL_MAX_TEAM]; int count;
   char pending_msg[256];
   char inflight_msg[256];
-  /* NTL and Vlither chat visibility must be independent. A single shared
-     flag made disabling one network's HUD silently disable the other. */
   char input[256];
   bool ntl_chat_open;
   bool vlither_chat_open;
@@ -281,8 +277,6 @@ static double field_num(const char *a, const char *b, const char *key, double fa
   while (q < b && isspace((unsigned char)*q)) q++;
   if (q >= b) return fallback;
 
-  /* The endpoint can serialize numeric fields as JSON strings. Accept both
-     normal JSON numbers and quoted numeric strings. */
   if (*q == '\"') {
     q++;
     while (q < b && isspace((unsigned char)*q)) q++;
@@ -320,10 +314,6 @@ static void ntl_parse_vlither_telemetry(ntl_member *m) {
   m->has_telemetry = false;
   m->has_vlither_telemetry = false;
 
-  /* Current Vlither Android publishes the same readable FPS/ping prefix used
-     by the official NTL client, followed by its Vlither version. This lets
-     normal NTL clients display the line too. Keep support for the short-lived
-     semicolon format from earlier Vlither Android builds as well. */
   if (strncmp(m->dt, "VlitherAndroid;", 15) == 0) {
     const char *v = strstr(m->dt, ";v=");
     const char *fps = strstr(m->dt, ";fps=");
@@ -364,8 +354,6 @@ static void ntl_parse_vlither_telemetry(ntl_member *m) {
     m->has_vlither_telemetry = true;
   }
 
-  /* Official NTL detail strings use: FPS: <fps> @ <ping>(<avg>) ms @ ...
-     Parse that format for every NTL member, not only Vlither clients. */
   const char *fps_label = strstr(m->dt, "FPS:");
   if (fps_label) {
     char *endptr = NULL;
@@ -408,9 +396,6 @@ static size_t ntl_append_utf8(char *out, size_t cap, size_t n,
   return n;
 }
 
-/* NTL stores a browser-style message snapshot per client. Keep line breaks
-   while decoding so a snapshot containing several queued messages can be
-   compared with the previous snapshot without losing any intermediate text. */
 static void ntl_decode_chat_snapshot(char *text, size_t cap) {
   if (!text || cap == 0) return;
 
@@ -666,8 +651,6 @@ static size_t ntl_snapshot_overlap(const char *old_msg, const char *new_msg) {
   size_t new_len = strlen(new_msg);
   size_t best = 0;
 
-  /* Match complete message records only. A raw character suffix match could
-     turn "hello" followed by "okay" into "kay" because both touch on "o". */
   for (size_t start = 0; start < old_len; ++start) {
     if (start > 0 && old_msg[start - 1] != '\n') continue;
     size_t overlap = old_len - start;
@@ -687,8 +670,6 @@ static void ntl_add_snapshot_delta(const char *nick, const char *delta) {
     const char *end = strchr(p, '\n');
     size_t len = end ? (size_t)(end - p) : strlen(p);
 
-    /* The desktop Vlither reference joins a burst using " | ". Accept that
-       separator too, while the official extension normally uses <br>. */
     const char *segment = p;
     const char *segment_end = p + len;
     while (segment < segment_end) {
@@ -895,14 +876,8 @@ static bool parse_members(const char *s, size_t len) {
       const char *old = seen_message_for(m->nick);
       if (!baseline_only && m->msg[0]) {
         if (!old || !old[0]) {
-          /* A player first appearing after the initial baseline may already
-             carry a real message. The extension displays it immediately. */
           ntl_add_snapshot_delta(m->nick, m->msg);
         } else if (strcmp(old, m->msg) != 0) {
-          /* NTL can return an accumulated browser message buffer. Match the
-             official extension by removing the previous snapshot prefix. The
-             suffix/prefix overlap also handles a bounded server-side buffer
-             that rotates older text out. */
           size_t overlap = ntl_snapshot_overlap(old, m->msg);
           ntl_add_snapshot_delta(m->nick, m->msg + overlap);
         }
@@ -920,21 +895,12 @@ static bool parse_members(const char *s, size_t len) {
 }
 
 static void cb(struct mg_connection *c, int ev, void *ev_data) {
-  /* Ignore final events from a request that has already timed out or has been
-     superseded. This prevents an old close/error event from breaking a newer
-     poll. */
   if (c != S.request_conn) return;
 
   if (ev == MG_EV_CONNECT) {
-    /* FIX: send SNI. Without .name the TLS ClientHello has no server_name, so
-       a vhost/CDN-fronted ntl-slither.com answers with the wrong cert or
-       drops the handshake -> chat never connects. Every other NTL request
-       (ntl_tags.c) already sets it. */
     struct mg_tls_opts tls = {.name = mg_str("ntl-slither.com"),
                               .skip_verification = 1};
     mg_tls_init(c, &tls);
-    /* FIX: look like the extension's XHR (browser UA + slither.io origin).
-       Some front-ends reject unknown non-browser user agents with 403. */
     mg_printf(c,
               "GET %s HTTP/1.1\r\nHost: ntl-slither.com\r\n"
               "User-Agent: Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
@@ -963,10 +929,6 @@ static void cb(struct mg_connection *c, int ev, void *ev_data) {
         free(body);
         S.last_success = now;
         S.consecutive_failures = 0;
-        /* Match the extension protocol: keep publishing a chat message until
-           this same eight-character client ID is returned with that message.
-           This prevents a short connection interruption from producing only a
-           local echo that other NTL clients never see. */
         if (message_echoed) S.inflight_msg[0] = 0;
         S.next_poll = now + NTL_POLL_SECONDS;
       } else {
@@ -985,8 +947,6 @@ static void cb(struct mg_connection *c, int ev, void *ev_data) {
     S.request_conn = NULL;
     ntl_schedule_retry(now);
   } else if (ev == MG_EV_CLOSE) {
-    /* A close before an HTTP message is a failed heartbeat. Normal closes are
-       ignored because MG_EV_HTTP_MSG already clears request_conn. */
     double now = mg_millis() / 1000.0;
     S.request_active = false;
     S.request_conn = NULL;
@@ -1022,9 +982,6 @@ static void ntl_poll_request(tenv *env) {
   bool in_game = g->conn == CONNECTED && g->curr_screen == PLAYING;
   snake *local = in_game ? local_snake(g) : NULL;
   const char *presence_server = local ? us->server_address : "_GAME_MENU_";
-  /* Match the official NTL client: publish the authoritative world
-     coordinates, not the short-lived render correction offsets (fx/fy).
-     Sending fx/fy can make the team marker jump ahead/behind after packets. */
   float x = local ? local->xx : 0.0f;
   float y = local ? local->yy : 0.0f;
   int sid = local ? (int)local->ntl_id : -1;
@@ -1034,8 +991,6 @@ static void ntl_poll_request(tenv *env) {
   int ping = local && g->data.ping > 0 ? g->data.ping : -1;
   int ping_peak = local && g->data.ping_peak > 0 ? g->data.ping_peak : ping;
 
-  /* Keep one message in flight until a successful response. A newly typed
-     message can wait in pending_msg without overwriting the retrying one. */
   if (!S.inflight_msg[0] && S.sos_message_pending) {
     strncpy(S.inflight_msg, "Help me!", sizeof S.inflight_msg - 1);
     S.inflight_msg[sizeof S.inflight_msg - 1] = 0;
@@ -1121,9 +1076,6 @@ void ntl_team_update(tenv *env) {
   ntl_sync_active_credentials(us);
   ntl_ensure_client_id(us);
 
-  /* Publish nickname/server transitions immediately. The stable eight-character
-     client prefix lets NTL replace this player's old name instead of creating a
-     second entry. */
   bool playing = g->conn == CONNECTED && g->curr_screen == PLAYING;
   const char *presence_server = playing ? us->server_address : "_GAME_MENU_";
   if (strcmp(S.last_nickname, us->nickname) != 0 ||
@@ -1273,9 +1225,6 @@ static bool ntl_member_is_local(const ntl_member *m,
                                 const snake *local) {
   if (!m || !us) return false;
 
-  /* The eight-character client prefix survives nickname changes, respawns,
-     server changes and secondary-ID updates. It is the safest way to reject
-     our own echoed NTL presence record. */
   if (strlen(m->nick) >= 8 && strlen(us->ntl_client_id) == 8) {
     bool same_client = true;
     for (int i = 0; i < 8; ++i) {
@@ -1288,9 +1237,6 @@ static bool ntl_member_is_local(const ntl_member *m,
     if (same_client) return true;
   }
 
-  /* NTL's `sid` field is snake.ntlid (the secondary NTL ID), not the normal
-     Slither snake ID. The old comparison used local->id and intermittently
-     left a second, stale marker for the local player. */
   return local && m->sid >= 0 && m->sid == (int)local->ntl_id;
 }
 
@@ -1411,17 +1357,10 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
   ImDrawList *dl = igGetWindowDrawList();
   if (!dl) return;
   float radius = size * 0.5f;
-  /* Keep CPU markers in the exact coordinate space used by mm.slang. The
-     minimap shader normalizes world positions by the current (possibly
-     shrinking) border radius and then applies its 0.90 shadow scale. Using
-     the fixed world-center value as the divisor makes a snake at a shrinking
-     border appear incorrectly near the middle of the minimap. */
   float map_radius = radius * 0.90f;
   float world_radius = g->data.flux_grd;
   ImVec2 center = {x + radius, y + radius};
 
-  /* Draw the local snake with the same dynamic-border transform used by the
-     location percentage HUD and minimap shader. */
   snake *local = local_snake(g);
   if (local) {
     float rx = (local->xx - g->data.grd) / world_radius;
@@ -1443,10 +1382,6 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
     }
   }
 
-  /* Vlither Android presence is independent from NTL. Every Vlither client
-     publishes its authoritative world coordinates to the Vlither backend once
-     per second, so same-server players remain visible on the minimap even when
-     they are outside this client's rendered snake range. */
   if (us->vlither_show_minimap_players && vlither_chat_connected()) {
     int count = vlither_chat_player_count();
     for (int i = 0; i < count; ++i) {
@@ -1511,9 +1446,6 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
   if (!us->ntl_enabled || !us->ntl_show_teammates || !ntl_feed_is_fresh())
     return;
 
-  /* NTL teammates use the same visual marker style. If the same Vlither
-     Android client is present in both feeds, prefer the Vlither copy to avoid
-     drawing duplicate dots/names. */
   for (int i = 0; i < S.count; ++i) {
     ntl_member *m = &S.members[i];
     if (!same_server(m->srv, us->server_address) ||
@@ -1524,18 +1456,12 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
     float marker_x = m->x;
     float marker_y = m->y;
 
-    /* When the teammate's snake is currently known by this game client, use
-       its live Slither coordinates. The NTL team endpoint updates roughly
-       once per second, so the network copy naturally trails fast movement. */
     snake *visible = ntl_visible_snake_for_member(g, m, local);
     if (visible) {
       marker_x = visible->xx;
       marker_y = visible->yy;
     }
 
-    /* A reconnect or respawn can briefly leave two endpoint records carrying
-       the same stable client prefix. Draw only the best copy: a record that
-       maps to a live snake wins; otherwise the later endpoint record wins. */
     int quality = visible ? 2 :
         (isfinite(marker_x) && isfinite(marker_y) &&
          !(marker_x == 0.0f && marker_y == 0.0f) ? 1 : 0);
@@ -1593,8 +1519,6 @@ void ntl_team_draw_minimap(tenv *env, float x, float y, float size) {
 
 void ntl_team_consume_ui_touch(tenv *env) {
   (void)env;
-  /* Android input ownership now prevents NTL-window touches from entering
-     gameplay at ACTION_DOWN. Preserve any separate trackpad finger. */
 }
 
 static void draw_chat_network_switch(void) {
@@ -1766,9 +1690,6 @@ void ntl_team_draw(tenv *env) {
   game_data *g = &u->gdata;
   if (g->conn != CONNECTED) return;
 
-  /* Match the lightweight S.zip NTL HUD while playing. Both NTL Chat and the
-     online-player list are hidden on Settings; their Android size/position is
-     edited from Keyboard Editor instead. */
   bool settings_open = g->curr_screen == SETTINGS;
   if (us->ntl_stealth_mode && !settings_open) return;
   ImGuiViewport *vp = igGetMainViewport();
@@ -1781,9 +1702,6 @@ void ntl_team_draw(tenv *env) {
   igPushStyleColor_Vec4(ImGuiCol_WindowBg,
                         (ImVec4){0.08f, 0.08f, 0.10f, 0.65f});
 
-  /* Keep NTL Chat completely hidden while the Settings screen is open.
-     Its Android HUD position/size is edited from the Keyboard Editor instead,
-     so Settings no longer exposes or overlays the chat window. */
   bool *active_chat_open = S.vlither_chat_active
                                ? &S.vlither_chat_open
                                : &S.ntl_chat_open;
@@ -1840,9 +1758,6 @@ void ntl_team_draw(tenv *env) {
                                 chat_pos_now.x + chat_size_now.x,
                                 chat_pos_now.y + chat_size_now.y);
       } else {
-        /* The message history is display-only in gameplay. Capture only the
-           input strip so the transparent S-style HUD does not steal a large
-           trackpad area from movement. */
         float input_capture_h = igGetFrameHeight() + 16.0f;
         android_ui_capture_rect(
             chat_pos_now.x,
@@ -1850,9 +1765,6 @@ void ntl_team_draw(tenv *env) {
                   chat_pos_now.y + chat_size_now.y - input_capture_h),
             chat_pos_now.x + chat_size_now.x,
             chat_pos_now.y + chat_size_now.y);
-        /* The network selector at the top is interactive as well. Capture only
-           that strip so the transparent center of the chat remains usable as
-           the movement trackpad. */
         float switch_capture_h = igGetFrameHeight() + 14.0f;
         android_ui_capture_rect(chat_pos_now.x, chat_pos_now.y,
                                 chat_pos_now.x + chat_size_now.x,
@@ -1955,7 +1867,6 @@ void ntl_team_draw(tenv *env) {
 
       igSetCursorPosY(fmaxf(0.0f, win_sz.y - igGetFrameHeight() - 8.0f));
       igPushItemWidth(fmaxf(40.0f, win_sz.x - 16.0f));
-      /* Glass-style message field */
       igPushStyleColor_Vec4(ImGuiCol_FrameBg,
                             (ImVec4){0.08f, 0.10f, 0.14f, 0.28f});
       igPushStyleColor_Vec4(ImGuiCol_FrameBgHovered,
@@ -1976,7 +1887,7 @@ void ntl_team_draw(tenv *env) {
           S.vlither_chat_active ? "Message Vlither chat..." : "Message NTL team...",
           S.input, sizeof S.input, ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
       igEndDisabled();
-      igPopStyleColor(1); /* Border */
+      igPopStyleColor(1);
       igPopStyleVar(2);
       igPopStyleColor(5);
       igPopItemWidth();
@@ -1985,8 +1896,6 @@ void ntl_team_draw(tenv *env) {
     igEnd();
   }
 
-  /* Keep the online-player list hidden on Settings as well. Its layout is
-     controlled from Keyboard Editor, matching the NTL Chat treatment. */
   if (S.players_open && !settings_open) {
     ImGuiWindowFlags player_flags = ImGuiWindowFlags_NoCollapse |
                                     ImGuiWindowFlags_NoSavedSettings;
@@ -1995,8 +1904,6 @@ void ntl_team_draw(tenv *env) {
                     ImGuiWindowFlags_NoBackground;
 
 #ifdef ANDROID
-    /* Never let the stored layout become larger than the current phone's
-       usable area (rotation, cut-outs and split-screen can all shrink it). */
     float players_max_w =
         fminf(vp->WorkSize.x, fmaxf(220.0f, vp->WorkSize.x * 0.82f));
     float players_max_h =
@@ -2014,11 +1921,6 @@ void ntl_team_draw(tenv *env) {
     px = ntl_clampf(px, vp->WorkPos.x, vp->WorkPos.x + vp->WorkSize.x - pw);
     py = ntl_clampf(py, vp->WorkPos.y, vp->WorkPos.y + vp->WorkSize.y - ph);
     {
-      /* The stored layout is a fraction of the screen, so the default
-         top-right spot that sits beside the leaderboard in landscape lands
-         right on top of it in portrait. Drop the panel below the leaderboard
-         instead — only when it would actually overlap, and only in
-         portrait, so landscape and saved custom layouts are untouched. */
       extern float g_leaderboard_left_x, g_leaderboard_bottom_y;
       bool portrait_now = vp->WorkSize.y > vp->WorkSize.x;
       if (portrait_now && g_leaderboard_bottom_y > 0.0f &&
@@ -2114,10 +2016,6 @@ static void ntl_queue_message(const user_settings *us) {
     return;
   }
 
-  /* Do not insert a local chat echo here. The NTL response is the
-     authoritative feed and will add this message once when the server echoes
-     it for our persistent client ID. Adding it locally as well made every
-     outgoing message appear twice. */
   (void)us;
   strncpy(S.pending_msg, S.input, sizeof S.pending_msg - 1);
   S.pending_msg[sizeof S.pending_msg - 1] = 0;
@@ -2208,9 +2106,6 @@ void ntl_team_panel(tenv *env) {
                &us->vlither_show_player_stats);
     ntl_draw_friends_zoom_control(us, "##vlither_friends_zoom");
     igTextDisabled("Minimap players use the Team dots style from NTL Players & minimap.");
-    /* Closed by default so short phone screens retain the full chat body.
-       Every control inside uses the current content width and therefore
-       stacks naturally instead of clipping on narrow devices. */
     if (igCollapsingHeader_TreeNodeFlags("My map colour & emoji",
                                          ImGuiTreeNodeFlags_None)) {
       bool profile_changed = false;
@@ -2260,10 +2155,6 @@ void ntl_team_panel(tenv *env) {
     }
     igSeparator();
 
-    /* Keep navigation visible on short/wide Android displays.  The previous
-       layout reserved space for a footer and then forced the chat body to a
-       large minimum height, which could push both the Back control and the
-       message input below the physical screen. */
     ImVec2 nav_avail_v;
     igGetContentRegionAvail(&nav_avail_v);
     float nav_w_v = (nav_avail_v.x - style->ItemSpacing.x) * 0.5f;
@@ -2283,9 +2174,6 @@ void ntl_team_panel(tenv *env) {
     }
     igSeparator();
 
-    /* Re-read the remaining region after the controls above.  Fill only the
-       space that actually exists so the message box and player list stay on
-       screen instead of extending past the bottom edge. */
     ImVec2 body_avail_v;
     igGetContentRegionAvail(&body_avail_v);
     bool wide_v = body_avail_v.x >= 720.0f;
@@ -2596,7 +2484,6 @@ void ntl_team_panel(tenv *env) {
       igSetNextItemWidth(-1.0f);
       if (igSliderFloat("##own_marker_size", &us->own_marker_size, 2.0f, 28.0f,
                         "%.1f px", ImGuiSliderFlags_AlwaysClamp)) {
-        /* live preview while dragging */
       }
       if (igIsItemDeactivatedAfterEdit()) save_user_settings(us);
       igText("Shape / color");

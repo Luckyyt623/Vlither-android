@@ -17,14 +17,6 @@ import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 
-/**
- * In-app browser used by the "Tags store" button on the title screen. Keeps
- * the player inside Vlither instead of bouncing them out to the system
- * browser, with a visible close control to return to the game.
- *
- * Launched from native code via android_jni_open_webview() (android_jni.c),
- * which passes the target URL as the "url" string extra.
- */
 class TagsStoreActivity : Activity() {
 
     companion object {
@@ -68,9 +60,6 @@ class TagsStoreActivity : Activity() {
             ): Boolean {
                 val requestUrl = request.url
                 val host = requestUrl.host ?: ""
-                // Keep the site itself inside the WebView; send everything
-                // else (Discord invite, mailto:, GitHub release, etc.) out
-                // to the system so it opens in the right app.
                 return if (host.endsWith("onrender.com")) {
                     false
                 } else {
@@ -88,7 +77,7 @@ class TagsStoreActivity : Activity() {
         }
 
         val closeButton = TextView(this).apply {
-            text = "\u2715" // ×
+            text = "\u2715"
             setTextColor(Color.WHITE)
             textSize = 20f
             gravity = Gravity.CENTER

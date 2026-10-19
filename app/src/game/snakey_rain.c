@@ -25,7 +25,7 @@ typedef struct sr_writer {
 
 typedef struct sr_state {
   bool initialized;
-  bool enabled_at_start; /* runtime active flag (no restart needed) */
+  bool enabled_at_start;
   bool mgr_ready;
   bool shutting_down;
   bool ws_open;
@@ -55,14 +55,12 @@ static sr_state S;
 
 static void sr_local_chat(const char *text) {
   if (!text || !text[0]) return;
-  /* Local-only notifications — never broadcast to other players. */
   ntl_team_system_message(text);
   vlither_chat_system_message(text);
 }
 
 static void sr_status(const char *text) {
   snprintf(S.status, sizeof S.status, "%s", text ? text : "");
-  /* Only push bot spawn / stop style events into chat for the local user. */
   if (!text || !text[0]) return;
   if (strstr(text, "Bots running") || strstr(text, "Bots stopped") ||
       strstr(text, "Starting bots") || strstr(text, "Stopping bots") ||
@@ -422,7 +420,7 @@ bool snakey_rain_enabled_at_start(void) { return S.enabled_at_start; }
 
 bool snakey_rain_requires_restart(tenv *env) {
   (void)env;
-  return false; /* settings apply live — no app restart */
+  return false;
 }
 
 void snakey_rain_apply_settings(tenv *env) {
@@ -464,13 +462,11 @@ void snakey_rain_on_spawn(tenv *env, const uint8_t *packet,
 void snakey_rain_update(tenv *env) {
   if (!S.initialized || !env || !env->usr) return;
   user_settings *us = &env->usr->usrs;
-  /* Live toggle — no app restart required. */
   if (us->snakey_rain_enabled && !S.enabled_at_start)
     sr_enable(env);
   else if (!us->snakey_rain_enabled && S.enabled_at_start)
     sr_disable();
   if (!S.enabled_at_start) return;
-  /* Keep credentials/name/skin in sync while idle. */
   if (!S.logged_in) sr_copy_settings(us);
   else if (S.desired_max_bots != us->snakey_rain_max_bots) {
     S.desired_max_bots = us->snakey_rain_max_bots;
@@ -536,8 +532,6 @@ void snakey_rain_draw(tenv *env) {
       env->usr->gdata.curr_screen != PLAYING)
     return;
 
-  /* Fit the top bar to phone width + height so small screens do not clip
-     buttons and large phones do not get oversized pills. */
   float sw = (float)env->ctx->size[0];
   float sh = (float)env->ctx->size[1];
   if (sw < 1.0f || sh < 1.0f) return;
@@ -577,7 +571,6 @@ void snakey_rain_draw(tenv *env) {
 
   float side_margin = fmaxf(8.0f, 12.0f * scale);
   if (width > sw - side_margin * 2.0f) {
-    /* Last-resort shrink so the three pills always stay on-screen. */
     float max_w = fmaxf(1.0f, sw - side_margin * 2.0f);
     float fit = max_w / width;
     bots_w *= fit;
@@ -608,7 +601,6 @@ void snakey_rain_draw(tenv *env) {
                           ImGuiWindowFlags_NoScrollbar |
                           ImGuiWindowFlags_NoBackground);
   if (open) {
-    /* Bots pill — tap starts/stops bots */
     ImVec4 bots_col = S.bots_running
                           ? (ImVec4){0.35f, 0.95f, 0.55f, 1.0f}
                           : (ImVec4){1.0f, 0.55f, 0.75f, 1.0f};
@@ -623,7 +615,6 @@ void snakey_rain_draw(tenv *env) {
 
     igSameLine(0, gap);
 
-    /* Follow / mode pill — cycles through modes when tapped */
     igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){0.95f, 0.95f, 1.0f, 1.0f});
     if (igButton(follow_label, (ImVec2){follow_w, btn_h})) {
       static const int modes[] = {1, 2, 3, 4, 5, 8, 9, 10, 11, 13, 14};
@@ -640,7 +631,6 @@ void snakey_rain_draw(tenv *env) {
 
     igSameLine(0, gap);
 
-    /* Boost / No Boost pill */
     ImVec4 boost_col = S.boost ? (ImVec4){1.0f, 0.85f, 0.25f, 1.0f}
                                : (ImVec4){0.85f, 0.85f, 0.90f, 1.0f};
     igPushStyleColor_Vec4(ImGuiCol_Text, boost_col);

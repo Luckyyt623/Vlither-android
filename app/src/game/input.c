@@ -8,8 +8,6 @@
 #include "ntl_team.h"
 #include "oef.h"
 
-/* Read by redraw.c. This is a held state (physical or custom on-screen W),
-   unlike Vlither's toggle hotkeys, so Skinless Peek feels like NTL. */
 bool g_ntl_skin_peek_active = false;
 
 void input(tenv* env) {
@@ -82,17 +80,10 @@ void input(tenv* env) {
 
 #ifdef ANDROID
 
-      /* Mouse + Keyboard mode uses Android's real USB/Bluetooth mouse
-         coordinates when a mouse has been detected. Until then, keep the
-         existing touchscreen scheme available as a fallback. */
       bool use_hw_mouse = usrs->external_input_mode == 1 &&
                           env->wnd->hw_mouse_present;
 
       if (use_hw_mouse) {
-        /* A touch-arrow may still have been tracking from the previous
-           control mode. Kill that state immediately when hardware-mouse
-           steering takes over so it cannot survive as a one-frame/legacy
-           second cursor. */
         gdata->touch_ctrl.tp_tracking = false;
         gdata->touch_ctrl.tp_visible = false;
 
@@ -117,8 +108,6 @@ void input(tenv* env) {
           if (env->wnd->touch.just_down || !gdata->touch_ctrl.tp_tracking) {
 
             float ang = me->eang;
-            /* Official mobile starts the arrow 58 scaled pixels ahead of the
-               snake, preserving the current direction when a new drag begins. */
             float spawn_r = 58.0f * me->sc * gdata->data.gsc;
             float spawn_x = cx + spawn_r * cosf(ang);
             float spawn_y = cy + spawn_r * sinf(ang);
@@ -140,9 +129,6 @@ void input(tenv* env) {
             float ny = gdata->touch_ctrl.tp_anchor_y
                      + (ty - gdata->touch_ctrl.tp_last_touch_y) * usrs->arrow_sensitivity;
 
-            /* Like the official client, the steering target is unrestricted:
-               it may cross the snake head. The rendered arrow follows the
-               target by 60% per frame, while steering uses the target itself. */
             gdata->touch_ctrl.tp_target_x = nx;
             gdata->touch_ctrl.tp_target_y = ny;
             gdata->touch_ctrl.tp_cursor_x +=
@@ -176,17 +162,11 @@ void input(tenv* env) {
         } else {
 
         if (env->wnd->touch.down) {
-          /* Match Slither mobile's joystick mode: the base is fixed in the
-             selected screen-side and the touch's angle from that base steers
-             the snake. Unlike Vlither's old stick, the base never follows
-             the finger and movement has no distance multiplier. */
           float sw = (float)ctx->size[0];
           float sh = (float)ctx->size[1];
           float margin = sw * 0.025f;
           float jr, jcx, jcy;
           if (usrs->joy_pos_custom) {
-            /* Keep the existing slider's scale semantics while converting
-               it to Slither's smaller 168px base artwork. */
             jr  = sh * usrs->joy_rel_size * 0.47f;
             jcx = sw * usrs->joy_rel_x;
             jcy = sh * usrs->joy_rel_y;
@@ -225,9 +205,6 @@ void input(tenv* env) {
 #ifdef ANDROID
     bool external_boost = false;
     if (usrs->external_input_mode == 1) {
-      /* Primary/left mouse button is the external-mouse boost control.
-         Space/Up are also accepted from a physical keyboard, matching the
-         desktop control vocabulary. */
       external_boost =
           twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
           tmouse_button_pressed(env->ms, GLFW_MOUSE_BUTTON_LEFT) ||
@@ -262,8 +239,6 @@ void input(tenv* env) {
       gdata->data.last_e_mtm = gdata->data.ctm;
       gdata->data.lsxm = xm;
       gdata->data.lsym = ym;
-      /* Official mobile has no centre dead-zone. At the exact head position,
-         atan2f(0, 0) resolves to 0 and therefore targets screen-right. */
       ang = atan2f(ym, xm);
       me->eang = ang;
       ang = fmodf(ang, PI2);
@@ -362,7 +337,4 @@ void input(tenv* env) {
     }
   }
 
-  /* show_crosshair is now the persisted local head-dot setting. It no longer
-     represents the OS mouse cursor, so never hide a real mouse because the
-     head dot is enabled. */
 }

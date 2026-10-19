@@ -3,6 +3,7 @@
 
 #include "body_part.h"
 #include "gpt.h"
+#include "rgb_skin.h"
 #include <stdint.h>
 
 typedef struct snake {
@@ -16,6 +17,7 @@ typedef struct snake {
   int fltg;
   int sct;
   int cusk_len;
+  int rgb_len;
   int dir;
   int rsc;
   int iiv;
@@ -58,16 +60,11 @@ typedef struct snake {
   float sep;
   float fchl;
 
-  /* Smoothed tag headings are kept per snake so tags trail turns naturally
-     without sharing state between players or tag systems. */
   float ntl_tag_follow_ang;
   float ntl_tag_follow_mtm;
   float vlither_tag_follow_ang;
   float vlither_tag_follow_mtm;
 
-  /* Spring-damper state for the Vlither tag's antenna tip — gives it an
-     organic, floppy wobble (like a real chain of points) without being
-     frame-rate dependent the way a fixed per-frame damping factor would be. */
   float vlither_tag_tip_x;
   float vlither_tag_tip_y;
   float vlither_tag_tip_vx;
@@ -82,9 +79,11 @@ typedef struct snake {
 
   uint8_t accessory;
   uint8_t cusk_data[MAX_SKIN_CODE_LEN];
+  rgb_seg rgb_data[RGB_SKIN_MAX];
   char nk[MAX_NICKNAME_LEN + 1];
 
   bool cusk;
+  bool rgbsk;
   bool dead;
   bool ntl_tag_follow_ready;
   bool vlither_tag_follow_ready;

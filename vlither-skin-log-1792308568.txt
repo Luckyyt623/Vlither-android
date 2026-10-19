@@ -1,0 +1,407 @@
+[   0s] CONN open (raw=0)
+[   1s] RECV riddle packet '6' len=185
+[   1s] LOGIN sent: raw=0 version=291 token=web custom_skin=1 send_rgb=0 rgb_len=0 send_classic=0 accessory=255 default_skin=0
+[   1s] LOGIN packet (36 bytes): 115 30 1 35 54 206 204 169 97 178 74 136 124 117 14 210 106 236 8 208 136 213 140 111 0 8 64 76 117 99 107 121 126 32 0 255 
+[   1s] RECV init 'a': len=30 grd=19 protocol_version=1817715904
+[   1s] RECV snake id=46420 (OWN, server echo) nick="@Lucky~ " skl=0
+[   1s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  19s] CONN closed
+[  28s] CONN open (raw=0)
+[  28s] CONN raw TCP connected
+[  28s] LOGIN sent: raw=1 version=291 token=web custom_skin=1 send_rgb=1 rgb_len=13 send_classic=0 accessory=255 default_skin=0
+[  28s] LOGIN packet (49 bytes): 115 30 1 35 54 206 204 169 97 178 74 136 124 117 14 210 106 236 8 208 136 213 140 111 0 8 64 76 117 99 107 121 126 32 0 255 8 3 2 7 3 92 154 0 3 9 110 26 26 
+[  28s] RECV init 'a': len=61 grd=19 protocol_version=-2065119937
+[  28s] RECV snake id=46 (OWN, server echo) nick="@Lucky~ " skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=5 (other player) nick="Supreme Monarch HBdBurry" skl=14
+[  28s]   skin bytes (14 bytes): 0 0 0 0 0 0 0 0 15 11 3 9 18 11 
+[  28s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=95 (other player) nick="" skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=206 (other player) nick="" skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=448 (other player) nick="Dilip" skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=13 (other player) nick="" skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=79 (other player) nick="" skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=213 (other player) nick="Siddhant" skl=12
+[  28s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 1 6 2 
+[  28s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  28s] RECV snake id=322 (other player) nick="" skl=0
+[  28s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  31s] RECV snake id=72 (other player) nick="[SMT] @Insane4XE" skl=200
+[  31s]   skin bytes (200 bytes): 255 255 255 0 0 0 223 13 11 30 1 26 1 9 1 26 1 9 1 23 1 15 1 16 1 21 1 26 1 21 1 30 1 21 1 30 1 26 1 21 1 30 1 21 1 30 1 26 1 21 1 30 1 21 1 30 1 26 1 21 1 30 1 21 1 30 1 26 1 21 1 30 1 21 1 30 1 26 1 21 1 30 1 21 1 30 1 26 1 9 1 26 1 9 1 23 1 15 1 16 1 21 1 26 7 9 1 18 2 21 1 18 1 9 1 18 1 23 1 15 1 16 1 21 2 30 2 21 2 30 2 21 2 30 2 21 2 30 2 21 2 30 2 21 2 30 2 21 2 30 2 21 2 30 2 21 1 16 1 15 1 23 1 9 1 18 2 21 1 18 1 9 1 26 1 9 1 23 1 15 1 16 1 21 1 26 1 9 1 23 1 15 1 16 1 21 1 26 1 9 
+[  31s]   parsed: classic format rgb_len=0 cusk_len=130 tag=-1
+[  31s] RECV snake id=438 (other player) nick="cutieee <3 " skl=0
+[  31s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  31s] RECV snake id=428 (other player) nick="bot(bot)" skl=60
+[  31s]   skin bytes (60 bytes): 0 0 0 0 0 0 0 0 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 2 26 2 29 
+[  31s]   parsed: ANDROID/RGB format rgb_len=66 cusk_len=66 tag=-1
+[  32s] RECV snake id=138 (other player) nick="" skl=0
+[  32s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  34s] RECV snake id=78 (other player) nick="Anjali" skl=36
+[  34s]   skin bytes (36 bytes): 0 0 0 0 0 0 0 0 1 28 1 18 1 9 1 18 6 28 4 29 5 28 5 18 6 9 5 29 2 28 2 11 2 28 3 0 
+[  34s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  35s] RECV snake id=508 (other player) nick="IND - ASHUPAYU.!!" skl=10
+[  35s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 1 9 
+[  35s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  35s] RECV snake id=308 (other player) nick="RuuH" skl=200
+[  35s]   skin bytes (200 bytes): 255 255 255 0 0 0 0 0 1 17 2 11 1 10 1 19 1 10 3 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 93 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 
+[  35s]   parsed: classic format rgb_len=0 cusk_len=191 tag=-1
+[  35s] RECV snake id=464 (other player) nick="" skl=0
+[  35s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  35s] RECV snake id=227 (other player) nick="pranav" skl=10
+[  35s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 1 32 
+[  35s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  36s] RECV snake id=349 (other player) nick="[SMT]BOOPER" skl=20
+[  36s]   skin bytes (20 bytes): 0 0 0 0 0 0 0 0 1 9 25 30 4 31 21 30 3 31 12 30 
+[  36s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  36s] RECV snake id=77 (other player) nick="[SMT] Khushi" skl=0
+[  36s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  36s] RECV snake id=446 (other player) nick="Donkey D. Luffy" skl=0
+[  36s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  37s] CONN closed
+[  38s] CONN open (raw=0)
+[  38s] CONN raw TCP connected
+[  38s] LOGIN sent: raw=1 version=291 token=web custom_skin=1 send_rgb=1 rgb_len=13 send_classic=0 accessory=255 default_skin=0
+[  38s] LOGIN packet (49 bytes): 115 30 1 35 54 206 204 169 97 178 74 136 124 117 14 210 106 236 8 208 136 213 140 111 0 8 64 76 117 99 107 121 126 32 0 255 8 3 2 7 3 92 154 0 3 9 110 26 26 
+[  38s] RECV init 'a': len=61 grd=19 protocol_version=1822669695
+[  38s] RECV snake id=16 (OWN, server echo) nick="@Lucky~ " skl=0
+[  38s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  38s] RECV snake id=84 (other player) nick="snkbooper" skl=0
+[  38s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  38s] RECV snake id=320 (other player) nick="" skl=12
+[  38s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 2 1 8 
+[  38s]   parsed: ANDROID/RGB format rgb_len=1 cusk_len=1 tag=-1
+[  39s] RECV snake id=328 (other player) nick="" skl=0
+[  39s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  39s] RECV snake id=210 (other player) nick="" skl=12
+[  39s]   skin bytes (12 bytes): 255 255 255 0 0 0 120 106 3 26 4 39 
+[  39s]   parsed: classic format rgb_len=0 cusk_len=7 tag=-1
+[  40s] RECV snake id=359 (other player) nick="" skl=0
+[  40s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  41s] RECV snake id=303 (other player) nick="HAPPY NAVARATRI [JSR]" skl=70
+[  41s]   skin bytes (70 bytes): 0 0 0 0 0 0 0 0 1 11 10 9 1 27 1 7 1 7 1 7 1 7 1 7 1 7 1 7 1 7 1 7 2 7 10 9 1 11 2 29 1 7 1 7 1 7 2 7 1 7 1 7 1 7 1 7 1 7 1 7 1 7 2 7 1 28 1 31 2 27 
+[  41s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  43s] RECV snake id=98 (other player) nick="" skl=0
+[  43s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  43s] RECV snake id=468 (other player) nick="Bk" skl=0
+[  43s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  46s] RECV snake id=308 (other player) nick="RuuH" skl=200
+[  46s]   skin bytes (200 bytes): 255 255 255 0 0 0 0 0 1 17 2 11 1 10 1 19 1 10 3 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 93 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 1 11 1 20 1 34 1 20 
+[  46s]   parsed: classic format rgb_len=0 cusk_len=191 tag=-1
+[  47s] RECV snake id=408 (other player) nick="night mare" skl=0
+[  47s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  47s] RECV snake id=320 (other player) nick="" skl=12
+[  47s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 2 1 8 
+[  47s]   parsed: ANDROID/RGB format rgb_len=1 cusk_len=1 tag=-1
+[  48s] RECV snake id=436 (other player) nick=" bd (pro)  " skl=40
+[  48s]   skin bytes (40 bytes): 0 0 0 0 0 0 0 0 1 2 1 3 1 3 1 3 1 4 1 5 1 5 1 7 1 7 1 7 1 7 1 8 1 8 1 1 1 1 1 1 
+[  48s]   parsed: ANDROID/RGB format rgb_len=1 cusk_len=1 tag=-1
+[  48s] RECV snake id=463 (other player) nick="" skl=0
+[  48s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  50s] RECV snake id=205 (other player) nick="Krishna ;)ur name cutie?" skl=0
+[  50s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  52s] RECV snake id=7 (other player) nick="jisnemarauskimkc" skl=0
+[  52s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  53s] RECV snake id=322 (other player) nick="" skl=0
+[  53s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  53s] RECV snake id=349 (other player) nick="[SMT]BOOPER" skl=20
+[  53s]   skin bytes (20 bytes): 0 0 0 0 0 0 0 0 1 9 25 30 4 31 21 30 3 31 12 30 
+[  53s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  54s] RECV snake id=227 (other player) nick="pranav" skl=10
+[  54s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 1 32 
+[  54s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  57s] RECV snake id=459 (other player) nick="boopicidal......." skl=10
+[  57s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 39 9 
+[  57s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  57s] RECV snake id=172 (other player) nick="Unholy Angel (bot) " skl=0
+[  57s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  57s] RECV snake id=508 (other player) nick="IND - ASHUPAYU.!!" skl=10
+[  57s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 1 9 
+[  57s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  62s] RECV snake id=141 (other player) nick="GHAR  JAA KE SUTTI BABU" skl=10
+[  62s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 2 11 
+[  62s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  63s] RECV snake id=152 (other player) nick="yuval (bot)" skl=12
+[  63s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 2 2 7 
+[  63s]   parsed: ANDROID/RGB format rgb_len=2 cusk_len=2 tag=-1
+[  63s] RECV snake id=143 (other player) nick="" skl=0
+[  63s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  65s] RECV snake id=77 (other player) nick="[SMT] Khushi" skl=0
+[  65s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  65s] RECV snake id=162 (other player) nick="Orry" skl=10
+[  65s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 2 11 
+[  65s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  66s] RECV snake id=171 (other player) nick="[Z  A  L ..  T R EX--/-]" skl=32
+[  66s]   skin bytes (32 bytes): 255 255 255 0 0 0 221 95 3 21 1 11 7 21 3 11 6 21 2 22 10 11 11 21 1 11 1 21 1 11 1 9 
+[  66s]   parsed: classic format rgb_len=0 cusk_len=47 tag=-1
+[  66s] RECV snake id=409 (other player) nick="Billa" skl=0
+[  66s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  67s] RECV snake id=252 (other player) nick="PM MODI" skl=14
+[  67s]   skin bytes (14 bytes): 0 0 0 0 0 0 0 0 7 2 7 7 8 3 
+[  67s]   parsed: ANDROID/RGB format rgb_len=2 cusk_len=2 tag=-1
+[  69s] RECV snake id=179 (other player) nick="happy" skl=0
+[  69s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  69s] RECV snake id=352 (other player) nick="Krishna " skl=0
+[  69s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  70s] RECV snake id=411 (other player) nick="[SMT] Pro one" skl=118
+[  70s]   skin bytes (118 bytes): 0 0 0 0 0 0 0 0 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 2 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 4 25 8 6 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 
+[  70s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  72s] RECV snake id=104 (other player) nick="atiq unnmmad" skl=12
+[  72s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 12 28 13 26 
+[  72s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  73s] RECV snake id=288 (other player) nick="[SMT] PROXIMA CENTAURI A" skl=0
+[  73s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  74s] RECV snake id=288 (other player) nick="[SMT] PROXIMA CENTAURI A" skl=0
+[  74s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  74s] RECV snake id=439 (other player) nick="" skl=16
+[  74s]   skin bytes (16 bytes): 0 0 0 0 0 0 0 0 15 22 13 9 4 41 12 26 
+[  74s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  75s] RECV snake id=349 (other player) nick="[SMT]BOOPER" skl=20
+[  75s]   skin bytes (20 bytes): 0 0 0 0 0 0 0 0 1 9 25 30 4 31 21 30 3 31 12 30 
+[  75s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  77s] RECV snake id=152 (other player) nick="yuval (bot)" skl=12
+[  77s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 2 2 7 
+[  77s]   parsed: ANDROID/RGB format rgb_len=2 cusk_len=2 tag=-1
+[  78s] RECV snake id=488 (other player) nick="anshika9827677484" skl=0
+[  78s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  79s] RECV snake id=40 (other player) nick="" skl=0
+[  79s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  79s] RECV snake id=352 (other player) nick="Krishna " skl=0
+[  79s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  80s] RECV snake id=187 (other player) nick="" skl=20
+[  80s]   skin bytes (20 bytes): 0 0 0 0 0 0 0 0 4 24 1 16 1 24 1 20 1 24 1 26 
+[  80s]   parsed: ANDROID/RGB format rgb_len=24 cusk_len=24 tag=-1
+[  80s] RECV snake id=67 (other player) nick="" skl=0
+[  80s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  80s] RECV snake id=5 (other player) nick="" skl=0
+[  80s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  81s] RECV snake id=457 (other player) nick="" skl=0
+[  81s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  81s] RECV snake id=411 (other player) nick="[SMT] Pro one" skl=118
+[  81s]   skin bytes (118 bytes): 0 0 0 0 0 0 0 0 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 2 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 4 25 8 6 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 
+[  81s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  82s] RECV snake id=256 (other player) nick="[SMT] @SILVA ~ hbd burry" skl=0
+[  82s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  83s] RECV snake id=62 (other player) nick="[TRL] Food stealer" skl=0
+[  83s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  84s] RECV snake id=501 (other player) nick="[SMT]siva" skl=0
+[  84s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  84s] RECV snake id=289 (other player) nick="Rusty (bot) " skl=0
+[  84s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  85s] RECV snake id=20 (other player) nick="" skl=0
+[  85s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  85s] RECV snake id=344 (other player) nick="Mahiru Is Best Waifu" skl=20
+[  85s]   skin bytes (20 bytes): 0 0 0 0 0 0 0 0 5 5 9 5 5 6 5 7 3 7 5 7 
+[  85s]   parsed: ANDROID/RGB format rgb_len=3 cusk_len=3 tag=-1
+[  85s] RECV snake id=311 (other player) nick="" skl=0
+[  85s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  85s] RECV snake id=309 (other player) nick="B R K N - C O O K S" skl=18
+[  85s]   skin bytes (18 bytes): 0 0 0 0 0 0 0 0 1 5 1 5 1 5 1 4 2 11 
+[  85s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  85s] RECV snake id=411 (other player) nick="[SMT] Pro one" skl=118
+[  85s]   skin bytes (118 bytes): 0 0 0 0 0 0 0 0 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 2 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 1 31 1 26 4 25 8 6 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 1 0 1 5 
+[  85s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  85s] RECV snake id=239 (other player) nick="" skl=0
+[  85s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  86s] RECV snake id=394 (other player) nick="[SMT] Ninco" skl=44
+[  86s]   skin bytes (44 bytes): 255 255 255 0 0 0 0 0 5 21 1 39 1 17 1 0 1 6 1 5 1 12 1 18 1 4 1 9 1 4 1 18 1 12 1 5 1 6 1 0 1 17 1 39 
+[  86s]   parsed: classic format rgb_len=0 cusk_len=22 tag=-1
+[  86s] RECV snake id=233 (other player) nick="priya" skl=12
+[  86s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 2 1 9 
+[  86s]   parsed: ANDROID/RGB format rgb_len=1 cusk_len=1 tag=-1
+[  87s] RECV snake id=502 (other player) nick="" skl=0
+[  87s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  87s] RECV snake id=354 (other player) nick="CHALBENOOB" skl=0
+[  87s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  87s] RECV snake id=318 (other player) nick="CRICKET" skl=22
+[  87s]   skin bytes (22 bytes): 0 0 0 0 0 0 0 0 5 11 6 9 6 7 6 6 6 5 5 4 8 3 
+[  87s]   parsed: ANDROID/RGB format rgb_len=11 cusk_len=11 tag=-1
+[  87s] RECV snake id=303 (other player) nick="HAPPY NAVARATRI [JSR]" skl=70
+[  87s]   skin bytes (70 bytes): 0 0 0 0 0 0 0 0 1 11 10 9 1 27 1 7 1 7 1 7 1 7 1 7 1 7 1 7 1 7 1 7 2 7 10 9 1 11 2 29 1 7 1 7 1 7 2 7 1 7 1 7 1 7 1 7 1 7 1 7 1 7 2 7 1 28 1 31 2 27 
+[  87s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  87s] RECV snake id=221 (other player) nick="rr" skl=12
+[  87s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 9 7 1 26 
+[  87s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  87s] RECV snake id=259 (other player) nick="nick" skl=0
+[  87s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  87s] RECV snake id=78 (other player) nick="Anjali" skl=36
+[  87s]   skin bytes (36 bytes): 0 0 0 0 0 0 0 0 1 28 1 18 1 9 1 18 6 28 4 29 5 28 5 18 6 9 5 29 2 28 2 11 2 28 3 0 
+[  87s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  88s] RECV snake id=243 (other player) nick="" skl=26
+[  88s]   skin bytes (26 bytes): 0 0 0 0 0 0 0 0 3 5 5 6 3 1 3 3 5 2 4 7 4 8 2 4 3 4 
+[  88s]   parsed: ANDROID/RGB format rgb_len=5 cusk_len=5 tag=-1
+[  88s] RECV snake id=36 (other player) nick="MONSTER" skl=0
+[  88s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  88s] RECV snake id=348 (other player) nick="Ha$ib" skl=0
+[  88s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  89s] RECV snake id=334 (other player) nick="" skl=0
+[  89s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  90s] RECV snake id=88 (other player) nick="[SMT] Yuvnexx HPBD BURRY" skl=0
+[  90s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  92s] RECV snake id=56 (other player) nick="R o c k s t a r FAN #1" skl=0
+[  92s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  92s] RECV snake id=390 (other player) nick="Goli beta masti nai" skl=0
+[  92s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  92s] RECV snake id=141 (other player) nick="GHAR  JAA KE SUTTI BABU" skl=10
+[  92s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 2 11 
+[  92s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  94s] RECV snake id=15 (other player) nick="[SMT]@Umarr~HPBD Burryyy" skl=0
+[  94s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  94s] RECV snake id=71 (other player) nick="Nishika" skl=0
+[  94s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  97s] RECV snake id=363 (other player) nick="ongzybongzy" skl=28
+[  97s]   skin bytes (28 bytes): 0 0 0 0 0 0 0 0 11 7 1 7 2 7 2 7 1 7 2 7 2 7 2 7 2 7 6 7 
+[  97s]   parsed: ANDROID/RGB format rgb_len=14 cusk_len=14 tag=-1
+[  98s] RECV snake id=239 (other player) nick="" skl=0
+[  98s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  98s] RECV snake id=390 (other player) nick="Goli beta masti nai" skl=0
+[  98s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[  98s] RECV snake id=191 (other player) nick="ANSH ---)==============>" skl=12
+[  98s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 3 1 9 
+[  98s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  99s] RECV snake id=102 (other player) nick="EGO" skl=10
+[  99s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 1 31 
+[  99s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[  99s] RECV snake id=390 (other player) nick="Goli beta masti nai" skl=0
+[  99s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 101s] RECV snake id=301 (other player) nick="solo " skl=14
+[ 101s]   skin bytes (14 bytes): 254 18 11 0 0 0 6 180 5 11 5 7 5 12 
+[ 101s]   parsed: classic format rgb_len=0 cusk_len=15 tag=6
+[ 101s] CONN closed
+[ 102s] CONN open (raw=0)
+[ 103s] CONN raw TCP connected
+[ 103s] LOGIN sent: raw=1 version=291 token=web custom_skin=1 send_rgb=1 rgb_len=13 send_classic=0 accessory=255 default_skin=0
+[ 103s] LOGIN packet (49 bytes): 115 30 1 35 54 206 204 169 97 178 74 136 124 117 14 210 106 236 8 208 136 213 140 111 0 8 64 76 117 99 107 121 126 32 0 255 8 3 2 7 3 92 154 0 3 9 110 26 26 
+[ 103s] RECV init 'a': len=61 grd=19 protocol_version=9996223
+[ 103s] RECV snake id=100 (OWN, server echo) nick="@Lucky~ " skl=0
+[ 103s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 103s] RECV snake id=170 (other player) nick="Dizz (bot)" skl=0
+[ 103s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 106s] RECV snake id=222 (other player) nick="Flip (bot)" skl=0
+[ 106s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 106s] RECV snake id=153 (other player) nick="Islam= Extremist factory" skl=0
+[ 106s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 110s] RECV snake id=170 (other player) nick="Dizz (bot)" skl=0
+[ 110s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 111s] RECV snake id=212 (other player) nick="" skl=0
+[ 111s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 111s] RECV snake id=364 (other player) nick="" skl=0
+[ 111s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 111s] RECV snake id=482 (other player) nick="Fubu (bot)" skl=0
+[ 111s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 116s] RECV snake id=413 (other player) nick="Cypris (bot)" skl=0
+[ 116s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 117s] RECV snake id=222 (other player) nick="Flip (bot)" skl=0
+[ 117s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 122s] RECV snake id=279 (other player) nick="" skl=18
+[ 122s]   skin bytes (18 bytes): 0 0 0 0 0 0 0 0 1 7 8 7 7 6 7 9 6 9 
+[ 122s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 126s] CONN closed
+[ 127s] CONN open (raw=0)
+[ 127s] CONN raw TCP connected
+[ 127s] LOGIN sent: raw=1 version=291 token=web custom_skin=1 send_rgb=1 rgb_len=13 send_classic=0 accessory=255 default_skin=0
+[ 127s] LOGIN packet (49 bytes): 115 30 1 35 54 206 204 169 97 178 74 136 124 117 14 210 106 236 8 208 136 213 140 111 0 8 64 76 117 99 107 121 126 32 0 255 8 3 2 7 3 92 154 0 3 9 110 26 26 
+[ 128s] RECV init 'a': len=61 grd=19 protocol_version=1843063999
+[ 128s] RECV snake id=343 (OWN, server echo) nick="@Lucky~ " skl=0
+[ 128s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 128s] RECV snake id=166 (other player) nick="CHALBENOOB" skl=0
+[ 128s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 128s] RECV snake id=450 (other player) nick="" skl=0
+[ 128s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 128s] RECV snake id=291 (other player) nick="atiq unnmmad" skl=12
+[ 128s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 12 28 13 26 
+[ 128s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 128s] RECV snake id=25 (other player) nick="nick" skl=0
+[ 128s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 128s] RECV snake id=214 (other player) nick="patlu " skl=24
+[ 128s]   skin bytes (24 bytes): 255 255 255 0 0 0 143 92 1 27 1 7 1 27 1 7 1 27 1 7 1 27 1 7 
+[ 128s]   parsed: classic format rgb_len=0 cusk_len=8 tag=-1
+[ 129s] RECV snake id=345 (other player) nick="cutieee <3 " skl=0
+[ 129s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 132s] RECV snake id=450 (other player) nick="" skl=0
+[ 132s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 132s] RECV snake id=423 (other player) nick="evil alive" skl=0
+[ 132s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 133s] RECV snake id=10 (other player) nick="" skl=0
+[ 133s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 133s] RECV snake id=304 (other player) nick="" skl=0
+[ 133s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 135s] RECV snake id=10 (other player) nick="" skl=0
+[ 135s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 135s] RECV snake id=458 (other player) nick="" skl=0
+[ 135s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 135s] RECV snake id=22 (other player) nick="R A H U L          NO" skl=24
+[ 135s]   skin bytes (24 bytes): 0 0 0 0 0 0 0 0 1 31 20 9 1 30 6 31 1 30 20 18 1 31 6 30 
+[ 135s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 139s] RECV snake id=450 (other player) nick="" skl=0
+[ 139s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 139s] RECV snake id=299 (other player) nick="vishuuuhh" skl=0
+[ 139s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 142s] RECV snake id=160 (other player) nick="bumbaaaa" skl=10
+[ 142s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 1 25 
+[ 142s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 143s] RECV snake id=16 (other player) nick="" skl=0
+[ 143s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 143s] RECV snake id=244 (other player) nick="[SMT] OG" skl=0
+[ 143s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 143s] RECV snake id=225 (other player) nick="[SMT]siva" skl=0
+[ 143s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 144s] RECV snake id=22 (other player) nick="R A H U L          NO" skl=24
+[ 144s]   skin bytes (24 bytes): 0 0 0 0 0 0 0 0 1 31 20 9 1 30 6 31 1 30 20 18 1 31 6 30 
+[ 144s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 145s] RECV snake id=442 (other player) nick="" skl=0
+[ 145s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 146s] RECV snake id=244 (other player) nick="[SMT] OG" skl=0
+[ 146s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 146s] RECV snake id=22 (other player) nick="R A H U L          NO" skl=24
+[ 146s]   skin bytes (24 bytes): 0 0 0 0 0 0 0 0 1 31 20 9 1 30 6 31 1 30 20 18 1 31 6 30 
+[ 146s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 146s] RECV snake id=419 (other player) nick="" skl=30
+[ 146s]   skin bytes (30 bytes): 0 0 0 0 0 0 0 0 3 2 3 7 3 2 3 7 3 2 3 7 3 2 3 7 3 2 3 7 4 2 
+[ 146s]   parsed: ANDROID/RGB format rgb_len=10 cusk_len=10 tag=-1
+[ 146s] RECV snake id=171 (other player) nick="sup" skl=16
+[ 146s]   skin bytes (16 bytes): 255 255 255 0 0 0 232 31 2 34 1 8 1 0 1 1 
+[ 146s]   parsed: classic format rgb_len=0 cusk_len=5 tag=-1
+[ 147s] RECV snake id=129 (other player) nick="hey noobs" skl=52
+[ 147s]   skin bytes (52 bytes): 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 9 1 9 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 
+[ 147s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 150s] RECV snake id=429 (other player) nick="" skl=0
+[ 150s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 150s] RECV snake id=233 (other player) nick="ongzybongzy" skl=28
+[ 150s]   skin bytes (28 bytes): 0 0 0 0 0 0 0 0 11 7 1 7 2 7 2 7 1 7 2 7 2 7 2 7 2 7 6 7 
+[ 150s]   parsed: ANDROID/RGB format rgb_len=14 cusk_len=14 tag=-1
+[ 151s] RECV snake id=419 (other player) nick="" skl=30
+[ 151s]   skin bytes (30 bytes): 0 0 0 0 0 0 0 0 3 2 3 7 3 2 3 7 3 2 3 7 3 2 3 7 3 2 3 7 4 2 
+[ 151s]   parsed: ANDROID/RGB format rgb_len=10 cusk_len=10 tag=-1
+[ 153s] RECV snake id=436 (other player) nick="wyrm.bot" skl=72
+[ 153s]   skin bytes (72 bytes): 255 255 255 0 0 0 0 0 5 9 1 23 1 9 2 23 1 9 1 23 2 9 2 23 1 9 1 28 1 9 1 28 1 9 2 28 1 9 1 28 1 9 1 18 1 9 1 18 2 9 2 18 1 9 1 18 1 9 1 23 1 9 1 23 1 9 1 23 3 9 6 23 
+[ 153s]   parsed: classic format rgb_len=0 cusk_len=49 tag=-1
+[ 154s] RECV snake id=0 (other player) nick="" skl=0
+[ 154s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 155s] CONN closed
+[ 158s] CONN open (raw=0)
+[ 158s] CONN raw TCP connected
+[ 158s] LOGIN sent: raw=1 version=291 token=web custom_skin=1 send_rgb=1 rgb_len=13 send_classic=0 accessory=255 default_skin=0
+[ 158s] LOGIN packet (49 bytes): 115 30 1 35 54 206 204 169 97 178 74 136 124 117 14 210 106 236 8 208 136 213 140 111 0 8 64 76 117 99 107 121 126 32 0 255 8 3 2 7 3 92 154 0 3 9 110 26 26 
+[ 158s] RECV init 'a': len=61 grd=19 protocol_version=1820236287
+[ 158s] RECV snake id=162 (OWN, server echo) nick="@Lucky~ " skl=0
+[ 158s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 158s] RECV snake id=469 (other player) nick="nishu" skl=12
+[ 158s]   skin bytes (12 bytes): 0 0 0 0 0 0 0 0 1 2 1 9 
+[ 158s]   parsed: ANDROID/RGB format rgb_len=1 cusk_len=1 tag=-1
+[ 158s] RECV snake id=24 (other player) nick="King hu ma" skl=0
+[ 158s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 158s] RECV snake id=376 (other player) nick="" skl=72
+[ 158s]   skin bytes (72 bytes): 0 0 0 0 0 0 0 0 1 10 1 5 1 20 1 19 3 20 3 7 1 22 1 27 1 26 1 32 1 10 1 3 1 2 1 1 1 8 1 11 1 5 1 1 1 0 1 2 2 3 1 4 1 5 6 10 2 20 1 21 1 20 6 19 7 10 7 19 6 20 2 0 
+[ 158s]   parsed: ANDROID/RGB format rgb_len=52 cusk_len=52 tag=-1
+[ 158s] RECV snake id=372 (other player) nick="GHAR  JAA KE SUTTI BABU" skl=10
+[ 158s]   skin bytes (10 bytes): 0 0 0 0 0 0 0 0 2 11 
+[ 158s]   parsed: ANDROID/RGB format rgb_len=0 cusk_len=0 tag=-1
+[ 158s] RECV snake id=427 (other player) nick="[LwK] TOKITO fan" skl=0
+[ 158s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1
+[ 159s] RECV snake id=244 (other player) nick="[SMT] OG" skl=0
+[ 159s]   parsed: no custom skin rgb_len=0 cusk_len=0 tag=-1

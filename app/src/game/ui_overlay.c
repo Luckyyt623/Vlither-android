@@ -20,8 +20,6 @@
 #include "../android_glfw_shim.h"
 #endif
 
-/* Screen-space left edge / bottom edge of the leaderboard from the last
-   frame it was drawn (0 when hidden). Read by ntl_team.c. */
 float g_leaderboard_left_x = 0.0f;
 float g_leaderboard_bottom_y = 0.0f;
 
@@ -34,9 +32,6 @@ static void draw_world_center_marker(tenv* env, float half_width,
       !isfinite(gdata->data.view_xx) || !isfinite(gdata->data.view_yy))
     return;
 
-  /* The Slither arena is centred at (grd, grd). Transform that world point
-     with the same camera and zoom used by snakes, so the marker only enters
-     the screen when the player actually approaches the centre. */
   float screen_x = half_width +
       (gdata->data.grd - gdata->data.view_xx) * gdata->data.gsc;
   float screen_y = half_height +
@@ -159,9 +154,6 @@ void ui_overlay(tenv* env) {
           laser_tx = mww2;
           laser_ty = mhh2;
         }
-        /* Joystick mode has no cursor, so the laser used to collapse onto
-           the screen centre and was invisible. Aim it along the stick (or the
-           snake's heading before the stick has been touched). */
         bool joystick_laser = !usrs->ctrl_mode_trackpad &&
                               !(usrs->external_input_mode == 1 &&
                                 env->wnd->hw_mouse_present);
@@ -353,8 +345,6 @@ void ui_overlay(tenv* env) {
           glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, 0.4f, tcolor);
           ImVec4 itcolor = {tcolor[0], tcolor[1], tcolor[2], 1};
           if (usrs->ntl_leaderboard_style == 1) {
-            /* Gold -> cyan rank gradient: rank remains readable even when
-               several snakes share nearly identical skin colours. */
             float t = (float)row / (float)(NUM_LEADERBOARD_ENTRIES - 1);
             itcolor.x = 1.00f + (0.25f - 1.00f) * t;
             itcolor.y = 0.82f + (0.90f - 0.82f) * t;
@@ -365,8 +355,6 @@ void ui_overlay(tenv* env) {
                                usrs->ntl_leaderboard_color[2],
                                usrs->ntl_leaderboard_color[3]};
           }
-          /* Teammates use the same fully opaque bold treatment as the local
-             player's own leaderboard name, without a boxed row background. */
           if (is_my_snake || is_team_snake) {
             igPushFont(
                 usr->imgui_data.mono_font_bold[usrs->lb_font_size],
@@ -389,9 +377,6 @@ void ui_overlay(tenv* env) {
           igPopFont();
         }
         igEndTable();
-        /* Remember where the leaderboard sits so other HUD panels (the team
-           players list) can avoid landing on top of it — in portrait the two
-           default to the same corner. */
         ImVec2 lb_end;
         igGetCursorScreenPos(&lb_end);
         g_leaderboard_left_x = table_x;
@@ -399,9 +384,6 @@ void ui_overlay(tenv* env) {
       }
     }
 
-    /* Keep the minimap usable on every device resolution. The configured
-       pixel size is treated as a preference and capped against the current
-       shorter screen edge so it cannot cover most of a small display. */
     float mm_max = fminf((float)ctx->size[0], (float)ctx->size[1]) * 0.46f;
     float mm_min = fminf(72.0f, mm_max);
     float mm_size = fminf((float)usrs->minimap_size, mm_max);
@@ -428,9 +410,7 @@ void ui_overlay(tenv* env) {
 
 
 #ifdef ANDROID
-    /* Direct minimap editing. The hit rectangle is registered for the next
-       input poll, so the touch never starts the trackpad/boost path. */
-    static int s_minimap_edit_action = 0; /* 1=move, 2=resize */
+    static int s_minimap_edit_action = 0;
     static float s_minimap_drag_dx = 0.0f, s_minimap_drag_dy = 0.0f;
     static float s_minimap_fixed_x = 0.0f, s_minimap_fixed_y = 0.0f;
     static bool s_minimap_was_editing = false;
@@ -455,8 +435,6 @@ void ui_overlay(tenv* env) {
         s_minimap_fixed_x = mm_x;
         s_minimap_fixed_y = mm_y;
 
-        /* The minimap pointer is UI-owned. Keep any different gameplay
-           pointer active so trackpad movement can continue while editing. */
       }
 
       if (s_minimap_edit_action != 0 && ui->down) {
@@ -569,12 +547,6 @@ void ui_overlay(tenv* env) {
   g_ctrl_swap_sides = usrs->ctrl_swap_sides;
 
   if (gdata->data.follow_view || gdata->curr_screen == CONTROLS) {
-    /* Normally these draw on the foreground layer (always on top, as
-       real gameplay controls should be). While a hidden background
-       preview snake is running behind the Settings/Controls screen,
-       that would paint over the actual adjustment sliders — so draw
-       to the background layer instead, underneath the real UI, purely
-       as an ambient look-behind preview. */
     bool panel_preview = (gdata->curr_screen == CONTROLS);
     ImDrawList* dl  = (gdata->preview_active || panel_preview)
                           ? igGetBackgroundDrawList(igGetMainViewport())
@@ -582,17 +554,9 @@ void ui_overlay(tenv* env) {
     float sw        = (float)ctx->size[0];
     float sh        = (float)ctx->size[1];
     float margin    = sw * 0.025f;
-    /* Landscape's short edge is always sh (a phone is never taller than it
-       is wide while in landscape), so sizing the controls off this instead
-       of sh directly is a no-op there — it only changes anything once sh
-       becomes the LONG edge, i.e. in portrait, where using sh unmodified
-       used to make the boost button and joystick balloon to a fraction of
-       the tall dimension instead of the narrow one. */
     float short_edge = sw < sh ? sw : sh;
     bool  is_portrait = sh > sw;
 
-    /* Reflect every boost source, including right-click/physical keyboard in
-       Mouse + Keyboard mode, not only the touchscreen boost button. */
     bool  boost_on  = gdata->data.wmd;
     bool  swapped   = usrs->ctrl_swap_sides;
 
@@ -614,9 +578,6 @@ void ui_overlay(tenv* env) {
 
     float jr, jcx, jcy;
     if (usrs->joy_pos_custom) {
-        /* SWF joystick background: 168px artwork scaled to 0.7. The old
-           Vlither ring was much larger, so retain saved slider values while
-           mapping them to the original Slither visual scale. */
         jr  = short_edge * usrs->joy_rel_size * 0.47f;
         jcx = sw * usrs->joy_rel_x;
         jcy = sh * usrs->joy_rel_y;
@@ -630,11 +591,6 @@ void ui_overlay(tenv* env) {
       extern bool  g_is_trackpad_mode, g_panel_open;
       extern bool  g_joystick_uses_side, g_joystick_left_side;
       g_boost_cx = bcx; g_boost_cy = bcy;
-      /* Same idea as the official mobile client: the round boost button is a
-         landscape-only control. There's no room for it in portrait without
-         crowding the joystick, so it's hidden there and replaced by
-         double-tap-and-hold-to-boost (see twindow_android.c), which works
-         everywhere but is otherwise redundant with the button. */
       g_boost_r  = (mouse_controls_active || is_portrait) ? 0.0f : br;
       g_joy_cx   = jcx; g_joy_cy   = jcy; g_joy_r   = jr;
       g_is_trackpad_mode = usrs->ctrl_mode_trackpad;
@@ -645,17 +601,12 @@ void ui_overlay(tenv* env) {
     if (!usrs->ctrl_mode_trackpad) {
       bool  joy_on = gdata->touch_ctrl.joy_tracking;
 
-      /* Direct port of the SWF artwork: a 35%-alpha grey 168px base and a
-         35%-alpha white 128px thumb, each with its soft black drop shadow.
-         It intentionally replaces Vlither's ring, crosshair and MOVE label. */
       float jo = usrs->joy_opacity;
       ImDrawList_AddCircleFilled(dl, (ImVec2){jcx, jcy + jr * 0.06f}, jr * 0.77f,
                                IM_COL32(0, 0, 0, (int)(64 * jo)), 64);
       ImDrawList_AddCircleFilled(dl, (ImVec2){jcx, jcy}, jr * 0.77f,
                                IM_COL32(128, 128, 128, (int)(89 * jo)), 64);
       if (usrs->hotkeys[HOTKEY_ASSIST].active) {
-        /* Visible Assist indicator on the joystick itself, in the laser
-           colour, so it is obvious the mode is on. */
         float la = usrs->laser_color[3] < 0.6f ? 0.6f : usrs->laser_color[3];
         ImDrawList_AddCircle(
             dl, (ImVec2){jcx, jcy}, jr * 0.77f,
@@ -679,9 +630,6 @@ void ui_overlay(tenv* env) {
 
     } else {
 
-      /* The touch-arrow cursor belongs only to touch controls. When
-         Mouse + Keyboard mode is active, main.c draws the custom hardware
-         mouse texture instead. Never render both cursors at once. */
       if (!mouse_controls_active && gdata->touch_ctrl.tp_tracking &&
           gdata->touch_ctrl.tp_visible &&
           !usrs->hotkeys[HOTKEY_BOT].active && !usrs->arrow_invisible) {
@@ -693,10 +641,6 @@ void ui_overlay(tenv* env) {
         float cs   = cosf(rot);
         float sn_v = sinf(rot);
 
-        /* At the normal 1.5x game zoom the multiplier is 1.0. Sync mode makes
-           the overlay shrink while zooming out and grow while zooming in, but
-           clamps extreme game zoom values so the control remains usable. When
-           sync is disabled, the multiplier stays exactly 1.0 in screen space. */
         float arrow_zoom_scale = 1.0f;
         if (usrs->arrow_sync_with_zoom) {
           arrow_zoom_scale = gdata->data.gsc / 1.5f;
@@ -747,7 +691,6 @@ void ui_overlay(tenv* env) {
               (ImVec2){arrow_u0, arrow_v1},
               IM_COL32(255, 255, 255, 255));
         } else {
-          /* Safe fixed-red fallback if an optional texture could not load. */
           ImDrawList_AddTriangleFilled(
               dl, ARPT(-0.5f * aw, 0),
               ARPT(0.35f * aw, -0.5f * ah),
@@ -807,8 +750,6 @@ void ui_overlay(tenv* env) {
     bool preview_controls = (gdata->curr_screen == CONTROLS);
     if (mouse_controls_active || (usrs->zslider_hidden && !preview_controls)) {
 
-      /* Mouse + Keyboard mode has no touch zoom bar. Clearing the hit
-         rectangle also prevents an invisible slider from consuming touches. */
       g_zslider_left = g_zslider_right = g_zslider_top = g_zslider_bottom = 0;
       g_zslider_half_h = 1;
       env->wnd->touch.zslider_ptr_id = -1;
@@ -938,7 +879,6 @@ void ui_overlay(tenv* env) {
       float shx = W2SX(g_bot_dbg.bx);
       float shy = W2SY(g_bot_dbg.by);
 
-      /* 1. body segments (type=1): blue filled dots */
       for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
         if (g_bot_dbg.coll_type[_i] != 1) continue;
         float cx = W2SX(g_bot_dbg.coll_x[_i]);
@@ -949,7 +889,6 @@ void ui_overlay(tenv* env) {
           IM_COL32(50, 120, 255, 128), 16);
       }
 
-      /* 2. gradient threat lines + heatmap (head -> each coll pt) */
       for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
         float cx  = W2SX(g_bot_dbg.coll_x[_i]);
         float cy  = W2SY(g_bot_dbg.coll_y[_i]);
@@ -958,7 +897,6 @@ void ui_overlay(tenv* env) {
         ImU32 col;
         if (d < rad * 5.0f) {
           col = IM_COL32(255, 60,  0, 200);
-          /* heatmap: concentric red glow */
           float hr = g_bot_dbg.coll_r[_i] * gsc * 3.0f;
           ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr,  IM_COL32(255,0,0,30),20);
           ImDrawList_AddCircleFilled(bdl,(ImVec2){cx,cy},hr*.6f,IM_COL32(255,80,0,50),16);
@@ -974,52 +912,43 @@ void ui_overlay(tenv* env) {
         ImDrawList_AddLine(bdl, (ImVec2){shx, shy}, (ImVec2){cx, cy}, col, 1.5f);
       }
 
-      /* 3. collision point circles by type */
       for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
         float cx = W2SX(g_bot_dbg.coll_x[_i]);
         float cy = W2SY(g_bot_dbg.coll_y[_i]);
         float cr = g_bot_dbg.coll_r[_i] * gsc;
         if (cr < 3.0f) cr = 3.0f;
         if (g_bot_dbg.coll_type[_i] == 0) {
-          /* enemy head: red outline */
           ImDrawList_AddCircle(bdl, (ImVec2){cx, cy}, cr,
             IM_COL32(255, 50, 50, 220), 24, 2.0f);
         } else if (g_bot_dbg.coll_type[_i] == 2) {
-          /* wall point: yellow outline */
           ImDrawList_AddCircle(bdl, (ImVec2){cx, cy}, cr,
             IM_COL32(255, 220, 0, 200), 16, 1.5f);
         }
       }
 
-      /* 4. head detection circle (yellow, pulsing) */
       float hcx = W2SX(g_bot_dbg.head_cx);
       float hcy = W2SY(g_bot_dbg.head_cy);
       float hcr = g_bot_dbg.head_cr * gsc;
       ImDrawList_AddCircle(bdl, (ImVec2){hcx, hcy}, hcr,
         IM_COL32(255, 230, 0, (int)(PULSE(200.0f, 2.0f))), 32, 1.5f);
 
-      /* 5. encircle detection circles */
       float er1 = g_bot_dbg.encircle_r1 * gsc;
       float er2 = g_bot_dbg.encircle_r2 * gsc;
       if (g_bot_dbg.encircle_state == 1) {
-        /* being encircled by one snake: red filled */
         ImDrawList_AddCircleFilled(bdl, (ImVec2){shx, shy}, er1,
           IM_COL32(255, 50, 50, (int)(PULSE(60.0f, 3.0f))), 48);
         ImDrawList_AddCircle(bdl, (ImVec2){shx, shy}, er1,
           IM_COL32(255, 50, 50, (int)(PULSE(200.0f, 3.0f))), 48, 2.0f);
       } else if (g_bot_dbg.encircle_state == 2) {
-        /* all-around threat: yellow filled */
         ImDrawList_AddCircleFilled(bdl, (ImVec2){shx, shy}, er2,
           IM_COL32(255, 180, 0, (int)(PULSE(50.0f, 2.0f))), 48);
         ImDrawList_AddCircle(bdl, (ImVec2){shx, shy}, er2,
           IM_COL32(255, 180, 0, (int)(PULSE(180.0f, 2.0f))), 48, 2.0f);
       } else {
-        /* no threat: quiet blue pulsing outline */
         ImDrawList_AddCircle(bdl, (ImVec2){shx, shy}, er1,
           IM_COL32(80, 180, 255, (int)(PULSE(120.0f, 1.0f))), 48, 1.5f);
       }
 
-      /* 6. avoidance lines (orange forward + red to intersect) */
       if (g_bot_dbg.avoid_active) {
         float fwdx = W2SX(g_bot_dbg.avoid_fwd_x);
         float fwdy = W2SY(g_bot_dbg.avoid_fwd_y);
@@ -1033,7 +962,6 @@ void ui_overlay(tenv* env) {
           IM_COL32(255, 40, 40, 255), 12);
       }
 
-      /* 7. food target: green crosshair + dim line */
       if (g_bot_dbg.has_food) {
         float fx  = W2SX(g_bot_dbg.food_x);
         float fy  = W2SY(g_bot_dbg.food_y);
@@ -1048,7 +976,6 @@ void ui_overlay(tenv* env) {
           IM_COL32(50,255,100,230),1.8f);
       }
 
-      /* 8. goal: magenta crosshair + line from head */
       float gx  = W2SX(g_bot_dbg.goal_x);
       float gy  = W2SY(g_bot_dbg.goal_y);
       float gcs = 14.0f;
@@ -1061,7 +988,6 @@ void ui_overlay(tenv* env) {
       ImDrawList_AddCircle(bdl,(ImVec2){gx,gy},6.0f,
         IM_COL32(255,80,255,255),12,2.0f);
 
-      /* 9. stage badge */
       const char* stage_lbl = g_bot_dbg.stage == 2 ? "BOT: COIL"
                             : g_bot_dbg.stage == 1 ? "BOT: ENCIRCLE"
                             :                        "BOT: AVOID";

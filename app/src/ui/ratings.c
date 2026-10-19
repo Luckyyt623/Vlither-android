@@ -132,7 +132,6 @@ static void draw_reviews(float scale) {
     igTextWrapped("%s", vlither_ratings_message_at(i));
     igPopTextWrapPos();
 
-    /* Reply thread is public — every player can read admin/player replies. */
     int rc = vlither_ratings_reply_count_at(i);
     for (int r = 0; r < rc; ++r) {
       const char *role = vlither_ratings_reply_role_at(i, r);

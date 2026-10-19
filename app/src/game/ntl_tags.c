@@ -76,10 +76,6 @@ typedef struct ntl_tags_state {
   texture *fixed_atlas_tex;
   VkDescriptorSet fixed_atlas_ds;
 
-  /* A freshly-decoded catalog waiting on its async GPU upload
-     (tcontext_async_transfer_busy) before it's safe to swap into the
-     fields above. Avoids the old vkWaitForFences(UINT64_MAX) main-thread
-     stall on every hourly catalog refresh. */
   bool dynamic_swap_pending;
   texture *dynamic_atlas_tex_pending;
   ntl_tag_meta dynamic_meta_pending[NTL_DYNAMIC_TAG_MAX];
@@ -185,19 +181,13 @@ bool ntl_tags_is_packet_tag(int id) {
 }
 
 bool ntl_tags_is_protected_tag(int id) {
-  /* Public fixed tags grow upward from 304, while private/custom tags grow
-     downward from 580. Their live catalogues update these two boundaries. */
   int private_min = S.private_tag_min > 0 ? S.private_tag_min : 374;
   return (id >= 60 && id <= 199) || (id >= private_min && id <= 665);
 }
 
 bool ntl_tags_exists(int id) {
   if (id == -1) return true;
-  /* Remember packet IDs immediately. If its live image is still downloading,
-     the snake switches from the temporary fallback to the image automatically
-     as soon as the fixed catalogue atlas is installed. */
   if (ntl_tags_is_packet_tag(id)) return true;
-  /* Future protected IDs are accepted and then verified by NTL itself. */
   return ntl_tags_is_protected_tag(id);
 }
 
@@ -426,9 +416,6 @@ static bool install_dynamic_catalog(struct mg_str json) {
   free(pixels);
   if (!new_tex) return false;
 
-  /* Don't touch the live S.dynamic_atlas_* fields yet — the GPU upload
-     is still in flight. ntl_tags_update() finalizes this (descriptor set
-     + swap-in) once tcontext_async_transfer_busy() clears. */
   memcpy(S.dynamic_meta_pending, parsed_meta,
          sizeof parsed_meta[0] * (size_t)parsed_count);
   memcpy(S.dynamic_atlas_pending, parsed_atlas,
@@ -538,9 +525,6 @@ static void reset_ws_handshake(void) {
 
 static void restart_ws_registration(void) {
   reset_ws_handshake();
-  /* NTL sends the full tag registration only as the first message on a new
-     mapping connection. Reconnect after a local selection change so the
-     server cannot mistake the full registration array for a position update. */
   if (S.ws)
     S.ws->is_closing = 1;
   else
@@ -582,12 +566,6 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
         .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
     mg_tls_init(c, &tls);
 
-    /* Match NTL's interactive `!tag id pass` command exactly: that command
-       takes the plaintext password, not its MD5 digest (the digest is only
-       used afterwards, as the "sa" identity on the position-mapping
-       websocket). Sending the hash here made every private-tag
-       authorization request fail. The password can contain characters
-       that are unsafe in a URL, so percent-encode it first. */
     char pass_enc[sizeof S.pending_password * 3 + 8];
     mg_url_encode(S.pending_password, strlen(S.pending_password),
                  pass_enc, sizeof pass_enc);
@@ -601,7 +579,6 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
               "Accept: */*\r\n"
               "Connection: close\r\n\r\n",
               S.pending_tag_id, pass_enc);
-    /* Don't keep the plaintext around any longer than needed to send it. */
     memset(S.pending_password, 0, sizeof S.pending_password);
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
@@ -713,8 +690,6 @@ static void fixed_catalog_cb(struct mg_connection *c, int ev,
     struct mg_tls_opts tls = {
         .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
     mg_tls_init(c, &tls);
-    /* Vlither does not persist downloaded image bytes, so request the complete
-       update set on every refresh instead of an incremental delta. */
     mg_printf(c,
               "GET " NTL_TAG_FIXED_CATALOG_PATH "?v=1 HTTP/1.1\r\n"
               "Host: " NTL_TAG_HOST "\r\n"
@@ -866,9 +841,6 @@ static void send_tag_handshake(snake *me) {
   if (!S.ws || !S.ws_open || !S.env || !S.env->usr || !me) return;
   user_settings *us = &S.env->usr->usrs;
 
-  /* NTL's `sa` identity is the stable eight-hex client prefix followed by
-     the visible nickname. The mapping server uses this together with server
-     and secondary snake ID; omitting the prefix prevents private mappings. */
   char raw_nick[sizeof us->ntl_client_id + MAX_NICKNAME_LEN + 2];
   snprintf(raw_nick, sizeof raw_nick, "%s%s", us->ntl_client_id,
            us->nickname[0] ? us->nickname : "Vlither");
@@ -925,11 +897,9 @@ void ntl_tags_init(tenv *env) {
   S.ready = true;
 }
 
-/* Called once per frame. Cheap no-op unless a catalog refresh just
-   finished decoding and its async GPU upload has landed. */
 static void finalize_pending_catalog_swaps(tenv *env) {
   if (!env || !env->ctx) return;
-  if (tcontext_async_transfer_busy(env->ctx)) return;  /* still uploading */
+  if (tcontext_async_transfer_busy(env->ctx)) return;
 
   if (S.dynamic_swap_pending) {
     VkDescriptorSet new_ds = igImplVulkan_AddTexture(
@@ -1020,9 +990,6 @@ void ntl_tags_update(tenv *env) {
   snake *me = local_snake();
   bool in_game = me && g->conn == CONNECTED && g->curr_screen == PLAYING &&
                  !g->preview_active;
-  /* Heavy catalogue HTTP (up to multi‑MB) competes with the live Slither
-     WebSocket on mobile radios. 4.6 did not do live catalogue pulls during
-     play; keep tag WS/positions, but only fetch catalogues in menu/lobby. */
   bool allow_catalog = g->curr_screen != PLAYING || g->preview_active ||
                        g->conn != CONNECTED;
   if (!allow_catalog) {
@@ -1030,7 +997,6 @@ void ntl_tags_update(tenv *env) {
       S.catalog->is_closing = 1;
       S.catalog = NULL;
       S.catalog_started = 0.0;
-      /* Retry after the match instead of immediately. */
       if (S.next_catalog_sync < now + 30.0)
         S.next_catalog_sync = now + 30.0;
     }
@@ -1047,10 +1013,6 @@ void ntl_tags_update(tenv *env) {
       begin_fixed_catalog_sync();
   }
 
-  /* NTL also publishes each team member's active `tg` value through its
-     normal presence endpoint. Use that as a second, official compatibility
-     path in addition to the tag WebSocket. This is especially important on
-     mobile networks that block port 9000. */
   if (in_game) {
     int snake_count = tdarray_length(g->data.snakes);
     for (int i = 0; i < snake_count; ++i) {
@@ -1102,8 +1064,8 @@ void ntl_tags_destroy(tenv *env) {
   if (!S.ready) return;
   tcontext *ctx = env ? env->ctx : (S.env ? S.env->ctx : NULL);
   if (ctx && (S.dynamic_atlas_tex_pending || S.fixed_atlas_tex_pending)) {
-    tcontext_wait_idle(ctx);  /* shutdown only — safe to block here */
-    tcontext_poll_async_transfer(ctx);  /* reclaim the staging buffer */
+    tcontext_wait_idle(ctx);
+    tcontext_poll_async_transfer(ctx);
   }
   if (S.atlas_ds) igImplVulkan_RemoveTexture(S.atlas_ds);
   if (S.dynamic_atlas_ds) igImplVulkan_RemoveTexture(S.dynamic_atlas_ds);
@@ -1279,7 +1241,6 @@ void ntl_tags_skin_panel(tenv *env) {
     us->tag_size_with_zoom = true;
   }
 
-  /* Keep private-tag authorization above the complete image gallery. */
   igSpacing();
   igSeparatorText("Private tag");
   igTextWrapped(
@@ -1328,8 +1289,6 @@ void ntl_tags_skin_panel(tenv *env) {
     int columns = (int)((avail.x + style->ItemSpacing.x) /
                         (cell_w + style->ItemSpacing.x));
     if (columns < 3) columns = 3;
-    /* A table gives every lower-row image its own clipped hit rectangle. This
-       avoids the long SameLine layout losing taps after a large mobile scroll. */
     if (igBeginTable("##ntl_tag_image_grid", columns,
                      ImGuiTableFlags_SizingFixedFit, (ImVec2){0, 0}, 0)) {
       int gallery_count = NTL_TAG_ATLAS_ENTRY_COUNT + S.fixed_tag_count +
@@ -1432,8 +1391,6 @@ void ntl_tags_draw_preview(tenv *env, int id, float head_x, float head_y,
   float back_x = -cosf(angle), back_y = -sinf(angle);
   float side_x = -back_y, side_y = back_x;
   float distance = 68.0f * body_scale;
-  /* Negative lateral places the preview below the upper snake when it faces
-     right, keeping it clear of the screen edge and making the antenna visible. */
   float lateral = -58.0f * body_scale;
   ImVec2 center = {head_x + back_x * distance + side_x * lateral,
                    head_y + back_y * distance + side_y * lateral};
@@ -1524,9 +1481,6 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
   float hx = mww2 + (o->xx + o->fx - g->data.view_xx) * g->data.gsc;
   float hy = mhh2 + (o->yy + o->fy - g->data.view_yy) * g->data.gsc;
 
-  /* The connector begins in the snake's current direction, while the tag
-     follows a damped heading. During a turn this creates a soft trailing arc
-     instead of rotating the entire tag assembly as one rigid straight piece. */
   float follow_ang = tag_follow_angle(
       &o->ntl_tag_follow_ang, &o->ntl_tag_follow_mtm,
       &o->ntl_tag_follow_ready, o->ang, g->data.ctm, 9.0f);

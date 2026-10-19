@@ -35,8 +35,6 @@ vs_output vs_main(vs_input input) {
 }
 
 float4 fs_main(vs_output input) {
-  // Square signed-distance field. Using max(abs(x), abs(y)) keeps the food
-  // perfectly square while still giving the edges anti-aliasing.
   float2 q = abs(input.uv * 2 - 1);
   float d = max(q.x, q.y);
   float p = max(length(float2(ddx(d), ddy(d))), 0.0001);

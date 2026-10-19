@@ -27,9 +27,6 @@
 #define VLITHER_CHAT_PLAYER_MAX 128
 #define VLITHER_EVENT_MAX 24
 
-/* These badge glyphs are present in Vlither's bundled Liberation Sans font,
-   unlike many newer U+1Fxxx emoji characters which render as empty boxes on
-   older Android phones. Index zero intentionally means no badge. */
 static const char *VLITHER_PROFILE_EMOJIS[] = {
     "", "☺", "☻", "♥", "♦", "♠", "♣", "♪", "♫", "♀", "♂"};
 #define VLITHER_PROFILE_EMOJI_COUNT \
@@ -307,9 +304,6 @@ static void copy_json_string(struct mg_str json, const char *path,
                              char *dst, size_t cap, const char *fallback) {
   if (!dst || cap == 0) return;
   dst[0] = 0;
-  /* Avoid one heap allocation/free pair for every string in every presence
-     snapshot.  The backend already bounds these fields below their matching
-     destination capacities, so they can be unescaped straight into place. */
   struct mg_str token = mg_json_get_tok(json, path);
   if (token.buf && token.len >= 2 && token.buf[0] == '"' &&
       token.buf[token.len - 1] == '"' && token.len - 2 < cap &&
@@ -364,7 +358,6 @@ static void clear_chat_messages(void) {
 
 void vlither_chat_system_message(const char *text) {
   if (!text || !text[0]) return;
-  /* seq=0 bypasses the last_chat_seq dedupe so local notices always show. */
   append_chat_message(0, 0, "local", "Snakey Rain", text, "",
                       "#7CFC00", "");
 }
@@ -579,9 +572,6 @@ static void handle_ws_json(struct mg_str json) {
       set_status(msg);
     }
   } else if (!strcmp(type, "chat_history")) {
-    /* New Vlither backends do not retain chat history. Ignore this packet as
-       well so a client never resurrects stale messages when connected to an
-       older backend build. */
   } else if (!strcmp(type, "chat")) {
     if (vlither_chat_joined()) parse_chat_message(json, "$");
   } else if (!strcmp(type, "presence")) {
@@ -647,8 +637,6 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
     S.ws_open = true;
     S.hello_sent = false;
     S.last_heartbeat = 0;
-    /* Every connection is a fresh live-chat session. This also guarantees
-       that a game/app reload or reconnect never resurrects old messages. */
     clear_chat_messages();
     set_status("Vlither services connected.");
   } else if (ev == MG_EV_WS_MSG) {
@@ -670,8 +658,6 @@ static void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
 
 static void send_identity(const char *type) {
   if (!S.ws || !S.ws_open || !S.env || !S.env->usr) return;
-  /* Never grow an unbounded realtime queue on a slow/mobile connection.
-     Leaving the heartbeat timestamp unchanged makes the next frame retry. */
   if (S.ws->send.len >= VLITHER_WS_BACKPRESSURE_BYTES) return;
   user_settings *us = &S.env->usr->usrs;
   bool chat_joined = us->vlither_chat_joined;
@@ -964,11 +950,6 @@ void vlither_tags_update(tenv *env) {
     S.next_connect = 0;
     clear_snake_mappings();
   }
-  /* Keep the backend transport alive even when an older user.dat contains
-     a false chat-toggle value. Tags, atlas updates and presence all share
-     this WebSocket, so gating it here made the entire Vlither service look
-     disconnected after an upgrade. The chat UI can still choose whether to
-     display/send messages independently. */
   if (!S.ws && now >= S.next_connect) {
     S.ws = mg_ws_connect(&S.mgr, S.ws_url, ws_cb, NULL,
                          "Origin: https://vlither.app\r\n");
@@ -1147,7 +1128,6 @@ const char *vlither_profile_emoji_at(int index) {
 }
 
 void vlither_chat_profile_changed(void) {
-  /* Force the next update tick to publish the new optional profile fields. */
   S.last_heartbeat = 0;
 }
 
@@ -1382,9 +1362,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   float tag_back_x = -cosf(follow_ang), tag_back_y = -sinf(follow_ang);
   float tag_side_x = -tag_back_y, tag_side_y = tag_back_x;
 
-  /* Build the image dimensions first, then place the center using the actual
-     rendered tag height. This keeps different Vlither tag shapes at a stable
-     distance from the snake instead of using one fixed offset for every image. */
   float width = entry->display_width * body_scale;
   float height = entry->display_height * body_scale;
   float hw = width * 0.5f, hh = height * 0.5f;
@@ -1393,8 +1370,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   float ux = cosf(angle), uy = sinf(angle);
   float vx = -uy, vy = ux;
 
-  /* Use backend-supplied attachment metadata so the antenna connects to the
-     real visual shape, matching the NTL extension style more closely. */
   float attach_x = entry->attach_x;
   float attach_y = entry->attach_y;
   if (!isfinite(attach_x) || attach_x < 0.0f || attach_x > 1.0f) attach_x = 0.5f;
@@ -1407,18 +1382,11 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   ImVec2 target_tip = {hx + tag_back_x * distance + tag_side_x * lateral,
                        hy + tag_back_y * distance + tag_side_y * lateral};
 
-  /* A little continuous, time-based sway so the tag doesn't look welded in
-     place — a pure function of elapsed time (not a per-frame random draw),
-     so it neither depends on frame rate nor accumulates. */
   float sway_x = sinf(g->data.ctm * 0.0021f + o->xx * 0.01f) * 1.6f * body_scale;
   float sway_y = cosf(g->data.ctm * 0.0027f + o->yy * 0.01f) * 1.6f * body_scale;
   target_tip.x += sway_x;
   target_tip.y += sway_y;
 
-  /* Spring-damper the rendered tip toward that target instead of snapping to
-     it directly — gives the antenna an organic, slightly-lagging wobble
-     through turns, the way a real hanging chain would, without the
-     frame-rate-dependent feel a fixed per-frame damping factor would have. */
   tag_follow_point(&o->vlither_tag_tip_x, &o->vlither_tag_tip_y,
                    &o->vlither_tag_tip_vx, &o->vlither_tag_tip_vy,
                    &o->vlither_tag_tip_mtm, &o->vlither_tag_tip_ready,
@@ -1437,9 +1405,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   ImVec2 q4 = {center.x - ux * hw + vx * hh,
                center.y - uy * hw + vy * hh};
 
-  /* The first control point follows the head immediately; the far end follows
-     the smoothed tag heading. This keeps the antenna attached while allowing
-     it to bend naturally through fast turns. */
   ImVec2 p0 = {hx + head_back_x * 9.0f * body_scale,
                hy + head_back_y * 9.0f * body_scale};
   ImVec2 p1 = {p0.x + head_back_x * distance * 0.34f,

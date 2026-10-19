@@ -10,12 +10,6 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.View
 
-/**
- * Neon "Vlither android" logo, drawn with Canvas (no image assets), one line:
- *  1. outline of "Vlither" draws itself (stroke draw-on)
- *  2. outline fades, green fill fades in
- *  3. "android" types out to the right with a blinking cursor
- */
 class AnimatedLogoView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
@@ -49,7 +43,6 @@ class AnimatedLogoView @JvmOverloads constructor(
         color = green
     }
 
-    // Cached geometry (rebuilt when size changes)
     private val wordPath = Path()
     private val contours = ArrayList<PathMeasure>()
     private val seg = Path()
@@ -63,7 +56,6 @@ class AnimatedLogoView @JvmOverloads constructor(
 
     private var startMs = 0L
 
-    // Timeline (ms)
     private val drawEnd = 2000f
     private val fillStart = 1900f
     private val fillDur = 800f
@@ -79,7 +71,6 @@ class AnimatedLogoView @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w <= 0) return
-        // Fit "Vlither" + gap + "android" on ONE line within the view width.
         var size = 48f * density
         fun layout(s: Float) {
             wordPaint.textSize = s
@@ -106,7 +97,6 @@ class AnimatedLogoView @JvmOverloads constructor(
         wordPaint.getTextPath(word, 0, word.length, originX, baseY, wordPath)
         contours.clear()
         val pm = PathMeasure(wordPath, false)
-        // Split into one PathMeasure per contour
         do {
             val p = Path()
             pm.getSegment(0f, pm.length, p, true)
@@ -127,7 +117,6 @@ class AnimatedLogoView @JvmOverloads constructor(
         super.onDraw(canvas)
         val t = (SystemClock.uptimeMillis() - startMs).toFloat()
 
-        // 1+2: outline draw-on (ease-out), then fade to fill
         val dp = clamp01(t / drawEnd)
         val ease = 1f - (1f - dp) * (1f - dp)
         val fp = clamp01((t - fillStart) / fillDur)
@@ -145,7 +134,6 @@ class AnimatedLogoView @JvmOverloads constructor(
             }
         }
 
-        // 3: "android" typed to the right of "Vlither", same baseline
         if (t >= typeStart) {
             val shown = minOf(sub.length, ((t - typeStart) / typeStep).toInt() + 1)
             val done = shown >= sub.length && (t - typeStart) / typeStep >= sub.length
@@ -155,7 +143,6 @@ class AnimatedLogoView @JvmOverloads constructor(
                 canvas.drawText(ch, x, baseY, subPaint)
                 x += subPaint.measureText(ch) + subSpacing
             }
-            // cursor: solid while typing, then blink
             val cursorOn = if (!done) true else (((t - typeStart) / 400f).toInt() % 2 == 0)
             if (cursorOn) {
                 canvas.drawRect(x, baseY - subSize * 0.12f, x + subSize * 0.55f, baseY, subPaint)

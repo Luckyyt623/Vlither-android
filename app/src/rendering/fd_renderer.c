@@ -225,7 +225,6 @@ void fd_renderer_render(fd_renderer* r, tcontext* ctx) {
                          (VkDeviceSize[]){0});
   vkCmdDraw(fr->cmd, 4, r->num_instances, 0, 0);
 
-  // Prey keeps the original Solid food shader regardless of food style.
   vkCmdBindPipeline(fr->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     r->pipelines[0]);
   vkCmdBindVertexBuffers(fr->cmd, 1, 1,

@@ -132,11 +132,6 @@ void imgui_init(tenv* env) {
 
     AAssetManager* am = g_android_app->activity->assetManager;
 
-    /* Keep the UI at the same physical proportion on every Android render
-       resolution. The old 1.30 cap made 1080p/1440p phones render smaller
-       controls than a 720p phone, while fixed-size widgets stayed unscaled
-       and clipped their already-scaled labels. 720px on the short edge is the
-       design baseline used by the original Android layout. */
     float short_edge = (float)(env->ctx->size[0] < env->ctx->size[1]
                                    ? env->ctx->size[0] : env->ctx->size[1]);
     float ui_scale = short_edge / 720.0f;
@@ -208,8 +203,6 @@ void imgui_init(tenv* env) {
     io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io->IniFilename  = NULL;
 
-    /* Use Android's real system clipboard instead of Dear ImGui's private
-       fallback clipboard. This enables copy/paste in every InputText widget. */
     ImGuiPlatformIO* platform_io = igGetPlatformIO_Nil();
     platform_io->Platform_GetClipboardTextFn = android_imgui_get_clipboard;
     platform_io->Platform_SetClipboardTextFn = android_imgui_set_clipboard;
@@ -276,10 +269,6 @@ void imgui_prerender(void) {
 
     if (g_android_app->userData) {
         twindow* wnd = (twindow*)g_android_app->userData;
-        /* Use Dear ImGui's input-event queue instead of assigning MouseDown
-           directly. When Android reports DOWN+UP between two rendered frames,
-           the queue trickles those transitions across frames and preserves a
-           real click instead of losing it. */
         ImGuiIO_AddMousePosEvent(io, wnd->ui_touch.x, wnd->ui_touch.y);
         if (wnd->ui_touch.just_down)
             ImGuiIO_AddMouseButtonEvent(io, 0, true);
@@ -306,9 +295,6 @@ void imgui_prerender(void) {
             s_scroll_was_down = false;
         }
 
-        /* Text, keyboard clipboard suggestions, composition and edit keys
-           arrive through the native Android InputConnection. A stationary
-           long press remains available as a direct paste fallback. */
         static bool s_paste_tracking = false;
         static bool s_paste_fired = false;
         static ImVec2 s_paste_start = {0.0f, 0.0f};

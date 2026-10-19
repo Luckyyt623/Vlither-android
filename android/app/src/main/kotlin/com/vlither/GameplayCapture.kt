@@ -37,11 +37,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.min
 
-/**
- * Bridges the native game state to Android's MediaProjection consent flow.
- * Recording is intentionally session-scoped: it may run only while a real
- * server session is active, and is finalized as soon as the homepage opens.
- */
 object GameplayCaptureController {
     const val CAPTURE_REQUEST_CODE = 4404
     private const val TAG = "VlitherCapture"
@@ -221,7 +216,6 @@ object GameplayCaptureController {
     }
 }
 
-/** Foreground service required for MediaProjection recording on Android 10+. */
 class GameplayCaptureService : Service() {
     companion object {
         private const val TAG = "VlitherCapture"

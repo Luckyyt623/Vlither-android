@@ -15,6 +15,7 @@
 #endif
 
 #include "../user.h"
+#include "../ui/skin_wheel.h"
 #include "../cimgui/cimgui_impl.h"
 #ifdef ANDROID
 #include "../android_path.h"
@@ -183,9 +184,6 @@ renderer* renderer_create(tenv* env) {
   DLOG("renderer: loading bg texture (4K)");
   r->bg_tex = create_mipmap_texture(ctx, "app/res/textures/background_4k.png");
   DLOG("renderer: bg_tex=%p", (void*)r->bg_tex);
-  /* Alternate/custom backgrounds are loaded lazily from Settings. Keeping
-     only one optional background resident avoids another ~20 MB 2K texture
-     allocation on Android before the player even selects it. */
   r->bg_tex_alt = NULL;
   r->bg_tex_custom = NULL;
   r->bg_custom_variant = -1;
@@ -194,19 +192,27 @@ renderer* renderer_create(tenv* env) {
   r->tex_atlas = create_mipmap_texture(ctx, "app/res/textures/tex_atlas_8k.png");
   DLOG("renderer: tex_atlas=%p", (void*)r->tex_atlas);
 
-  /* Orb-textured body atlas for the Orb render mode (small: 336x1968).
-     Failing to load it is not fatal: the mode then falls back to plain
-     coloured circles, and binding 4 reuses the main atlas. */
   r->orb_atlas = create_mipmap_texture(ctx, "app/res/textures/orb_skin_atlas.png");
   DLOG("renderer: orb_atlas=%p", (void*)r->orb_atlas);
+
+  r->seg_atlas = NULL;
+  {
+    unsigned int png_len = 0;
+    const unsigned char* png = sk_wheel_seg_png(&png_len);
+    int sw = 0, sh = 0;
+    unsigned char* px = decode_texture_rgba_from_memory(png, png_len, &sw, &sh);
+    if (px) {
+      r->seg_atlas = create_mipmap_texture_from_rgba(ctx, px, sw, sh);
+      free_texture_rgba(px);
+    }
+  }
+  DLOG("renderer: seg_atlas=%p", (void*)r->seg_atlas);
 
   DLOG("renderer: loading boost button texture");
   r->boost_button_tex = create_mipmap_texture(ctx, "app/res/textures/boost_button.png");
   r->boost_button_ds = VK_NULL_HANDLE;
   DLOG("renderer: boost_button_tex=%p", (void*)r->boost_button_tex);
 
-  /* Optional homepage Discord artwork. Keep it non-fatal so a missing social
-     asset can never prevent the game renderer from starting. */
   r->discord_tex = create_mipmap_texture(ctx, "app/res/textures/discord.png");
   r->discord_ds = VK_NULL_HANDLE;
   DLOG("renderer: discord_tex=%p", (void*)r->discord_tex);
@@ -218,6 +224,7 @@ renderer* renderer_create(tenv* env) {
     if (r->bg_tex_alt) { destroy_texture(ctx, r->bg_tex_alt); }
     if (r->tex_atlas) { destroy_texture(ctx, r->tex_atlas); }
     if (r->orb_atlas) { destroy_texture(ctx, r->orb_atlas); }
+    if (r->seg_atlas) { destroy_texture(ctx, r->seg_atlas); }
     if (r->boost_button_tex) { destroy_texture(ctx, r->boost_button_tex); }
     if (r->discord_tex) { destroy_texture(ctx, r->discord_tex); }
     free(r);
@@ -227,8 +234,6 @@ renderer* renderer_create(tenv* env) {
   r->bg_variant = 0;
   r->bg_failed_variant = -1;
 
-  /* All nine fixed-colour arrows share one atlas and one ImGui descriptor.
-     This avoids exhausting the small Vulkan descriptor pool during startup. */
   r->arrow_atlas_tex = create_mipmap_texture(
       ctx, "app/res/textures/arrow_atlas.webp");
   r->arrow_atlas_ds = VK_NULL_HANDLE;
@@ -295,7 +300,7 @@ renderer* renderer_create(tenv* env) {
           .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
           .pNext = NULL,
           .flags = 0,
-          .bindingCount = 5,
+          .bindingCount = 6,
           .pBindings =
               (VkDescriptorSetLayoutBinding[]){
                   {.binding = 0,
@@ -316,6 +321,10 @@ renderer* renderer_create(tenv* env) {
                    .descriptorCount = 1,
                    .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
                   {.binding = 4,
+                   .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                   .descriptorCount = 1,
+                   .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+                  {.binding = 5,
                    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                    .descriptorCount = 1,
                    .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}}},
@@ -386,7 +395,7 @@ renderer* renderer_create(tenv* env) {
 
   for (int i = 0; i < ctx->fif; i++)
     vkUpdateDescriptorSets(
-        ctx->device, 5,
+        ctx->device, 6,
         (VkWriteDescriptorSet[]){
             {
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -452,6 +461,20 @@ renderer* renderer_create(tenv* env) {
                         r->linear_sampler,
                         r->orb_atlas ? r->orb_atlas->view : r->tex_atlas->view,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = NULL,
+                .dstSet = r->global_set[i],
+                .dstBinding = 5,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .pImageInfo =
+                    &(VkDescriptorImageInfo){
+                        r->linear_sampler,
+                        r->seg_atlas ? r->seg_atlas->view : r->tex_atlas->view,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             }},
         0, NULL);
 
@@ -476,11 +499,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
     return;
   }
 
-  /* The user-uploaded slot (23) needs a cheap stat() every call to notice a
-     fresh re-upload even while variant stays 23 across frames — a plain
-     "already on this variant" check can't see file changes by itself. Done
-     up front so the common "nothing changed" case still exits before any
-     of the expensive GPU work below. */
   char custom_bg_path[640] = {0};
   bool custom_bg_have_file = false;
   long long custom_bg_signature = 0;
@@ -501,13 +519,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
     }
   }
 
-  /* Animated custom background: if the last upload to slot 23 was a GIF, the
-     Kotlin side will have decoded it into custom_background_gif/frame_NNN.png
-     plus a manifest instead of writing custom_background_image. Checked
-     before the "nothing changed" early-return below, since the displayed
-     frame still needs to advance over time even when the file on disk
-     hasn't. Falls through to the ordinary static-image handling further
-     down whenever no such manifest exists. */
   char gif_dir[600] = {0};
   bool gif_have_manifest = false;
   int gif_frame_count = 0;
@@ -546,10 +557,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
 
   if (gif_have_manifest &&
       (gif_signature != r->bg_gif_signature || r->bg_gif_frame_count == 0)) {
-    /* Fresh upload (or first time this session): decode every frame up
-       front. This is the only point where loading a GIF costs more than a
-       normal image — after this it's just picking which already-loaded
-       frame texture is current. */
     for (int i = 0; i < r->bg_gif_frame_count; i++)
       if (r->bg_gif_frames[i]) destroy_texture(ctx, r->bg_gif_frames[i]);
     free(r->bg_gif_frames);
@@ -573,9 +580,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
       r->bg_gif_next_swap_at = mg_millis() + (uint64_t)gif_frame_ms;
       r->bg_gif_signature = gif_signature;
     } else {
-      /* Partial/corrupt decode (e.g. interrupted upload) — drop it and let
-         this call fall through to the static/default background instead of
-         showing a half-built animation. */
       for (int i = 0; frames && i < gif_frame_count; i++)
         if (frames[i]) destroy_texture(ctx, frames[i]);
       free(frames);
@@ -595,9 +599,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
     texture* desired = r->bg_gif_frames[r->bg_gif_current_frame];
     if (r->bg_variant == 23 && r->active_bg_tex == desired) return;
 
-    /* Same in-flight-descriptor hazard as the static-image swap below, so
-       the same device-wide wait applies — see the comment on bg_gif_frames
-       in renderer.h for why that's an acceptable trade-off here. */
     vkDeviceWaitIdle(ctx->device);
     for (int i = 0; i < ctx->fif; i++) {
       VkDescriptorImageInfo image_info = {
@@ -658,9 +659,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
   texture* desired = r->bg_tex;
   texture* new_custom = NULL;
   if (variant == 23) {
-    /* User-uploaded background, picked from local storage via the
-       "Custom (Upload)" option on the homepage and in-game background
-       pickers. Shared by both — one uploaded image, one file on disk. */
     if (custom_bg_unchanged) {
       desired = r->bg_tex_custom;
     } else if (custom_bg_have_file) {
@@ -697,9 +695,6 @@ void renderer_set_background_variant(renderer* r, tcontext* ctx, int variant) {
   }
   if (!desired) return;
 
-  /* Descriptor sets may still be referenced by an in-flight frame. Background
-     changes happen only from Settings, so a one-time wait here is preferable
-     to updating/destroying an image that the GPU can still be sampling. */
   vkDeviceWaitIdle(ctx->device);
 
   for (int i = 0; i < ctx->fif; i++) {
@@ -843,6 +838,7 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
   destroy_texture(ctx, r->boost_button_tex);
   destroy_texture(ctx, r->tex_atlas);
   if (r->orb_atlas) destroy_texture(ctx, r->orb_atlas);
+  if (r->seg_atlas) destroy_texture(ctx, r->seg_atlas);
   if (r->bg_tex_custom) destroy_texture(ctx, r->bg_tex_custom);
   for (int i = 0; i < r->bg_gif_frame_count; i++)
     if (r->bg_gif_frames[i]) destroy_texture(ctx, r->bg_gif_frames[i]);

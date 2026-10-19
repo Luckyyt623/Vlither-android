@@ -85,9 +85,6 @@ class GameActivity : NativeActivity() {
         private const val CUSTOM_BACKGROUND_FILE_NAME = "custom_background_image"
         private const val CUSTOM_BACKGROUND_GIF_DIR_NAME = "custom_background_gif"
         private const val CUSTOM_BACKGROUND_GIF_MANIFEST_NAME = "manifest.txt"
-        /* Kept low because the native renderer has no texture-array support: every
-           frame swap is a full descriptor-set rewrite (see bg_gif_frames in
-           renderer.h), so this is a deliberate trade-off, not a quality choice. */
         private const val CUSTOM_BACKGROUND_GIF_MAX_FRAMES = 24
         private const val CUSTOM_BACKGROUND_GIF_MIN_FRAME_MS = 80
         private const val CUSTOM_BACKGROUND_GIF_MAX_DIMENSION = 480
@@ -111,7 +108,6 @@ class GameActivity : NativeActivity() {
         private val pendingEventNotifications =
             ConcurrentHashMap<String, PendingEventNotification>()
 
-        /* Weak ref to the overlay so the static JNI callback can reach it */
         private var overlayRef: FrameLayout? = null
         private var scanAnimator: ObjectAnimator? = null
 
@@ -185,8 +181,6 @@ class GameActivity : NativeActivity() {
             return packet
         }
 
-        /** Decode packaged image assets for native Vulkan textures. Android's
-         * BitmapFactory supplies WebP support that stb_image does not have. */
         @JvmStatic
         fun decodeAssetRgba(activity: Activity, pathUtf8: ByteArray): ByteArray? {
             val path = pathUtf8.toString(Charsets.UTF_8).removePrefix("app/res/")
@@ -201,7 +195,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Decode downloaded tag images (including WebP) for native Vulkan. */
         @JvmStatic
         fun decodeImageRgba(activity: Activity, encoded: ByteArray): ByteArray? {
             return try {
@@ -214,10 +207,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /* Screen orientation preference: 1 = Landscape (default),
-           2 = Portrait. Stored in SharedPreferences so the
-           launcher (MainActivity) and the game share one choice, and set from
-           the native homepage through JNI. */
         private const val DISPLAY_PREFS_NAME = "vlither_display_prefs"
         private const val PREF_ORIENTATION_MODE = "orientation_mode"
 
@@ -230,11 +219,9 @@ class GameActivity : NativeActivity() {
         fun readOrientationMode(context: Context): Int {
             val mode = context.getSharedPreferences(DISPLAY_PREFS_NAME, Context.MODE_PRIVATE)
                 .getInt(PREF_ORIENTATION_MODE, 1)
-            // 0 was the removed "Auto" mode; old saves fall back to landscape.
             return if (mode == 2) 2 else 1
         }
 
-        /** Applies the saved preference to an activity (call from onCreate). */
         @JvmStatic
         fun applySavedOrientation(activity: Activity) {
             try {
@@ -321,9 +308,6 @@ class GameActivity : NativeActivity() {
                 activity.runOnUiThread {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                         activity is GameActivity) {
-                        /* Modern Android document pickers can return an empty
-                           placeholder to NativeActivity without delivering a
-                           usable result URI. Save through MediaStore instead. */
                         activity.exportSettingsBackupToDownloads()
                     } else {
                         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
@@ -382,11 +366,6 @@ class GameActivity : NativeActivity() {
             enqueueImePacket(packet)
         }
 
-        /**
-         * Native code polls this queue from the render thread. Android's IME
-         * thread never calls into the native library directly, preventing a
-         * missing/mismatched JNI callback from terminating the process.
-         */
         @JvmStatic
         fun pollImeEvent(activity: Activity): ByteArray? {
             if (activity !is GameActivity) return null
@@ -406,7 +385,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Queue clipboard text through the same safe IME channel. */
         @JvmStatic
         fun enqueueClipboardPaste(activity: Activity): Boolean {
             if (activity !is GameActivity) return false
@@ -427,7 +405,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Read Android's primary clipboard for the native ImGui backend. */
         @JvmStatic
         fun getClipboardText(activity: Activity): String {
             return try {
@@ -442,7 +419,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Write text selected in ImGui to Android's primary clipboard. */
         @JvmStatic
         fun setClipboardText(activity: Activity, text: String) {
             try {
@@ -454,7 +430,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** UTF-8 JNI variants avoid modified-UTF-8 corruption for emoji. */
         @JvmStatic
         fun getClipboardUtf8(activity: Activity): ByteArray =
             getClipboardText(activity).toByteArray(Charsets.UTF_8)
@@ -464,7 +439,6 @@ class GameActivity : NativeActivity() {
             setClipboardText(activity, utf8.toString(Charsets.UTF_8))
         }
 
-        /** Enable or disable the real Android IME bridge used by ImGui. */
         @JvmStatic
         fun setTextInputActive(activity: Activity, active: Boolean) {
             (activity as? GameActivity)?.setTextInputActiveOnUi(active)
@@ -481,10 +455,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Native game state owns the policy; Android owns permission,
-         *  capture and local MediaStore output. This callback may originate
-         *  on the native render thread, so all Activity work is posted to the
-         *  UI thread. */
         @JvmStatic
         fun syncGameplayCapture(
             activity: Activity,
@@ -500,7 +470,6 @@ class GameActivity : NativeActivity() {
             }
         }
 
-        /** Called only for the local player's confirmed server `k` packet. */
         @JvmStatic
         fun onConfirmedKill(activity: Activity) {
             val game = activity as? GameActivity ?: return
@@ -649,11 +618,6 @@ class GameActivity : NativeActivity() {
             nm.notify(("review-" + title).hashCode() and 0x7fffffff, notification)
         }
 
-        /**
-         * Called from C via JNI (android_jni.c) when the first Vulkan frame
-         * has been rendered. Fades out and removes the loading overlay.
-         * Signature used in android_jni.c: (Landroid/app/Activity;)V
-         */
         @JvmStatic
         fun notifyGameReady(activity: Activity) {
             activity.runOnUiThread {
@@ -681,12 +645,6 @@ class GameActivity : NativeActivity() {
     private var imeBridgeView: ImeBridgeView? = null
     private var textInputActive = false
 
-    /**
-     * A one-pixel Android text editor. It is visually hidden, but because it
-     * exposes a genuine InputConnection, Gboard and other keyboards can send
-     * commitText(), composing text, clipboard-history taps, emoji, deletion,
-     * enter and hardware-key events. ImGui remains the visible text field.
-     */
     private inner class ImeBridgeView(context: Context) : View(context) {
         private var composingCodePoints = 0
 
@@ -865,8 +823,6 @@ class GameActivity : NativeActivity() {
         }
     }
 
-    /* ── Loading overlay ───────────────────────────────────────────── */
-
     private fun dp(value: Float): Int =
         TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics
@@ -879,17 +835,15 @@ class GameActivity : NativeActivity() {
 
     private fun buildLoadingOverlay(): FrameLayout {
 
-        /* ── Root: full-screen dark background ── */
         val root = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(Color.parseColor("#0D0E14"))
-            alpha = 0f   // start invisible; we fade it in below
+            alpha = 0f
         }
 
-        /* ── Centre column ── */
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity     = Gravity.CENTER
@@ -900,10 +854,9 @@ class GameActivity : NativeActivity() {
             )
         }
 
-        /* Line 1 – "Official Vlither by Ignite" */
         val line1 = TextView(this).apply {
             text    = "Official Vlither by Ignite"
-            setTextColor(Color.parseColor("#5DCFCF"))   // muted cyan
+            setTextColor(Color.parseColor("#5DCFCF"))
             setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(15f))
             typeface = Typeface.create("monospace", Typeface.NORMAL)
             gravity  = Gravity.CENTER
@@ -914,10 +867,9 @@ class GameActivity : NativeActivity() {
             ).also { it.bottomMargin = dp(6f) }
         }
 
-        /* Line 2 – "Mobile Vlither by Lucky" */
         val line2 = TextView(this).apply {
             text    = "Mobile Vlither by Lucky"
-            setTextColor(Color.parseColor("#2BFF88"))   // bright neon green
+            setTextColor(Color.parseColor("#2BFF88"))
             setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(22f))
             typeface = Typeface.create("monospace", Typeface.BOLD)
             gravity  = Gravity.CENTER
@@ -928,23 +880,20 @@ class GameActivity : NativeActivity() {
             ).also { it.bottomMargin = dp(36f) }
         }
 
-        /* Loading bar track */
         val trackWidth = dp(260f)
         val track = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(trackWidth, dp(4f))
-            setBackgroundColor(Color.parseColor("#1C2030"))  // dark track
+            setBackgroundColor(Color.parseColor("#1C2030"))
             clipChildren = true
             clipToPadding = true
         }
 
-        /* Scanning bar inside track */
         val scanBar = View(this).apply {
             layoutParams = FrameLayout.LayoutParams(dp(90f), dp(4f))
-            setBackgroundColor(Color.parseColor("#00E5FF"))  // neon cyan
+            setBackgroundColor(Color.parseColor("#00E5FF"))
         }
         track.addView(scanBar)
 
-        /* Animate scan bar: slides left → right, loops forever */
         val scanAnim = ObjectAnimator.ofFloat(
             scanBar, "translationX",
             -dp(90f).toFloat(),
@@ -962,7 +911,6 @@ class GameActivity : NativeActivity() {
         col.addView(track)
         root.addView(col)
 
-        /* Fade the whole overlay in */
         root.animate()
             .alpha(1f)
             .setDuration(700)
@@ -972,8 +920,6 @@ class GameActivity : NativeActivity() {
 
         return root
     }
-
-    /* ── System UI helpers ─────────────────────────────────────────── */
 
     private fun hideSystemBars() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -995,8 +941,6 @@ class GameActivity : NativeActivity() {
             )
         }
     }
-
-    /* ── Lifecycle ─────────────────────────────────────────────────── */
 
     private fun copyFileIntoBackup(
         zip: ZipOutputStream,
@@ -1060,9 +1004,6 @@ class GameActivity : NativeActivity() {
     }
 
     private fun writeSettingsBackup(uri: android.net.Uri, backup: ByteArray) {
-        /* rwt requests a new, truncated document. Some file managers only
-           commit the document once this stream is closed, so build and check
-           all data before opening it and always close it after a full write. */
         val output = try {
             contentResolver.openOutputStream(uri, "rwt")
         } catch (_: Exception) {
@@ -1077,8 +1018,6 @@ class GameActivity : NativeActivity() {
                 it.length
             } ?: -1L
         } catch (_: Exception) {
-            // A few cloud document providers allow writing but cannot report
-            // a readable size immediately. The closed write above is valid.
             -1L
         }
         if (savedSize >= 0L && savedSize != backup.size.toLong())
@@ -1297,7 +1236,6 @@ class GameActivity : NativeActivity() {
         enableHighPerformanceDisplay()
         hideSystemBars()
         installImeBridge()
-        /* Add the overlay on top of NativeActivity's surface view */
         val overlay = buildLoadingOverlay()
         overlayRef  = overlay
         window.decorView.let {
@@ -1306,23 +1244,6 @@ class GameActivity : NativeActivity() {
         Log.d(TAG, "GameActivity created – loading overlay shown")
     }
 
-    /**
-     * Saves a picked background image to disk for native variant 23
-     * ("Custom (Upload)"), shared by the homepage and the skin editor.
-     *
-     * If the file decodes as a GIF with more than one frame, it's sampled
-     * down to a small, fixed-rate sequence of PNG frames plus a manifest
-     * (frame count + per-frame milliseconds) instead of being copied
-     * verbatim — the native side has no GIF decoder and no texture-array
-     * support, so this is the only practical way to get it animating there.
-     * Anything else (a normal photo, or a GIF with a single frame) is saved
-     * exactly as before: a byte-for-byte copy that the native mipmap loader
-     * decodes itself.
-     *
-     * Whichever kind wins, the other kind's leftovers are deleted so a stale
-     * animation can't keep shadowing a freshly uploaded photo, or vice
-     * versa — the native side always prefers the GIF manifest when present.
-     */
     private fun saveCustomBackground(bytes: ByteArray) {
         val gifDir = filesDir.resolve(CUSTOM_BACKGROUND_GIF_DIR_NAME)
         val staticFile = filesDir.resolve(CUSTOM_BACKGROUND_FILE_NAME)
@@ -1374,7 +1295,6 @@ class GameActivity : NativeActivity() {
             } catch (e: Exception) {
                 gifDir.deleteRecursively()
                 Log.e(TAG, "Could not decode animated background, falling back to static", e)
-                /* Fall through to the static path below using the original bytes. */
             }
         }
 

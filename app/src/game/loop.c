@@ -30,8 +30,6 @@ void game_loop(tenv* env) {
       usr->r->global.minimap_opacity = 0;
 
       double connect_elapsed = glfwGetTime() - gdata->connect_started_at;
-      /* Give mid-game rejoins more time on slow mobile networks (4.6-style
-         patience) before giving up on a single attempt. */
       double connect_timeout = gdata->restart_req ? 15.0 : (double)TIMEOUT;
       if (gdata->connection && connect_elapsed > connect_timeout) {
         gdata->connection->is_closing = true;

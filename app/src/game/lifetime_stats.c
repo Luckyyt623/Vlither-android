@@ -10,8 +10,8 @@
 #endif
 
 #define LIFETIME_STATS_FILE "lifetime_stats.dat"
-#define LIFETIME_STATS_MAGIC_V1 0x4C53544Cu /* 'LSTL' : length + total kills   */
-#define LIFETIME_STATS_MAGIC_V2 0x4C535432u /* 'LST2' : + best kills per match */
+#define LIFETIME_STATS_MAGIC_V1 0x4C53544Cu
+#define LIFETIME_STATS_MAGIC_V2 0x4C535432u
 
 typedef struct {
   uint32_t magic;
@@ -60,7 +60,6 @@ void lifetime_stats_load(void) {
     s_best_match_kills = d.best_match_kills > 0 ? d.best_match_kills : 0;
   } else if (magic == LIFETIME_STATS_MAGIC_V1 &&
              got >= sizeof(lifetime_stats_file_v1)) {
-    /* Older save: keep what it has; best match kills starts from 0. */
     lifetime_stats_file_v1 d;
     memcpy(&d, raw, sizeof d);
     s_best_length = d.best_length > 0 ? d.best_length : 0;

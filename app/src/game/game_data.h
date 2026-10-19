@@ -33,10 +33,6 @@ typedef struct game_data {
   screen curr_screen;
   conn_status conn;
 
-  /* True while a hidden "background preview" snake (bot-controlled) owns
-     the connection, e.g. while the Settings or Controls screen is open.
-     Used to keep that preview session from touching the player's real,
-     persisted stats. See game/bg_preview.h */
   bool preview_active;
 
   uint8_t default_skins[NUM_DEFAULT_SKINS][64];
@@ -64,9 +60,6 @@ typedef struct game_data {
     int   joy_last_xm;
     int   joy_last_ym;
 
-    /* Slither mobile joystick state. The original control keeps its base
-       fixed and moves the white thumb a fixed distance in the selected
-       direction; it does not drag the base under the finger. */
     float joy_angle;
     bool  joy_has_direction;
 
@@ -98,21 +91,18 @@ typedef struct game_data {
     int pings[MAX_SERVER_LIST];
     int sorted_order[MAX_SERVER_LIST];
     char ips[MAX_SERVER_LIST][MAX_SERVER_IP_LEN + 1];
-    uint16_t sids[MAX_SERVER_LIST]; /* official 4-digit server IDs */
-    uint8_t families[MAX_SERVER_LIST]; /* retained for saved/custom IPv4 data */
+    uint16_t sids[MAX_SERVER_LIST];
+    uint8_t families[MAX_SERVER_LIST];
     int count;
     int custom_count;
-    char names[MAX_CUSTOM_SERVERS][MAX_CUSTOM_NAME_LEN + 1]; /* custom only */
-    bool custom_stage;               /* fetching the admin-managed list */
+    char names[MAX_CUSTOM_SERVERS][MAX_CUSTOM_NAME_LEN + 1];
+    bool custom_stage;
     uint64_t custom_started_ms;
     struct mg_connection* custom_conn;
     struct mg_mgr mgr;
   } server_list;
 
   bool restart_req;
-  /* A real gameplay socket can briefly drop during a mobile network handover
-     or after a long render frame. Unexpected drops retry in-place; explicit
-     Quit and incompatible-protocol closes suppress that retry. */
   bool suppress_reconnect;
   int reconnect_attempts;
   double connect_started_at;
@@ -190,8 +180,8 @@ typedef struct game_data {
     int vfrb;
     int frames;
     int fps;
-    int ping;      /* NTL-style current ping (ms) */
-    int ping_peak; /* NTL-style peak ping over ~10 s (ms), shown in ( ) */
+    int ping;
+    int ping_peak;
     int score;
     int lb_pos;
     int rank;
@@ -204,11 +194,9 @@ typedef struct game_data {
     float* fmlts;
     float* fpsls;
 
-    /* NTL ping system timestamps (glfwGetTime() in ms, double so they keep
-       sub-ms precision on long sessions). */
     double ping_sent_ms;
-    double poll_prev_ms; /* start of the previous network poll */
-    double poll_cur_ms;  /* start of the current network poll */
+    double poll_prev_ms;
+    double poll_cur_ms;
     double ping_avg_stamp;
     double ping_accum_sum;
     int ping_accum_count;

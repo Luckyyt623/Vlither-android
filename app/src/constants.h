@@ -75,11 +75,9 @@ typedef enum screen {
   CONTROLS = 4,
   NTL_PANEL = 5,
   KEYBOARD_EDITOR = 6,
-  /* 7 was VOICE_PANEL, retired along with Vlither Voice. Left unused rather
-     than reassigned so no stored/serialized screen number silently changes
-     meaning. */
   EVENTS_PANEL = 8,
-  RATINGS_PANEL = 9
+  RATINGS_PANEL = 9,
+  LEADERBOARD_PANEL = 10
 } screen;
 
 typedef enum font_size {

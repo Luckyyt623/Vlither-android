@@ -146,9 +146,6 @@ bool android_jni_request_custom_background(void) {
     return result;
 }
 
-/* Implemented in twindow_android.c: tells the window/swapchain code which
-   orientation the activity has been locked to (-1 when it follows the
-   sensor), so the logical size never depends on config-change timing. */
 extern void twindow_android_set_orientation_mode(int mode);
 
 int android_jni_get_screen_orientation_mode(void) {
@@ -207,8 +204,6 @@ bool android_jni_set_screen_orientation_mode(int mode) {
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     if (cls) (*env)->DeleteLocalRef(env, cls);
     if (attached) (*vm)->DetachCurrentThread(vm);
-    /* Update the hint only after the activity accepted the new lock. The
-       actual rebuild happens when Android delivers the resize event. */
     if (result) twindow_android_set_orientation_mode(mode);
     return result;
 }
@@ -581,12 +576,6 @@ void android_jni_open_webview(const char* url) {
         attached = true;
     } else if (status != JNI_OK || !env) return;
 
-    /* GetObjectClass() on the activity instance we already hold — not a
-       name-based FindClass() — is what actually resolves app-defined
-       classes/methods correctly from this native thread. Same pattern as
-       android_jni_request_custom_arrow() above. The Kotlin side
-       (GameActivity.openTagsStore) does the actual Intent/startActivity
-       work, where a plain TagsStoreActivity::class reference is safe. */
     jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
     if (cls && !(*env)->ExceptionCheck(env)) {
         jmethodID mid = (*env)->GetStaticMethodID(

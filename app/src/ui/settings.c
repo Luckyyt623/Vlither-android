@@ -36,7 +36,7 @@ static void apply_mode_graphics_preset(user_settings *us, int mode_index,
   us->mode_graphics_preset[mode_index] = preset;
   gameplay_mode *m = &us->modes[mode_index];
   {
-    if (preset == 1) { /* Competitive */
+    if (preset == 1) {
       m->show_background = false;
       m->show_accessories = false;
       m->show_shadows = true;
@@ -47,7 +47,7 @@ static void apply_mode_graphics_preset(user_settings *us, int mode_index,
       m->render_mode = 1;
       us->food_glow[mode_index] = false;
       us->snake_shadow_strength[mode_index] = 0.6f;
-    } else if (preset == 2) { /* Low */
+    } else if (preset == 2) {
       m->show_background = false;
       m->show_accessories = false;
       m->show_shadows = true;
@@ -58,7 +58,7 @@ static void apply_mode_graphics_preset(user_settings *us, int mode_index,
       m->render_mode = 2;
       us->food_glow[mode_index] = false;
       us->snake_shadow_strength[mode_index] = 0.6f;
-    } else { /* Normal / High */
+    } else {
       m->show_background = true;
       m->show_accessories = true;
       m->show_shadows = true;
@@ -93,9 +93,6 @@ void ui_settings(tenv* env) {
              usr->imgui_data.regular_font[usrs->ui_font_size]->LegacySize);
 
   float frame_height = igGetFrameHeight();
-  /* The action footer is pinned to the fullscreen Settings window. Reserve
-     its full height before sizing the two scrollable table rows; otherwise a
-     short landscape phone lets Hotkeys paint behind Create backup / Reset. */
   ImVec2 settings_window_size;
   igGetWindowSize(&settings_window_size);
   float footer_btn_h = frame_height * 1.8f;
@@ -241,9 +238,6 @@ void ui_settings(tenv* env) {
           usrs->fps_limit = 0;
           usrs->vsync = false;
         } else {
-          /* Turning the convenience toggle off returns to display-synced
-             presentation. The numeric FPS limiter remains independently
-             available above. */
           usrs->vsync = true;
         }
         env->config.vsync = usrs->vsync;
@@ -520,8 +514,6 @@ void ui_settings(tenv* env) {
         igEndDisabled();
         igCheckbox("##center line", &mode->center_line);
         igCheckbox("##center line others", &usrs->center_line_others[i]);
-        /* Keep the existing persisted show_crosshair field for settings-file
-           compatibility, but use it as a local-player head-dot toggle. */
         igCheckbox("##head dot", &mode->show_crosshair);
 
         igCheckbox("##boost", &mode->show_boost);
@@ -678,9 +670,6 @@ void ui_settings(tenv* env) {
     igEndTable();
   }
 
-  /* Responsive two-column footer. Backup actions share one row immediately
-     above the final Reset / OK row, keeping the primary confirmation in the
-     bottom-right on every Android screen width. */
   float footer_x = style->WindowPadding.x;
   float footer_w = settings_window_size.x - style->WindowPadding.x * 2.0f;
   float btn_w = (footer_w - style->ItemSpacing.x) * 0.5f;
@@ -693,8 +682,6 @@ void ui_settings(tenv* env) {
   igSetCursorPosX(col1_x);
   igSetCursorPosY(backup_y);
   if (igButton("Create backup", (ImVec2){btn_w, btn_h})) {
-    /* Export the current in-memory values, including Controls and custom
-       buttons, rather than the last values written by the OK button. */
     save_user_settings(usrs);
     if (!android_jni_request_settings_backup())
       settings_transfer_unavailable = true;

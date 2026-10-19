@@ -36,9 +36,6 @@ static stbi_uc* _load_from_asset(const char* filename, int* w, int* h, int* c) {
     stbi_uc* pixels = stbi_load_from_memory((stbi_uc*)buf, (int)len, w, h, c, 4);
     free(buf);
     if (!pixels) {
-        /* stb_image has no WebP decoder. Android's BitmapFactory does, and
-           the JNI bridge returns the same malloc/free-compatible RGBA layout
-           expected by the Vulkan upload path. */
         pixels = android_jni_decode_asset_rgba(filename, w, h);
         if (pixels) *c = 4;
         else LOGE("Failed to decode texture asset: %s", path);
@@ -278,24 +275,11 @@ texture* create_mipmap_texture_from_rgba(tcontext* ctx,
   return r;
 }
 
-/* Same upload as create_mipmap_texture_from_rgba(), except it submits on
-   the dedicated async_transfer_cmd/fence and returns immediately instead
-   of blocking on vkWaitForFences(UINT64_MAX). The returned texture's image
-   + view are valid to hand to the caller right away (creating a view
-   doesn't require the copy to have finished); what the caller must NOT do
-   yet is start SAMPLING it (e.g. via igImplVulkan_AddTexture + swapping it
-   into active use) until tcontext_async_transfer_busy(ctx) reports false,
-   since that's the only way to know the GPU copy has actually landed. */
 texture* create_mipmap_texture_from_rgba_async(tcontext* ctx,
                                                const unsigned char* data,
                                                int w, int h) {
   if (!ctx || !data || w <= 0 || h <= 0) return NULL;
 
-  /* Only one async upload in flight at a time. If a previous one hasn't
-     been reclaimed by tcontext_poll_async_transfer() yet (rare — e.g. two
-     catalog refreshes landing the same frame), flush it here. This still
-     avoids the *common* case of blocking every texture upload; it only
-     blocks on the unusual case of back-to-back async uploads. */
   if (ctx->async_transfer_pending) {
     vkWaitForFences(ctx->device, 1, &ctx->async_transfer_fence, VK_TRUE,
                     UINT64_MAX);
@@ -499,9 +483,6 @@ texture* create_mipmap_texture_from_rgba_async(tcontext* ctx,
                                 .pCommandBuffers = &ctx->async_transfer_cmd},
                 ctx->async_transfer_fence);
 
-  /* No wait here — this is the whole point. The staging buffer stays
-     alive (owned by ctx) until tcontext_poll_async_transfer() sees the
-     fence signal and frees it. */
   ctx->async_staging_buffer = staging_buffer;
   ctx->async_staging_memory = staging_memory;
   ctx->async_transfer_pending = true;
@@ -525,10 +506,6 @@ texture* create_mipmap_texture_from_rgba_async(tcontext* ctx,
                                    .baseArrayLayer = 0,
                                    .layerCount = 1}},
           NULL, &r->view) != VK_SUCCESS) {
-    /* Can't safely tear down the image/staging here — the GPU may still
-       be mid-copy into it. Let it leak this one time rather than corrupt
-       an in-flight submission; this path only triggers on driver-level
-       view-creation failure, which is already an abnormal condition. */
     r->view = VK_NULL_HANDLE;
   }
 

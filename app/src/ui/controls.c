@@ -35,8 +35,6 @@ void ui_controls(tenv* env) {
 
   bool swapped = usrs->ctrl_swap_sides;
 
-  /* Centered translucent panel so the player can still see the live
-     gameplay/control preview behind it. */
   float panel_w = ctx->size[0] * 0.86f;
   float panel_h = ctx->size[1] * 0.82f;
 #ifdef ANDROID
@@ -84,7 +82,6 @@ void ui_controls(tenv* env) {
                        (ImVec2){}, 0)) {
         igTableNextRow(ImGuiTableRowFlags_None, 0);
 
-        // ---- Column 0: General ----
         igTableSetColumnIndex(0);
         igBeginChild_Str("controls_general_child",
                          (ImVec2){-1, child_window_height},
@@ -182,7 +179,6 @@ void ui_controls(tenv* env) {
 
         igEndChild();
 
-        // ---- Column 1: Boost Button + Joystick Ring ----
         igTableSetColumnIndex(1);
         igBeginChild_Str("controls_col1_child", (ImVec2){-1, child_window_height},
                          ImGuiChildFlags_None, ImGuiWindowFlags_None);
@@ -275,7 +271,6 @@ void ui_controls(tenv* env) {
 
         igEndChild();
 
-        // ---- Column 2: Arrow Cursor + Zoom Slider ----
 #ifdef ANDROID
         igTableNextRow(ImGuiTableRowFlags_None, 0);
         igTableSetColumnIndex(0);
@@ -461,7 +456,6 @@ void ui_controls(tenv* env) {
 
         igEndChild();
 
-        // ---- Column 3: Keyboard Buttons ----
 #ifdef ANDROID
         igTableSetColumnIndex(1);
 #else

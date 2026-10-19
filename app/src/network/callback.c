@@ -15,6 +15,7 @@
 #include "../game/lifetime_stats.h"
 #include "../game/snakey_rain.h"
 #include "../user.h"
+#include "../ui/skin_wheel.h"
 #ifdef ANDROID
 #include "../android_jni.h"
 #endif
@@ -133,6 +134,23 @@ static uint8_t* get_default_skin_compressed(tuser_data* usr) {
   return reduced;
 }
 
+static int nearest_classic_cg(const game_data* gdata, int r, int g, int b) {
+  int best = 0;
+  float best_d = 1e30f;
+  for (int id = 0; id < NUM_COLOR_GROUPS; id++) {
+    if (!rgb_skin_palette_ok(id)) continue;
+    float dr = gdata->cg_colors[id].r * 255.0f - (float)r;
+    float dg = gdata->cg_colors[id].g * 255.0f - (float)g;
+    float db = gdata->cg_colors[id].b * 255.0f - (float)b;
+    float d = dr * dr + dg * dg + db * db;
+    if (d < best_d) {
+      best_d = d;
+      best = id;
+    }
+  }
+  return best;
+}
+
 void got_packet(tenv* env, uint8_t* a, int a_len) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -152,11 +170,6 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     decode_secret(a, a_len, secret);
     mg_ws_send(c, secret, 27, WEBSOCKET_OP_BINARY);
 
-    /* Battledome client identifier: a persistent 16-char ID (8 random bytes
-       hex-encoded), created once and reused for this install's lifetime.
-       Per noaha's v9.68 spec, sent as [67][16 ID bytes] right after the
-       riddle answer and before the nick/skin combo packet below. Gated to
-       BD ID-target servers, or any server if !idforce is on. */
     if (server_bd_id_should_send(usrs->server_address)) {
       ensure_bd_client_id(usrs);
       uint8_t bd_msg[1 + 16];
@@ -171,10 +184,12 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     int skin_compressed_len = 0;
     int selected_tag = usrs->ntl_tag_id;
     bool packet_tag = ntl_tags_is_packet_tag(selected_tag);
-    bool send_skin_payload = usrs->custom_skin || packet_tag;
+    bool custom_for_server =
+        usrs->custom_skin && (usrs->skin_code[0] || !sk_wheel_active());
+    bool send_skin_payload = custom_for_server || packet_tag;
 
     if (send_skin_payload) {
-      skin_compressed = usrs->custom_skin
+      skin_compressed = custom_for_server
                             ? get_skin_compressed(usr)
                             : get_default_skin_compressed(usr);
       skin_compressed_len = tdarray_length(skin_compressed);
@@ -220,7 +235,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
 
       ba[m++] = marker0;
       ba[m++] = marker1;
-      ba[m++] = usrs->custom_skin ? 255 : usrs->default_skin;
+      ba[m++] = custom_for_server ? 255 : usrs->default_skin;
       ba[m++] = 0;
       ba[m++] = 0;
       ba[m++] = 0;
@@ -420,6 +435,7 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
         if (pts[0].dying) o.sct--;
       };
 
+      const bool own_snake = gdata->data.dead;
       if (gdata->data.dead) {
 
         usr->r->global.lview[0] = gdata->data.lview_xx;
@@ -449,7 +465,6 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
           gdata->suppress_reconnect = true;
           c->is_closing = true;
         } else {
-          /* A successful spawn ends any transient-disconnect retry cycle. */
           gdata->restart_req = false;
           gdata->suppress_reconnect = false;
           gdata->reconnect_attempts = 0;
@@ -465,6 +480,19 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       o.yy = sny;
       o.cv = cv % NUM_DEFAULT_SKINS;
       o.cusk = skl != 0;
+      if (own_snake && usr->usrs.custom_skin) {
+        o.rgb_len = sk_wheel_export(o.rgb_data, RGB_SKIN_MAX);
+        if (o.rgb_len > 0) {
+          for (int j = 0; j < o.rgb_len; j++) {
+            const rgb_seg* sg = &o.rgb_data[j];
+            o.cusk_data[j] = (uint8_t)nearest_classic_cg(gdata, sg->r, sg->g,
+                                                         sg->b);
+          }
+          o.cusk_len = o.rgb_len;
+          o.cusk = true;
+          o.rgbsk = true;
+        }
+      }
       o.sc = 1;
       o.ssp = gdata->data.nsp1 + gdata->data.nsp2 * o.sc;
       o.fsp = o.ssp + .1;
@@ -1365,8 +1393,6 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
     gdata->data.lview_xx = gdata->data.view_xx;
     gdata->data.lview_yy = gdata->data.view_yy;
 
-    /* Don't let a hidden background-preview snake (Settings / Controls
-       screen) bump the player's real lifetime stats. */
     if (!gdata->preview_active) {
       usrs->kills = gdata->data.kills;
       usrs->score = gdata->data.score;
@@ -1380,9 +1406,6 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       gdata->restart_req = true;
       c->is_closing = true;
     } else if (usrs->instant_death) {
-      /* Skip the after-death spectator/follow view entirely and drop
-         straight to the homepage — mirrors the manual Quit path (see
-         game_loop's HOTKEY_QUIT handling) rather than reconnecting. */
       gdata->suppress_reconnect = true;
       gdata->restart_req = false;
       c->is_closing = true;
@@ -1396,13 +1419,6 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
   tcontext* ctx = env->ctx;
   game_data* gdata = &usr->gdata;
 
-  /* Guards against a rare handover race: the background-preview system
-     (see game/bg_preview.c) can be in the middle of closing its own
-     hidden connection at the exact moment the player hits "Play" and a
-     brand new real connection takes over gdata->connection. Events from
-     any connection that isn't the one currently tracked are stale —
-     let mongoose finish closing them without touching shared game
-     state that now belongs to the real session. */
   if (gdata->connection != NULL && c != gdata->connection) {
     if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) c->is_closing = true;
     return;
@@ -1452,10 +1468,6 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
   } else if (ev == MG_EV_CLOSE) {
     DLOG("conn closed");
     printf("Connection closed\n");
-    /* Do not auto-rejoin on a normal disconnect. The player returns to the
-       title screen and joins again via Play. Auto-rejoin only happens when
-       something already set restart_req (Instant Restart on death, or the
-       Restart hotkey). */
     if (gdata->connection == c) gdata->connection = NULL;
     gdata->closed = true;
   }

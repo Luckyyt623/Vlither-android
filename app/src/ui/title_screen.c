@@ -11,6 +11,7 @@
 #include "../game/lifetime_stats.h"
 #include "../imgui_setup.h"
 #include "ratings.h"
+#include "leaderboard.h"
 #include "../game/vlither_ratings.h"
 
 #include <math.h>
@@ -35,14 +36,14 @@ static const char* const HOMEPAGE_BACKGROUND_NAMES[] = {
 
 static ImVec4 homepage_accent(int background) {
   static const ImVec4 accents[] = {
-      {0.36f, 0.30f, 0.62f, 1.0f}, /* Normal Vlither */
-      {0.18f, 0.48f, 0.24f, 1.0f}, /* Alpine Valley */
-      {0.49f, 0.31f, 0.18f, 1.0f}, /* Himalayan Dawn */
-      {0.08f, 0.38f, 0.70f, 1.0f}, /* Cloudsea Sunrise */
-      {0.55f, 0.20f, 0.62f, 1.0f}, /* Neon Bridge */
-      {0.14f, 0.25f, 0.48f, 1.0f}, /* Galaxy */
-      {0.48f, 0.25f, 0.18f, 1.0f}, /* Fuji Sunset */
-      {0.30f, 0.30f, 0.32f, 1.0f}, /* Custom (Upload) */
+      {0.36f, 0.30f, 0.62f, 1.0f},
+      {0.18f, 0.48f, 0.24f, 1.0f},
+      {0.49f, 0.31f, 0.18f, 1.0f},
+      {0.08f, 0.38f, 0.70f, 1.0f},
+      {0.55f, 0.20f, 0.62f, 1.0f},
+      {0.14f, 0.25f, 0.48f, 1.0f},
+      {0.48f, 0.25f, 0.18f, 1.0f},
+      {0.30f, 0.30f, 0.32f, 1.0f},
   };
   if (background < 0 || background > 7) background = 5;
   return accents[background];
@@ -85,15 +86,11 @@ static void apply_homepage_background(tenv* env) {
     return;
   }
 
-  /* Gameplay owns variants 0..16. Homepage scenes are 17..22 and share the
-     same one-texture lazy slot, so only the currently selected photo lives in
-     GPU memory. The user-uploaded image (selected == 7) is a separate slot,
-     variant 23, shared with the in-game "Custom (Upload)" background. */
   int homepage_variant;
   float brightness;
   if (selected == 7) {
     homepage_variant = 23;
-    brightness = 1.0f; /* it's the user's own photo — don't dim it */
+    brightness = 1.0f;
   } else {
     homepage_variant = 16 + selected;
     static const float scene_brightness[] = {
@@ -510,16 +507,12 @@ static void draw_privacy_policy_popup(tenv *env) {
 void ui_title_screen_init(tenv* env) {}
 
 #ifdef ANDROID
-/* Homepage "Screen" toggle: Landscape <-> Portrait. The choice is stored by
-   the Android side (shared with the launcher) and applied by asking the
-   activity to rotate; the Vulkan swapchain and every layout then follow from
-   the resize event, so nothing here touches rendering directly. */
 static void draw_homepage_orientation_button(tenv* env, float frame_height) {
   static const char* const names[2] = {"Landscape", "Portrait"};
-  static int mode = 0; /* 0 = landscape, 1 = portrait */
+  static int mode = 0;
   static bool mode_known = false;
   if (!mode_known) {
-    int saved = android_jni_get_screen_orientation_mode(); /* 1 / 2 */
+    int saved = android_jni_get_screen_orientation_mode();
     mode = saved == 2 ? 1 : 0;
     mode_known = true;
   }
@@ -568,8 +561,6 @@ void ui_title_screen(tenv* env) {
 #endif
 
 #ifdef ANDROID
-  /* Homepage policy entry point and the supplied Discord artwork. The image is
-     intentionally used as the Discord link instead of a second text button. */
   const float home_edge = homepage_px(16.0f);
   const float home_gap = homepage_px(8.0f);
   const float side_button_w = homepage_px(170.0f);
@@ -593,8 +584,6 @@ void ui_title_screen(tenv* env) {
     if (igIsItemHovered(0)) igSetTooltip("Open Vlither Discord");
   }
 
-  /* Event access stays directly below Discord as requested. The compact
-     countdown is shown only for this player's interested event. */
   const float event_button_y =
       home_edge + frame_height * 1.15f + home_gap + discord_size + home_gap;
   igSetCursorPos((ImVec2){home_edge, event_button_y});
@@ -648,9 +637,6 @@ void ui_title_screen(tenv* env) {
     android_jni_open_url("https://vlitherandroid.onrender.com/");
 #endif
 
-  /* Every homepage element uses the same 720p baseline. This keeps the menu
-     at the same apparent size on 720p, 1080p and 1440p phones instead of
-     shrinking as framebuffer resolution increases. */
   float logo_size = homepage_px(400.0f);
 
   igPushFont(usr->imgui_data.mono_font[usrs->ui_font_size],
@@ -662,8 +648,6 @@ void ui_title_screen(tenv* env) {
   int hours = tot_sec / 3600;
   int minutes = (tot_sec % 3600) / 60;
   int seconds = tot_sec % 60;
-  /* Last match (white) next to the best ever (gold), for score and kills.
-     Shown on the homepage, i.e. after the player is out. */
   {
     const float col2_x = ctx->size[0] / 2.0f - logo_size / 2 + logo_size * 0.46f;
     const ImVec4 last_col = {1, 1, 1, 0.85f};
@@ -729,8 +713,6 @@ void ui_title_screen(tenv* env) {
   }
   igPopFont();
 
-  /* Fetch and ping IPv4 servers as soon as the homepage opens; the popup
-     only displays the already-running background work. */
   if (!gdata->server_list.fetching && !gdata->server_list.fetched &&
       !gdata->server_list.fetch_error)
     server_list_fetch(env);
@@ -861,8 +843,6 @@ void ui_title_screen(tenv* env) {
       int sid = atoi(entered);
       if (!server_list_resolve_sid(env, sid, usrs->server_address,
                                    sizeof(usrs->server_address))) {
-        /* Keep the SID in the same field so the player can refresh the list
-           or correct it; never attempt a connection to an unresolved ID. */
         return;
       }
     }
@@ -885,6 +865,13 @@ void ui_title_screen(tenv* env) {
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
   igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 5 +
                   frame_height * 4);
+  if (igButton("Leaderboard", (ImVec2){logo_size})) {
+    ui_leaderboard_panel_open();
+    usr->gdata.curr_screen = LEADERBOARD_PANEL;
+  }
+  igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
+                  frame_height * 5);
   if (igButton("\ue991 Controls",
                (ImVec2){logo_size / 2 - style->ItemSpacing.x / 2})) {
     usr->gdata.curr_screen = CONTROLS;
@@ -896,15 +883,15 @@ void ui_title_screen(tenv* env) {
   }
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 6 +
-                  frame_height * 5);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
+                  frame_height * 6);
   if (igButton("Tags store", (ImVec2){logo_size})) {
     android_jni_open_webview("https://vlitherandroid.onrender.com/store");
   }
 
   igSetCursorPosX(ctx->size[0] / 2.0f - logo_size / 2);
-  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 7 +
-                  frame_height * 6);
+  igSetCursorPosY(ctx->size[1] / 2.0f + style->ItemSpacing.y * 8 +
+                  frame_height * 7);
   if (igButton("\ue9b6 Quit", (ImVec2){logo_size})) {
     env->config.running = false;
     save_user_settings(usrs);

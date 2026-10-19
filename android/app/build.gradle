@@ -42,7 +42,7 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
         }
         debug {
-            signingConfig signingConfigs.release  // use same key for debug too
+            signingConfig signingConfigs.release
         }
     }
 

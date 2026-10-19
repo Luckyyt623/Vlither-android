@@ -7,9 +7,6 @@
 
 extern bool g_ntl_skin_peek_active;
 
-/* UV rect of one cell of the orb atlas (7 shades x 41 colours). The shade
-   cycles along the body and mirrors back (0..6..0) for every colour except
-   group 36, which repeats 0..6. */
 static inline vec4s redraw_orb_cell_uv(int cg_id, int seg) {
   int c = (cg_id < 0 || cg_id > 40) ? 40 : cg_id;
   int shade;
@@ -20,6 +17,46 @@ static inline vec4s redraw_orb_cell_uv(int cg_id, int seg) {
     if (shade >= 7) shade = 13 - shade;
   }
   return (vec4s){{shade / 7.0f, c / 41.0f, 1.0f / 7.0f, 1.0f / 41.0f}};
+}
+
+#define REDRAW_RGB_SHAPE_SCALE 2.0f
+
+static inline vec3s redraw_rgb_col(const snake* o, int j) {
+  const rgb_seg* sg = &o->rgb_data[j % o->rgb_len];
+  return (vec3s){{sg->r / 255.0f, sg->g / 255.0f, sg->b / 255.0f}};
+}
+
+static inline void redraw_push_rgb_seg(tuser_data* usr, const snake* o, int j,
+                                       float fix, float fiy, float lsz,
+                                       float alpha, float ang) {
+  game_data* gdata = &usr->gdata;
+  const rgb_seg* sg = &o->rgb_data[j % o->rgb_len];
+  float gsc = gdata->data.gsc;
+  if (sg->shape == RGB_SEG_PALETTE) {
+    bp_renderer_push(usr->r->bpr,
+                     &(bp_instance){{fix - gsc * lsz, fiy - gsc * lsz,
+                                     gsc * 2 * lsz, ang},
+                                    gdata->cg_uvs[sg->r],
+                                    {1, 1, 1, alpha}});
+    return;
+  }
+  vec3s c = redraw_rgb_col(o, j);
+  if (usr->r->seg_atlas && sg->shape < RGB_SKIN_SHAPES) {
+    float half = gsc * lsz * REDRAW_RGB_SHAPE_SCALE;
+    vec4s uv = {{(sg->shape % 3) / 3.0f, (sg->shape / 3) / 2.0f, 1.0f / 3.0f,
+                 1.0f / 2.0f}};
+    bp_renderer_push(usr->r->bpr,
+                     &(bp_instance){{fix - half, fiy - half, 2 * half, ang},
+                                    uv,
+                                    {c.r, c.g, c.b, alpha},
+                                    {0, 3.0f}});
+  } else {
+    bp_renderer_push(usr->r->bpr,
+                     &(bp_instance){{fix - gsc * lsz, fiy - gsc * lsz,
+                                     gsc * 2 * lsz, ang},
+                                    gdata->cg_uvs[BLANK_UV],
+                                    {c.r, c.g, c.b, alpha}});
+  }
 }
 
 static bool redraw_snake_is_teammate(const snake *o,
@@ -68,6 +105,254 @@ int arp(snake* o, int q, float xx, float yy) {
   }
 }
 
+#define SKINLESS_RUN 1024
+#define SKINLESS_DENSE 8192
+#define SKINLESS_CAP_SEGMENTS 12
+static ImVec2 skinless_pts[SKINLESS_DENSE];
+
+static void skinless_push(ImVec2 p, int* m) {
+  if (*m > 0) {
+    float dx = p.x - skinless_pts[*m - 1].x;
+    float dy = p.y - skinless_pts[*m - 1].y;
+    if (dx * dx + dy * dy < 0.0001f) return;
+  }
+  if (*m < SKINLESS_DENSE) skinless_pts[(*m)++] = p;
+}
+
+static int skinless_pieces(float len, float step) {
+  int k = (int)ceilf(len / step);
+  if (k < 1) k = 1;
+  if (k > 24) k = 24;
+  return k;
+}
+
+static int skinless_sample(const ImVec2* pts, int n, float step) {
+  int m = 0;
+  int i;
+  int s;
+  int k;
+  ImVec2 from = pts[0];
+  skinless_push(from, &m);
+  for (i = 1; i < n - 1; ++i) {
+    ImVec2 c = pts[i];
+    ImVec2 to = {(pts[i].x + pts[i + 1].x) * 0.5f,
+                 (pts[i].y + pts[i + 1].y) * 0.5f};
+    k = skinless_pieces(hypotf(c.x - from.x, c.y - from.y) +
+                            hypotf(to.x - c.x, to.y - c.y),
+                        step);
+    for (s = 1; s <= k; ++s) {
+      float t = (float)s / (float)k;
+      float u = 1.0f - t;
+      ImVec2 q = {u * u * from.x + 2.0f * u * t * c.x + t * t * to.x,
+                  u * u * from.y + 2.0f * u * t * c.y + t * t * to.y};
+      skinless_push(q, &m);
+    }
+    from = to;
+  }
+  if (n >= 2) {
+    ImVec2 to = pts[n - 1];
+    k = skinless_pieces(hypotf(to.x - from.x, to.y - from.y), step);
+    for (s = 1; s <= k; ++s) {
+      float t = (float)s / (float)k;
+      ImVec2 q = {from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t};
+      skinless_push(q, &m);
+    }
+  }
+  return m;
+}
+
+static ImVec2 skinless_unit(float x, float y) {
+  float len = sqrtf(x * x + y * y);
+  ImVec2 out = {0.0f, 0.0f};
+  if (len > 0.000001f) {
+    out.x = x / len;
+    out.y = y / len;
+  }
+  return out;
+}
+
+static void skinless_cap(ImDrawList* draw, ImVec2 uv, ImVec2 end, ImVec2 nrm,
+                         ImVec2 out, float r, ImU32 col, ImU32 clear) {
+  const int k = SKINLESS_CAP_SEGMENTS;
+  int i;
+  ImDrawIdx base;
+  ImDrawList_PrimReserve(draw, 9 * k, 1 + 2 * (k + 1));
+  base = (ImDrawIdx)draw->_VtxCurrentIdx;
+  ImDrawList_PrimWriteVtx(draw, end, uv, col);
+  for (i = 0; i <= k; ++i) {
+    float a = (float)PI * (float)i / (float)k;
+    float dx = nrm.x * cosf(a) + out.x * sinf(a);
+    float dy = nrm.y * cosf(a) + out.y * sinf(a);
+    ImDrawList_PrimWriteVtx(draw, (ImVec2){end.x + dx * r, end.y + dy * r}, uv,
+                            col);
+    ImDrawList_PrimWriteVtx(
+        draw, (ImVec2){end.x + dx * (r + 1.0f), end.y + dy * (r + 1.0f)}, uv,
+        clear);
+  }
+  for (i = 0; i < k; ++i) {
+    ImDrawIdx rim = (ImDrawIdx)(base + 1 + 2 * i);
+    ImDrawIdx next = (ImDrawIdx)(rim + 2);
+    ImDrawList_PrimWriteIdx(draw, base);
+    ImDrawList_PrimWriteIdx(draw, rim);
+    ImDrawList_PrimWriteIdx(draw, next);
+    ImDrawList_PrimWriteIdx(draw, rim);
+    ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(rim + 1));
+    ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(next + 1));
+    ImDrawList_PrimWriteIdx(draw, rim);
+    ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(next + 1));
+    ImDrawList_PrimWriteIdx(draw, next);
+  }
+}
+
+static void draw_skinless_run(ImDrawList* draw, ImVec2* buf, int n, ImU32 col,
+                              float width, int cap_start, int cap_end) {
+  float r = width * 0.5f;
+  ImU32 clear = col & 0x00FFFFFFu;
+  ImVec2 uv;
+  ImVec2 first_n = {0.0f, 0.0f};
+  ImVec2 first_t = {0.0f, 0.0f};
+  ImVec2 last_n = {0.0f, 0.0f};
+  ImVec2 last_t = {0.0f, 0.0f};
+  int m;
+  int j;
+  ImDrawIdx base;
+  if (n < 1 || width <= 0.0f) return;
+  if (n == 1) {
+    if (cap_start || cap_end) ImDrawList_AddCircleFilled(draw, buf[0], r, col, 24);
+    return;
+  }
+  {
+    float length = 0.0f;
+    float step;
+    for (j = 1; j < n; ++j)
+      length += hypotf(buf[j].x - buf[j - 1].x, buf[j].y - buf[j - 1].y);
+    step = fmaxf(3.0f, r * 0.35f);
+    step = fmaxf(step, length / (float)(SKINLESS_DENSE - 2 * n - 64));
+    m = skinless_sample(buf, n, step);
+  }
+  if (m < 2) {
+    if (cap_start || cap_end) ImDrawList_AddCircleFilled(draw, buf[0], r, col, 24);
+    return;
+  }
+  igGetFontTexUvWhitePixel(&uv);
+
+  ImDrawList_PrimReserve(draw, 18 * (m - 1), 4 * m);
+  base = (ImDrawIdx)draw->_VtxCurrentIdx;
+  for (j = 0; j < m; ++j) {
+    ImVec2 p = skinless_pts[j];
+    ImVec2 a = j > 0 ? skinless_unit(p.x - skinless_pts[j - 1].x,
+                                     p.y - skinless_pts[j - 1].y)
+                     : skinless_unit(skinless_pts[1].x - p.x,
+                                     skinless_pts[1].y - p.y);
+    ImVec2 b = j < m - 1 ? skinless_unit(skinless_pts[j + 1].x - p.x,
+                                         skinless_pts[j + 1].y - p.y)
+                         : a;
+    ImVec2 t = skinless_unit(a.x + b.x, a.y + b.y);
+    ImVec2 nrm;
+    float off_l = r;
+    float off_r = r;
+    float fade_l = 1.0f;
+    float fade_r = 1.0f;
+    if (t.x == 0.0f && t.y == 0.0f) t = b;
+    nrm = (ImVec2){-t.y, t.x};
+    if (j > 0 && j < m - 1) {
+      float cross = a.x * b.y - a.y * b.x;
+      float dot = a.x * b.x + a.y * b.y;
+      float turn = fabsf(atan2f(cross, dot));
+      if (turn > 0.0001f) {
+        float la = hypotf(p.x - skinless_pts[j - 1].x, p.y - skinless_pts[j - 1].y);
+        float lb = hypotf(skinless_pts[j + 1].x - p.x, skinless_pts[j + 1].y - p.y);
+        float bend = 0.5f * (la + lb) / turn;
+        if (bend < r) {
+          if (cross > 0.0f) {
+            off_l = bend;
+            fade_l = 0.0f;
+          } else {
+            off_r = bend;
+            fade_r = 0.0f;
+          }
+        }
+      }
+    }
+    if (j == 0) {
+      first_n = nrm;
+      first_t = t;
+    }
+    if (j == m - 1) {
+      last_n = nrm;
+      last_t = t;
+    }
+    ImDrawList_PrimWriteVtx(draw, (ImVec2){p.x + nrm.x * (off_l + fade_l),
+                                           p.y + nrm.y * (off_l + fade_l)},
+                            uv, clear);
+    ImDrawList_PrimWriteVtx(draw, (ImVec2){p.x + nrm.x * off_l, p.y + nrm.y * off_l},
+                            uv, col);
+    ImDrawList_PrimWriteVtx(draw, (ImVec2){p.x - nrm.x * off_r, p.y - nrm.y * off_r},
+                            uv, col);
+    ImDrawList_PrimWriteVtx(draw, (ImVec2){p.x - nrm.x * (off_r + fade_r),
+                                           p.y - nrm.y * (off_r + fade_r)},
+                            uv, clear);
+  }
+  for (j = 0; j < m - 1; ++j) {
+    ImDrawIdx s = (ImDrawIdx)(base + 4 * j);
+    ImDrawIdx e = (ImDrawIdx)(s + 4);
+    int q;
+    for (q = 0; q < 3; ++q) {
+      ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(s + q));
+      ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(s + q + 1));
+      ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(e + q + 1));
+      ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(s + q));
+      ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(e + q + 1));
+      ImDrawList_PrimWriteIdx(draw, (ImDrawIdx)(e + q));
+    }
+  }
+  if (cap_start)
+    skinless_cap(draw, uv, skinless_pts[0], first_n,
+                 (ImVec2){-first_t.x, -first_t.y}, r, col, clear);
+  if (cap_end)
+    skinless_cap(draw, uv, skinless_pts[m - 1], last_n, last_t, r, col, clear);
+}
+
+static void vl_skinless_strip(game_data* gdata, int bp, float cx, float cy,
+                              float lsz, float red, float green, float blue,
+                              float alpha, bool boosting, bool glow) {
+  ImDrawList* draw = igGetWindowDrawList();
+  ImVec2 buf[SKINLESS_RUN];
+  int n = 0;
+  int i;
+  int continued = 0;
+  float width = 2.0f * lsz * gdata->data.gsc;
+  ImU32 main_col = igColorConvertFloat4ToU32(
+      (ImVec4){red, green, blue, 0.8f * alpha});
+  ImU32 glow_col = igColorConvertFloat4ToU32(
+      (ImVec4){red, green, blue, 0.22f * alpha});
+  for (i = 0; i <= bp; ++i) {
+    int live = i < bp && gdata->data.pbu[i] >= 1;
+    if (live && n < SKINLESS_RUN) {
+      buf[n].x = cx + (gdata->data.pbx[i] - gdata->data.view_xx) * gdata->data.gsc;
+      buf[n].y = cy + (gdata->data.pby[i] - gdata->data.view_yy) * gdata->data.gsc;
+      n += 1;
+      if (n < SKINLESS_RUN) continue;
+    }
+    if (n >= 1) {
+      int cap_start = !continued;
+      int cap_end = !live;
+      if (boosting && glow)
+        draw_skinless_run(draw, buf, n, glow_col, width * 1.08f, cap_start,
+                          cap_end);
+      draw_skinless_run(draw, buf, n, main_col, width, cap_start, cap_end);
+    }
+    if (live) {
+      buf[0] = buf[n > 0 ? n - 1 : 0];
+      n = 1;
+      continued = 1;
+    } else {
+      n = 0;
+      continued = 0;
+    }
+  }
+}
+
 void redraw(tenv* env) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -85,9 +370,6 @@ void redraw(tenv* env) {
 
   int mode_index = usrs->hotkeys[HOTKEY_ASSIST].active ? 1 : 0;
   gameplay_mode* mode = usrs->modes + mode_index;
-  /* Performance mode keeps a light shadow instead of dropping it: it is
-     forced on, drawn on every second segment only (they overlap heavily), and
-     never fainter than a minimum strength even when the preset zeroes it. */
   bool shadow_thin = usrs->performance_mode;
   bool render_shadows = mode->show_shadows || usrs->performance_mode;
   float shadow_k = usrs->snake_shadow_strength[mode_index];
@@ -292,8 +574,6 @@ void redraw(tenv* env) {
           float ntx = o->xx + o->fx;
           float nty = o->yy + o->fy;
 
-          /* Team names intentionally use a larger bold face than ordinary
-             names so a teammate remains readable during fast movement. */
           bool vlither_teammate =
               vlither_chat_is_snake_player(o->id, usrs->server_address);
           bool ntl_teammate = !vlither_teammate &&
@@ -325,9 +605,6 @@ void redraw(tenv* env) {
           vec3 lcolor;
           glm_vec3_lerp((float*)scolor, (vec3){1, 1, 1}, mode->player_names_outline ? 0.8f : 0.7f, lcolor);
 
-          /* Team-network name highlighting. Vlither presence has priority so
-             a Vlither Android/key teammate is always yellow; otherwise an
-             NTL teammate is green. */
           if (sos_teammate) {
             ncolor[0] = 1.00f;
             ncolor[1] = 0.08f;
@@ -349,9 +626,6 @@ void redraw(tenv* env) {
             nty = nty + 32 + 11 * o->sc * gdata->data.gsc;
 
           bool strong_name_outline = mode->player_names_outline || team_teammate;
-          /* A radius of two creates 24 extra text draws per teammate name.
-             Keep the stronger normal-quality outline, but use the regular
-             eight-neighbour outline in Performance mode. */
           int name_outline_radius = team_teammate && !usrs->performance_mode
                                         ? 2 : 1;
           if (strong_name_outline) {
@@ -442,8 +716,6 @@ void redraw(tenv* env) {
         float wwk = 0;
         float nkr = 0;
         float msl = o->msl;
-        /* Pick the body style first: the skinless styles also decide the
-           segment spacing below. */
         bool is_local_snake = o->id == gdata->data.snake_id;
         bool is_team_snake = !is_local_snake &&
                              redraw_snake_is_teammate(o, usrs);
@@ -459,9 +731,6 @@ void redraw(tenv* env) {
           else
             snake_render_mode = 1;
         }
-        /* Orb and Flat bodies are made of separate sprites, so keep them at the
-           tightest spacing (qsm 1) whatever the body-parts-spacing slider says;
-           otherwise gaps open up between segments. */
         float eff_qsm = mode->qsm;
         if ((snake_render_mode == 1 || snake_render_mode == 2) && eff_qsm > 1.0f)
           eff_qsm = 1.0f;
@@ -772,8 +1041,6 @@ void redraw(tenv* env) {
 
         float om = 0;
         float mr = 0;
-        // NTL-style transparent snake body. This applies to textured, solid,
-        // and flat render modes instead of only the skinless modes.
         float skin_alpha = mode->transparent_skin
                                ? usrs->transparent_skin_opacity[mode_index]
                                : 1.0f;
@@ -840,6 +1107,11 @@ void redraw(tenv* env) {
                 float fiy =
                     ((py - gdata->data.view_yy) * gdata->data.gsc) + mhh2;
 
+                if (o->rgbsk) {
+                  redraw_push_rgb_seg(usr, o, (int)j, fix, fiy, lsz,
+                                      a * skin_alpha, gdata->data.pba[(int)j]);
+                  continue;
+                }
                 int cg_id = o->cusk_data[(int)j % o->cusk_len];
 
                 bp_renderer_push(usr->r->bpr,
@@ -964,9 +1236,13 @@ void redraw(tenv* env) {
 
                 int cg_id = o->cusk_data[(int)j % o->cusk_len];
                 vec3s* cg_col = gdata->cg_colors + cg_id;
+                vec3s rgb_col_tmp;
+                if (o->rgbsk) {
+                  rgb_col_tmp = redraw_rgb_col(o, (int)j);
+                  cg_col = &rgb_col_tmp;
+                }
 
                 if (orb_tex_ok) {
-                  /* Textured orb for this colour group and shade. */
                   bp_renderer_push(
                       usr->r->bpr,
                       &(bp_instance){
@@ -1030,7 +1306,6 @@ void redraw(tenv* env) {
                 vec3s* cg_col = gdata->cg_colors + cg_id;
 
                 if (orb_tex_ok) {
-                  /* Textured orb for this colour group and shade. */
                   bp_renderer_push(
                       usr->r->bpr,
                       &(bp_instance){
@@ -1118,6 +1393,11 @@ void redraw(tenv* env) {
 
                 int cg_id = o->cusk_data[0];
                 vec3s* cg_col = gdata->cg_colors + cg_id;
+                vec3s rgb_col_tmp;
+                if (o->rgbsk) {
+                  rgb_col_tmp = redraw_rgb_col(o, 0);
+                  cg_col = &rgb_col_tmp;
+                }
 
                 bp_renderer_push(
                     usr->r->bpr,
@@ -1178,62 +1458,13 @@ void redraw(tenv* env) {
               }
           }
         } else if (snake_render_mode == 3) {
-          /* Skinless: the whole body is a single solid colour (the first
-             colour of the skin) drawn as one continuous rounded tube, so
-             there are no segments and no gaps at any zoom or spacing. */
           int sk_cg = o->cusk && o->cusk_len > 0
                           ? o->cusk_data[0]
                           : gdata->default_skins[o->cv][1];
           vec3s* cg_col = gdata->cg_colors + sk_cg;
-          float tube_w = gdata->data.gsc * 2 * lsz;
-          float tube_a = a * skin_alpha;
-
-          if (render_shadows) {
-            for (j = bp - 1; j >= 4; j--) {
-              if (shadow_thin && (((int)j) & 1)) continue;
-              k = j - 4;
-              if (gdata->data.pbu[(int)k] != 2) continue;
-              float sx = ((gdata->data.pbx[(int)k] - gdata->data.view_xx) *
-                          gdata->data.gsc) + mww2;
-              float sy = ((gdata->data.pby[(int)k] - gdata->data.view_yy) *
-                          gdata->data.gsc) + mhh2;
-              bp_renderer_push(
-                  usr->r->bpr,
-                  &(bp_instance){{sx - (lsz * gdata->data.gsc + 1),
-                                  sy - (lsz * gdata->data.gsc + 1),
-                                  (lsz * gdata->data.gsc + 1) * 2,
-                                  gdata->data.pba[(int)j]},
-                                 gdata->cg_uvs[BLANK_UV],
-                                 {0, 0, 0, a * a * skin_alpha * shadow_k}});
-            }
-          }
-
-          for (j = bp - 1; j >= 1; j--) {
-            if (gdata->data.pbu[(int)j] < 1 && gdata->data.pbu[(int)j - 1] < 1)
-              continue;
-            float x1 = ((gdata->data.pbx[(int)j - 1] - gdata->data.view_xx) *
-                        gdata->data.gsc) + mww2;
-            float y1 = ((gdata->data.pby[(int)j - 1] - gdata->data.view_yy) *
-                        gdata->data.gsc) + mhh2;
-            float x2 = ((gdata->data.pbx[(int)j] - gdata->data.view_xx) *
-                        gdata->data.gsc) + mww2;
-            float y2 = ((gdata->data.pby[(int)j] - gdata->data.view_yy) *
-                        gdata->data.gsc) + mhh2;
-            float ddx = x2 - x1, ddy = y2 - y1;
-            float seg_len = sqrtf(ddx * ddx + ddy * ddy);
-            if (seg_len < 0.01f) continue;
-            /* The capsule's rounded ends overlap the neighbours, which hides
-               every joint. */
-            float cap_len = seg_len + tube_w;
-            float cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f;
-            bp_renderer_push(
-                usr->r->bpr,
-                &(bp_instance){{cx - cap_len * 0.5f, cy - tube_w * 0.5f,
-                                cap_len, atan2f(ddy, ddx)},
-                               gdata->cg_uvs[BLANK_UV],
-                               {cg_col->r, cg_col->g, cg_col->b, tube_a},
-                               {tube_w, 1}});
-          }
+          vl_skinless_strip(gdata, (int)bp, mww2, mhh2, lsz, cg_col->r,
+                            cg_col->g, cg_col->b, a * skin_alpha,
+                            o->tsp > o->fsp, mode->show_boost);
         }
 
         bool is_local_line = o->id == gdata->data.snake_id;
@@ -1661,58 +1892,48 @@ void redraw(tenv* env) {
                        ? o->alive_amt * o->alive_amt * sqrtf(1 - o->dead_amt)
                        : a;
 
-        bp_renderer_push(
-            usr->r->bpr,
-            &(bp_instance){
-                {(mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc) -
-                     iris_r,
-                 (mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc) -
-                     iris_r,
-                 iris_r * 2, 0},
-                gdata->cg_uvs[BLANK_UV],
-                {dfs->ec.r, dfs->ec.g, dfs->ec.b, ea}});
+        float eye_x[4], eye_y[4];
+        eye_x[0] = mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc;
+        eye_y[0] = mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc;
 
         ex = cosf(fang) * ed + cosf(fang + PI / 2) * (esp + .5);
         ey = sinf(fang) * ed + sinf(fang + PI / 2) * (esp + .5);
-
-        bp_renderer_push(
-            usr->r->bpr,
-            &(bp_instance){
-                {(mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc) -
-                     iris_r,
-                 (mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc) -
-                     iris_r,
-                 iris_r * 2, 0},
-                gdata->cg_uvs[BLANK_UV],
-                {dfs->ec.r, dfs->ec.g, dfs->ec.b, ea}});
+        eye_x[1] = mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc;
+        eye_y[1] = mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc;
 
         ex = cosf(fang) * (ed + .5) + o->rex * ssc + cosf(fang - PI / 2) * esp;
         ey = sinf(fang) * (ed + .5) + o->rey * ssc + sinf(fang - PI / 2) * esp;
-
-        bp_renderer_push(
-            usr->r->bpr,
-            &(bp_instance){
-                {(mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc) -
-                     pupil_r,
-                 (mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc) -
-                     pupil_r,
-                 pupil_r * 2, 0},
-                gdata->cg_uvs[BLANK_UV],
-                {dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, ea}});
+        eye_x[2] = mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc;
+        eye_y[2] = mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc;
 
         ex = cosf(fang) * (ed + .5) + o->rex * ssc + cosf(fang + PI / 2) * esp;
         ey = sinf(fang) * (ed + .5) + o->rey * ssc + sinf(fang + PI / 2) * esp;
+        eye_x[3] = mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc;
+        eye_y[3] = mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc;
 
-        bp_renderer_push(
-            usr->r->bpr,
-            &(bp_instance){
-                {(mww2 + (ex + hx - gdata->data.view_xx) * gdata->data.gsc) -
-                     pupil_r,
-                 (mhh2 + (ey + hy - gdata->data.view_yy) * gdata->data.gsc) -
-                     pupil_r,
-                 pupil_r * 2, 0},
-                gdata->cg_uvs[BLANK_UV],
-                {dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, ea}});
+        if (snake_render_mode == 3) {
+          ImDrawList* eye_dl = igGetWindowDrawList();
+          for (int ei = 0; ei < 4; ei++) {
+            float er_px = ei < 2 ? iris_r : pupil_r;
+            ImVec4 ec4 = ei < 2
+                ? (ImVec4){dfs->ec.r, dfs->ec.g, dfs->ec.b, ea}
+                : (ImVec4){dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, ea};
+            ImDrawList_AddCircleFilled(eye_dl, (ImVec2){eye_x[ei], eye_y[ei]},
+                                       er_px, igColorConvertFloat4ToU32(ec4),
+                                       24);
+          }
+        } else {
+          for (int ei = 0; ei < 4; ei++) {
+            float er_px = ei < 2 ? iris_r : pupil_r;
+            vec3s ecol = ei < 2 ? dfs->ec : dfs->ppc;
+            bp_renderer_push(
+                usr->r->bpr,
+                &(bp_instance){{eye_x[ei] - er_px, eye_y[ei] - er_px,
+                                er_px * 2, 0},
+                               gdata->cg_uvs[BLANK_UV],
+                               {ecol.r, ecol.g, ecol.b, ea}});
+          }
+        }
 
         bool hide_own_cosmetic = usrs->ntl_stealth_mode &&
                                  o->id == gdata->data.snake_id;
@@ -1741,9 +1962,6 @@ void redraw(tenv* env) {
 
   igPopFont();
 
-  /* NTL-compatible tags are attached to every visible snake. Public tags
-     come from the normal Slither skin packet; protected tags are supplied by
-     the same NTL mapping service used by the browser extension. */
   ntl_tags_begin_frame();
   if (usrs->show_tags) {
     int tag_snakes_len = tdarray_length(gdata->data.snakes);
@@ -1769,9 +1987,6 @@ void redraw(tenv* env) {
   usr->r->global.zoom = gdata->data.gsc;
   usr->r->global.grd = gdata->data.grd;
   usr->r->global.bd_radius = gdata->data.flux_grd;
-  /* background_style's "Custom (Upload)" entry (17) shares the same
-     variant-23 slot as the homepage's Custom (Upload) option, one file on
-     disk — the 17..22 range is already used by homepage preset photos. */
   renderer_set_background_variant(
       usr->r, env->ctx,
       usrs->background_style == 17 ? 23 : usrs->background_style);
@@ -1788,22 +2003,10 @@ void redraw(tenv* env) {
   usr->r->global.minimap_data_size = gdata->data.mmsz;
 
   if (mode->show_crosshair) {
-    /* Local-player head dot. The old show_crosshair setting name is retained
-       internally so existing settings files keep working, but the marker is
-       now a small configurable-colour dot fixed to the player's own snake
-       head. It is never drawn for remote snakes and does not depend on the
-       Android touch cursor. */
     snake *me = get_snake(gdata, gdata->data.snake_id);
     if (me && me->iiv && !me->dead) {
       float head_alpha = me->alive_amt * (1.0f - me->dead_amt);
       if (head_alpha > 0.01f) {
-        /* Put the marker right at the front tip of the head, just proud of
-           the surface, in the snake's own facing direction. The head is a
-           capsule of radius 14.5*sc centred on hx,hy (same radius the body
-           segments use — see lsz = 29*ssc a bit further down), so an offset
-           of exactly that radius lands the dot on the surface; a hair more
-           (15.5*sc) floats it just above/ahead of the tip instead of
-           sitting on top of it. */
         float forehead_offset = 15.5f * me->sc;
         float dot_wx = me->xx + me->fx + cosf(me->ehang) * forehead_offset;
         float dot_wy = me->yy + me->fy + sinf(me->ehang) * forehead_offset;
@@ -1811,12 +2014,6 @@ void redraw(tenv* env) {
                                   gdata->data.gsc;
         float head_y = mhh2 + (dot_wy - gdata->data.view_yy) *
                                   gdata->data.gsc;
-        /* World-space size (like Frontier's pointer dot): the dot is a small
-           fixed fraction of the snake's own thickness, so it scales with
-           zoom the same way the snake does — bigger in raw pixels when
-           zoomed in, but still reading as a small dot next to the now-much
-           bigger head, and smaller (but present) when zoomed out. Clamped so
-           it never vanishes at max zoom-out or balloons at max zoom-in. */
         float head_dot_radius_px =
             GLM_MAX(1.5f, GLM_MIN(2.2f * me->sc * gdata->data.gsc, 9.0f));
         ImDrawList_AddCircleFilled(
@@ -1847,8 +2044,6 @@ void redraw(tenv* env) {
     gdata->data.fps_ltm = gdata->data.ctm;
   }
 
-  /* gdata->data.ping / ping_peak are maintained per pong by
-     ping_mark_received() (NTL ping system); this only smooths the colour. */
   gdata->data.ping_follow = glm_lerp(
       gdata->data.ping_follow,
       GLM_MAX(GOOD_PING, GLM_MIN((float)gdata->data.ping, BAD_PING)),

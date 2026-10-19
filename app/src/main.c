@@ -12,6 +12,7 @@
 #include "ui/key_buttons.h"
 #include "ui/viewport.h"
 #include "ui/ratings.h"
+#include "ui/leaderboard.h"
 #include "user.h"
 #ifdef ANDROID
 #include "android_jni.h"
@@ -125,13 +126,6 @@ void tdestroy(tenv* env) {
   imgui_destroy();
 }
 
-/* Draws the already-rendered game-world texture a few extra times, softly
-   offset and scaled with low alpha, on top of the sharp copy ui_viewport()
-   just drew — a cheap "poor man's blur" that needs no extra render passes
-   or shaders. Then dims/tints it so foreground panels stay readable.
-   `strength` of 1.0 = full blur+dim (Settings), lower values keep more of
-   the scene crisp (Controls, where the player needs to actually see where
-   things line up). */
 static void draw_bg_preview_blur(tenv* env, float strength) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -172,20 +166,7 @@ void trender(tenv* env) {
   if (!tcontext_begin(ctx)) return;
 
 #ifdef ANDROID
-  /* Route touches as normal UI interaction (and drag-to-scroll) instead
-     of boost/joystick hit-testing while on Settings/Controls — see
-     twindow_android.c and imgui_setup_android.c. Without this, a real
-     tap on an adjustment slider that happens to fall inside the
-     (currently invisible, since nothing is being previewed yet at this
-     exact point) boost circle's hit region gets consumed as a boost
-     press before ImGui ever sees it, and the slider never receives the
-     click. */
   { extern bool g_panel_open;
-    /* Full-screen menu states must own every touch from ACTION_DOWN.
-       v2.5 accidentally omitted TITLE_SCREEN, so homepage taps were routed
-       into the gameplay trackpad path and ImGui never received them. Keep
-       PLAYING excluded: its individual HUD rectangles still opt in to UI
-       ownership without blocking the independent movement pointer. */
     g_panel_open = (gdata->curr_screen == TITLE_SCREEN ||
                     gdata->curr_screen == SETTINGS ||
                     gdata->curr_screen == CONTROLS ||
@@ -193,6 +174,7 @@ void trender(tenv* env) {
                     gdata->curr_screen == NTL_PANEL ||
                     gdata->curr_screen == EVENTS_PANEL ||
                     gdata->curr_screen == RATINGS_PANEL ||
+                    gdata->curr_screen == LEADERBOARD_PANEL ||
                     gdata->curr_screen == KEYBOARD_EDITOR ||
                     igGetIO_Nil()->WantTextInput);
     if (g_panel_open) {
@@ -221,8 +203,6 @@ void trender(tenv* env) {
     ui_viewport(env);
 
     if (bg_preview_visible(env) && usr->gdata.curr_screen == SETTINGS) {
-      /* Keep the visual depth users expect from Settings. Performance mode
-         uses fewer/lighter taps rather than removing the blur entirely. */
       draw_bg_preview_blur(env, usr->usrs.performance_mode ? 0.55f : 1.0f);
     }
 
@@ -236,15 +216,6 @@ void trender(tenv* env) {
                 ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     igPopStyleVar(1);
 
-    /* Must run inside an active ImGui frame *and* with a current window
-       bound (same as game_loop()'s call to redraw() during real
-       PLAYING, just below) — redraw()/ui_overlay() call ImGui functions
-       like igGetWindowDrawList() that assert/crash if there's no
-       current window. This used to run before imgui_prerender() and
-       before this igBegin(), which worked fine until the game actually
-       needed to draw something through that path (e.g. another
-       player's name label) — rare on a quiet test server, routine on a
-       populated official one. */
     bg_preview_update(env);
     ntl_team_update(env);
     ntl_tags_update(env);
@@ -252,13 +223,12 @@ void trender(tenv* env) {
     vlither_ratings_update(env);
     snakey_rain_update(env);
 
-    /* Process on-screen key buttons before gameplay input. Android keeps a
-       separate UI pointer stream, so a button gesture can be consumed here
-       without interrupting the button hold itself or reaching the trackpad. */
     if (usr->gdata.curr_screen == PLAYING)
       ui_key_buttons(env);
     if (usr->gdata.curr_screen == PLAYING)
       ntl_team_consume_ui_touch(env);
+
+    leaderboard_update(env);
 
     switch (usr->gdata.curr_screen) {
       case TITLE_SCREEN:
@@ -282,17 +252,13 @@ void trender(tenv* env) {
       case RATINGS_PANEL:
         ui_ratings_panel(env);
         break;
+      case LEADERBOARD_PANEL:
+        ui_leaderboard_panel(env);
+        break;
       case KEYBOARD_EDITOR:
-        /* Dedicated black-screen editor for user-created keyboard buttons. */
         ui_key_buttons(env);
         break;
       case CONTROLS:
-        /* Use the same owned background-preview path as Settings. Calling
-           game_loop() while bg_preview_update() owns the preview connection
-           polls and advances the same connection twice per frame, which can
-           prevent the preview snake from completing its join. Only keep the
-           normal game loop alive here when Controls was opened over a real
-           player session that the preview system does not own. */
         if (!bg_preview_visible(env) &&
             (gdata->conn == CONNECTED || gdata->conn == CONNECTING)) {
           game_loop(env);
@@ -305,19 +271,12 @@ void trender(tenv* env) {
       snakey_rain_draw(env);
 
 #ifdef ANDROID
-    /* A hidden settings/controls preview is not the player's gameplay and
-       must never start a recording. Sync after the screen/game loop so a
-       transition back to the homepage stops and finalizes in this frame. */
     android_jni_capture_sync(
         usr->usrs.record_gameplay, usr->usrs.screenshot_on_kill,
         gdata->curr_screen == PLAYING && gdata->conn == CONNECTED &&
             !gdata->preview_active);
 #endif
 
-    /* S.zip exposes the NTL HUD while Settings is open as normal ImGui
-       windows (title bar/background enabled), which gives the player a safe
-       place to reposition/resize them. In gameplay the same function switches
-       back to the transparent HUD presentation. */
     if (gdata->curr_screen == PLAYING || gdata->curr_screen == SETTINGS)
       ntl_team_draw(env);
     igEnd();

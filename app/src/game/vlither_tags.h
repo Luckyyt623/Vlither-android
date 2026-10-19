@@ -18,7 +18,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
 
 bool vlither_chat_connected(void);
 bool vlither_chat_send_text(const char *text);
-/* Local-only system line in Vlither chat (not sent to server). */
 void vlither_chat_system_message(const char *text);
 int vlither_chat_history_count(void);
 const char *vlither_chat_history_nick(int index);
@@ -51,9 +50,6 @@ int vlither_profile_emoji_count(void);
 const char *vlither_profile_emoji_at(int index);
 void vlither_chat_profile_changed(void);
 
-/* Event ping system. Backend timestamps are UTC epoch milliseconds; the UI
-   formats them with the phone's local timezone. Interest is persisted by the
-   backend using the same anonymous Vlither client ID used by Tags/Chat. */
 int vlither_event_count(void);
 const char *vlither_event_id_at(int index);
 const char *vlither_event_name_at(int index);

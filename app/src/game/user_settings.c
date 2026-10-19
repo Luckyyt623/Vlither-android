@@ -48,9 +48,6 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->restart_rc = false;
   usr_settings->quit_mc = false;
   usr_settings->smooth_zoom = false;
-  /* Stable display-paced rendering is the safe Android default.  Uncapped
-     rendering remains available in Settings, but starting uncapped needlessly
-     heats the phone and leads to thermal-throttling FPS spikes. */
   usr_settings->vsync = true;
   usr_settings->instant_restart = false;
   usr_settings->bot_radius_mult = 20;
@@ -227,7 +224,6 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->arrow_style = 0;
   memset(usr_settings->homepage_settings_reserved, 0,
          sizeof usr_settings->homepage_settings_reserved);
-  /* Normal Vlither is 0; Galaxy is the requested first-run default. */
   usr_settings->homepage_background = 5;
   usr_settings->homepage_blur = 0.0f;
   memset(usr_settings->vlither_feature_settings_reserved, 0,
@@ -407,10 +403,6 @@ void read_user_settings(user_settings* usr_settings) {
     return;
   }
 
-  /* Seed a temporary value with current defaults, then overwrite only the
-     bytes that exist in the file. v2.3 files are a strict prefix of v2.4, so
-     newly appended options receive safe defaults while all old preferences
-     survive the upgrade. */
   user_settings loaded;
   user_settings_default(&loaded);
 
@@ -427,9 +419,6 @@ void read_user_settings(user_settings* usr_settings) {
     return;
   }
 
-  /* Each appended settings generation reuses space that may have been tail
-     padding in the previous layout. Distinguish the known logical prefixes so
-     legacy padding never overwrites newer defaults or the persistent NTL ID. */
   size_t v23_prefix = offsetof(user_settings, transparent_skin_opacity);
   size_t v24_prefix = offsetof(user_settings, ntl_chat_minimized);
   size_t v25_prefix = offsetof(user_settings, ntl_client_id);
@@ -472,121 +461,63 @@ void read_user_settings(user_settings* usr_settings) {
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
   else if ((size_t)file_size >= v48_prefix)
-    /* Preserve every v4.7 instant-death / own-nickname value while leaving
-       the new per-origin food scale options on their defaults (1.0x). */
     bytes_to_read = v48_prefix;
   else if ((size_t)file_size >= v47_prefix)
-    /* Preserve every v4.6 Battledome client-ID value while leaving the new
-       instant-death and own-nickname options on their defaults. */
     bytes_to_read = v47_prefix;
   else if ((size_t)file_size >= v46_prefix)
-    /* Preserve every v4.5 Snakey Rain preference while leaving the new
-       Battledome client ID ungenerated until the player first connects to a
-       BD ID-target server. */
     bytes_to_read = v46_prefix;
   else if ((size_t)file_size >= v45_prefix)
-    /* Preserve every v4.4 value while keeping Snakey Rain disabled until the
-       player explicitly opts in from the homepage. */
     bytes_to_read = v45_prefix;
   else if ((size_t)file_size >= v44_prefix)
-    /* Preserve both v4.3 chat-HUD visibility values while initializing the
-       new player-list zoom to 1.0x. */
     bytes_to_read = v44_prefix;
   else if ((size_t)file_size >= v43_prefix)
-    /* Preserve the complete public-profile build while keeping both gameplay
-       chat HUDs visible by default for existing users. */
     bytes_to_read = v43_prefix;
   else if ((size_t)file_size >= v42_prefix)
-    /* Preserve the complete leaderboard-title build while initializing the
-       new public profile to automatic colour and no emoji. */
     bytes_to_read = v42_prefix;
   else if ((size_t)file_size >= v41_prefix)
-    /* Preserve the complete ratings build while giving the title its
-       original gold colour by default. */
     bytes_to_read = v41_prefix;
   else if ((size_t)file_size >= v40_prefix)
-    /* Preserve v3.9 capture preferences while generating a fresh anonymous
-       review-ownership token on first use. */
     bytes_to_read = v40_prefix;
   else if ((size_t)file_size >= v38_prefix)
-    /* Preserve every independent Normal/Assist preference from v3.8 while
-       initializing local capture controls to disabled. */
     bytes_to_read = v38_prefix;
   else if ((size_t)file_size >= v37_prefix)
-    /* Preserve the complete first feature-pack build while initializing the
-       new independent Normal/Assist values from safe defaults. */
     bytes_to_read = v37_prefix;
   else if ((size_t)file_size >= v36_prefix)
-    /* Preserve the full clock-map build while keeping all NTL competitive
-       controls on their deterministic defaults. */
     bytes_to_read = v36_prefix;
   else if ((size_t)file_size >= v35_prefix)
-    /* Preserve the complete crash-fixed v4.7.1 settings while leaving the
-       new clock-map option disabled by default. */
     bytes_to_read = v35_prefix;
   else if ((size_t)file_size > v34_prefix) {
-    /* The first v4.7 preview enlarged MAX_IPV4_LEN inside the persisted
-       prefix. Loading that shifted layout corrupts later settings and can
-       crash while opening the game, so replace it with safe defaults. */
     fclose(f);
     write_default_settings(usr_settings);
     return;
   }
   else if ((size_t)file_size >= v34_prefix)
-    /* v3.3 contains the complete homepage selection. Ignore its compiler tail
-       padding so every new v3.4 option receives a deterministic default. */
     bytes_to_read = v34_prefix;
   else if ((size_t)file_size >= v33_prefix)
-    /* Preserve the selected v3.2 arrow while keeping Galaxy and zero blur as
-       the new homepage defaults. */
     bytes_to_read = v33_prefix;
   else if ((size_t)file_size >= v32_prefix)
-    /* v3.1 contains the complete Arrow sync and head-dot preferences. Ignore
-       only its old tail padding so the new arrow style stays Red Arrow. */
     bytes_to_read = v32_prefix;
   else if ((size_t)file_size >= v31_prefix)
-    /* v3.0 contains the complete Voice status-icon preference. Ignore only
-       its old tail padding so Arrow sync and head-dot colour use defaults. */
     bytes_to_read = v31_prefix;
   else if ((size_t)file_size >= v30_prefix)
-    /* v2.9 contains all telemetry controls. Ignore its old tail padding so
-       the new voice-status visibility preference keeps its default. */
     bytes_to_read = v30_prefix;
   else if ((size_t)file_size >= v29_prefix)
-    /* v2.8 includes the complete external mouse/keyboard field. Ignore only
-       its final struct padding so the new telemetry defaults remain intact. */
     bytes_to_read = v29_prefix;
   else if ((size_t)file_size >= v28_prefix)
-    /* v2.7 ended before the external mouse/keyboard mode. Its file may
-       include compiler tail padding, so do not copy that padding over the
-       new mode's default value. */
     bytes_to_read = v28_prefix;
   else if ((size_t)file_size >= v27_prefix)
-    /* Preserve the complete v2.6 background and keyboard-button settings. */
     bytes_to_read = v27_prefix;
   else if ((size_t)file_size >= v26_prefix)
-    /* Builds immediately before the background-style / button-shape fields
-       contain the full visibility controls followed only by tail padding. */
     bytes_to_read = v26_prefix;
   else if ((size_t)file_size >= v256_prefix)
-    /* Builds immediately before the visibility controls contain the complete
-       Vlither tag settings followed only by compiler tail padding. */
     bytes_to_read = v256_prefix;
   else if ((size_t)file_size >= v255_prefix)
-    /* The prior NTL-tag build ended immediately before the Vlither backend
-       fields. Ignore its compiler tail padding. */
     bytes_to_read = v255_prefix;
   else if ((size_t)file_size >= v254_prefix)
-    /* v2.5.4 ended before the appended NTL tag settings. Ignore any old tail
-       padding so it cannot overwrite the new defaults. */
     bytes_to_read = v254_prefix;
   else if ((size_t)file_size >= v25_prefix)
-    /* v2.5 ended at v25_prefix, followed only by compiler tail padding. Do not
-       copy that padding into the new persistent NTL client ID. */
     bytes_to_read = v25_prefix;
   else if ((size_t)file_size >= v24_prefix)
-    /* A complete v2.4 file is larger than v24_prefix only because the struct
-       was rounded up to 16-byte alignment. Ignore those final padding bytes. */
     bytes_to_read = v24_prefix;
   else
     bytes_to_read = (size_t)file_size < v23_prefix
@@ -602,8 +533,6 @@ void read_user_settings(user_settings* usr_settings) {
     return;
   }
 
-  /* Validate appended settings in case a truncated or hand-edited file was
-     loaded. */
   for (int i = 0; i < 2; ++i) {
     if (loaded.transparent_skin_opacity[i] < 0.15f ||
         loaded.transparent_skin_opacity[i] > 0.85f)
@@ -731,8 +660,6 @@ void read_user_settings(user_settings* usr_settings) {
   loaded.ntl_show_player_stats = !!loaded.ntl_show_player_stats;
   loaded.voice_chat_enabled = !!loaded.voice_chat_enabled;
   loaded.arrow_sync_with_zoom = !!loaded.arrow_sync_with_zoom;
-  /* The old boost animation preference is intentionally retired: selected
-     arrow artwork must remain identical during normal movement and boost. */
   loaded.boost_arrow_anim = false;
   if (loaded.arrow_style < 0 || loaded.arrow_style >= ARROW_STYLE_COUNT)
     loaded.arrow_style = 0;

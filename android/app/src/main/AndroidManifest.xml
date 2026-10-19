@@ -9,13 +9,10 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
-    <!-- Needed to launch the system install prompt for the downloaded update APK -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- Required by AdMob for ad personalisation opt-out -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
-    <!-- Require Vulkan 1.0 -->
     <uses-feature android:name="android.hardware.vulkan.version"
                   android:version="0x00400000"
                   android:required="true" />
@@ -35,17 +32,14 @@
         android:isGame="true"
         android:resizeableActivity="false">
 
-        <!-- AdMob App ID -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-9185462985805279~3500296304" />
 
-        <!-- Opt out of AdMob data collection for GDPR safety during review -->
         <meta-data
             android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
             android:value="true" />
 
-        <!-- MainActivity: ad gate — this is the LAUNCHER entry point -->
         <activity
             android:name=".MainActivity"
             android:label="Vlither"
@@ -59,8 +53,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep link used by the Adsterra unlock webpage to signal
-                 "ad watched" back to the app: vlither://unlock -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -69,7 +61,6 @@
             </intent-filter>
         </activity>
 
-        <!-- GameActivity: NativeActivity subclass — launched by MainActivity -->
         <activity
             android:name=".GameActivity"
             android:label="Vlither"
@@ -79,14 +70,11 @@
             android:exported="false"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 
-            <!-- Tell NativeActivity which .so to load -->
             <meta-data
                 android:name="android.app.lib_name"
                 android:value="vlither" />
         </activity>
 
-        <!-- TagsStoreActivity: in-app browser for the website's Tags Store,
-             launched from the C title screen via android_jni_open_webview() -->
         <activity
             android:name=".TagsStoreActivity"
             android:label="Vlither Tags Store"

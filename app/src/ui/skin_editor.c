@@ -7,6 +7,7 @@
 #include "../user.h"
 #include "../game/ntl_tags.h"
 #include "../game/vlither_tags.h"
+#include "skin_wheel.h"
 
 int skin_code_filter(ImGuiInputTextCallbackData* data) {
   return !((data->EventChar >= 'a' && data->EventChar <= 'z') ||
@@ -20,10 +21,6 @@ static void apply_skin_editor_background(tenv *env) {
   tuser_data *usr = env->usr;
   renderer *r = usr->r;
   int selected = usr->usrs.homepage_background;
-  /* 7 = "Custom (Upload)", the same user photo the homepage shows. This used
-     to clamp at 6 and silently fall back to the Default Galaxy scene (5)
-     whenever a custom background was selected, so the skin editor never
-     matched the homepage's custom background. */
   if (selected < 0 || selected > 7) selected = 5;
   r->global.bd_opacity = 0.0f;
   r->global.minimap_opacity = 0.0f;
@@ -51,32 +48,23 @@ static void apply_skin_editor_background(tenv *env) {
   r->global.bg_opacity = 1.0f;
 }
 
-/* ------------------------------------------------------------------------ *
- * Skin page, laid out like the Slither Android "change skin" screen:
- *   - a vertical, endlessly looping carousel of wiggling snakes (centre one
- *     full size, neighbours half size) that you swipe up/down,
- *   - Tags (top-left) and Accessory (top-right),
- *   - OK (bottom-left) and Build skin (bottom-right).
- * Tags, Accessory and Build open a sheet over the lower part of the screen
- * while the neighbouring snakes shrink away and the chosen one moves up.
- * ------------------------------------------------------------------------ */
-
 typedef enum { SK_BROWSE = 0, SK_TAGS, SK_ACCESSORY, SK_BUILD } sk_mode;
 
-#define SK_SEGMENTS 72        /* segments drawn per carousel snake            */
-#define SK_STEP_RATIO (8.0f / 48.0f) /* segment spacing / sprite size (as before) */
+#define SK_SEGMENTS 72
+#define SK_STEP_RATIO (8.0f / 48.0f)
 
 static sk_mode s_mode = SK_BROWSE;
-static int s_tags_tab = 0;    /* 0 NTL tags, 1 Vlither tags */
+static int s_tags_tab = 0;
 static bool s_inited = false;
-static float s_pos = 0.0f;    /* carousel position, in slots (unbounded)      */
-static float s_vel = 0.0f;    /* slots per 60 Hz frame                        */
-static float s_target = 0.0f; /* tap-to-select target                         */
+static float s_pos = 0.0f;
+static float s_vel = 0.0f;
+static float s_target = 0.0f;
 static bool s_has_target = false;
-static float s_anim = 0.0f;   /* 0 browse .. 1 sheet open                     */
-static float s_phase = 0.0f;  /* wiggle phase                                 */
+static float s_anim = 0.0f;
+static float s_phase = 0.0f;
 static float s_drag_total = 0.0f;
 static int s_last_n = 0;
+static bool s_more_colors = false;
 
 static inline float sk_clampf(float v, float lo, float hi) {
   return v < lo ? lo : (v > hi ? hi : v);
@@ -87,7 +75,6 @@ static inline float sk_ease(float t) {
   return 0.5f * (1.0f - cosf((float)M_PI * t));
 }
 
-/* Signed shortest distance (in slots) from the carousel position to slot i. */
 static float sk_wrap_delta(float i, float pos, int n) {
   float d = fmodf(i - pos, (float)n);
   if (d < -n * 0.5f) d += (float)n;
@@ -95,12 +82,69 @@ static float sk_wrap_delta(float i, float pos, int n) {
   return d;
 }
 
+static void sk_hsv(float h, float* r, float* g, float* b) {
+  h = h - (float)(int)h;
+  float x = h * 6.0f;
+  int i = (int)x;
+  float f = x - (float)i;
+  float q = 1.0f - f;
+  switch (i % 6) {
+    case 0: *r = 1; *g = f; *b = 0; break;
+    case 1: *r = q; *g = 1; *b = 0; break;
+    case 2: *r = 0; *g = 1; *b = f; break;
+    case 3: *r = 0; *g = q; *b = 1; break;
+    case 4: *r = f; *g = 0; *b = 1; break;
+    default: *r = 1; *g = 0; *b = q; break;
+  }
+}
+
+static void sk_rgb_outline(ImDrawList* dl, ImVec2 mn, ImVec2 mx, float time) {
+  const float pi = 3.14159265f;
+  float h = mx.y - mn.y;
+  float r = h * 0.5f;
+  float straight = (mx.x - mn.x) - h;
+  if (straight < 0) straight = 0;
+  float arc = pi * r;
+  float total = 2.0f * straight + 2.0f * arc;
+  const int steps = 120;
+  float thick = h * 0.07f;
+  if (thick < 1.5f) thick = 1.5f;
+  ImVec2 prev = {0, 0};
+  for (int k = 0; k <= steps; k++) {
+    float d = total * (float)k / (float)steps;
+    ImVec2 p;
+    if (d < straight) {
+      p = (ImVec2){mn.x + r + d, mn.y};
+    } else if (d < straight + arc) {
+      float a = -0.5f * pi + (d - straight) / r;
+      p = (ImVec2){mx.x - r + cosf(a) * r, mn.y + r + sinf(a) * r};
+    } else if (d < 2.0f * straight + arc) {
+      p = (ImVec2){mx.x - r - (d - straight - arc), mx.y};
+    } else {
+      float a = 0.5f * pi + (d - 2.0f * straight - arc) / r;
+      p = (ImVec2){mn.x + r + cosf(a) * r, mn.y + r + sinf(a) * r};
+    }
+    if (k > 0) {
+      float cr, cg, cb;
+      sk_hsv((float)k / (float)steps + time * 0.25f, &cr, &cg, &cb);
+      ImU32 col = ((ImU32)255 << 24) | ((ImU32)(cb * 255) << 16) |
+                  ((ImU32)(cg * 255) << 8) | (ImU32)(cr * 255);
+      ImDrawList_AddLine(dl, prev, p, col, thick);
+    }
+    prev = p;
+  }
+}
+
+static bool sk_has_custom(const user_settings* usrs) {
+  return usrs->skin_code[0] != 0 || sk_wheel_active();
+}
+
 static int sk_slot_count(const user_settings* usrs) {
-  return NUM_DEFAULT_SKINS + (usrs->skin_code[0] ? 1 : 0);
+  return NUM_DEFAULT_SKINS + (sk_has_custom(usrs) ? 1 : 0);
 }
 
 static int sk_selected_slot(const user_settings* usrs) {
-  if (usrs->custom_skin && usrs->skin_code[0]) return NUM_DEFAULT_SKINS;
+  if (usrs->custom_skin && sk_has_custom(usrs)) return NUM_DEFAULT_SKINS;
   int s = usrs->default_skin;
   return (s < 0 || s >= NUM_DEFAULT_SKINS) ? 0 : s;
 }
@@ -119,18 +163,39 @@ static void sk_apply_slot(user_settings* usrs, int slot) {
   }
 }
 
-/* Draws one preview snake, head on the right, centred on (cx, cy). `slot`
-   selects the default skin (or the custom code for slot NUM_DEFAULT_SKINS).
-   `size` is the sprite size of one segment, `wiggle` scales the wave. */
+static bool sk_wheel_preview(void) {
+  return s_mode == SK_BUILD ? s_more_colors : sk_wheel_active();
+}
+
+static void sk_dot(tenv* env, bool imgui, float cx, float cy, float r, vec4s col) {
+  if (imgui) {
+    ImDrawList* dl = igGetBackgroundDrawList(igGetMainViewport());
+    ImDrawList_AddCircleFilled(
+        dl, (ImVec2){cx, cy}, r,
+        igGetColorU32_Vec4((ImVec4){col.x, col.y, col.z, col.w}), 24);
+    return;
+  }
+  tuser_data* usr = env->usr;
+  bp_renderer_push(usr->r->bpr,
+                   &(bp_instance){{cx - r, cy - r, r * 2},
+                                  usr->gdata.cg_uvs[BLANK_UV],
+                                  {col.x, col.y, col.z, col.w}});
+}
+
 static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
                           float wiggle, float alpha, bool is_main) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
   bool custom = slot >= NUM_DEFAULT_SKINS;
+  const bool wheel = custom && sk_wheel_preview();
   int code_len = custom ? (int)strlen(usrs->skin_code) : 0;
   int n = custom ? (code_len < SK_SEGMENTS ? code_len : SK_SEGMENTS)
                  : SK_SEGMENTS;
+  if (wheel) {
+    n = sk_wheel_count();
+    if (n > SK_SEGMENTS) n = SK_SEGMENTS;
+  }
   if (n <= 0 || size < 2.0f || alpha <= 0.01f) return;
 
   float step = size * SK_STEP_RATIO;
@@ -139,12 +204,6 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
   float amp = 0.52f * size * wiggle;
   float u = size / 48.0f;
 
-  /* Same wave as the Slither Android skin page:
-       y = cos(csfr + i/4) * 15 * (0.8 + 0.2 * (1 - i/len)),  i counted from
-     the tail with 10-unit point spacing and a 29-unit body. Per segment of
-     this preview (size/6 apart) that is 0.1208 rad. The wave runs from the
-     head towards the tail (that is what makes it look like swimming), and
-     the swing is largest at the tail (15) and smallest at the head (12). */
   const float wave_per_seg = 0.1208f;
   float px[SK_SEGMENTS], py[SK_SEGMENTS];
   for (int k = 0; k < n; k++) {
@@ -152,7 +211,6 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
     px[k] = head_x - k * step;
     py[k] = cy - size * 0.5f + cosf(s_phase - k * wave_per_seg) * amp * taper;
   }
-  /* The head turns with the wave, like the real snake. */
   float ang = n > 1 ? atan2f(py[0] - py[1], px[0] - px[1]) : 0.0f;
   float ca = cosf(ang), sa = sinf(ang);
 
@@ -164,7 +222,8 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
 
   int sk_len = custom ? 1 : gdata->default_skins[slot][0];
   if (sk_len < 1) sk_len = 1;
-  for (int k = n - 1; k >= 0; k--) {
+  if (wheel) sk_wheel_draw_body(env, n, px, py, size, alpha);
+  for (int k = n - 1; k >= 0 && !wheel; k--) {
     int cg_id = custom
                     ? get_cg_id(gdata, usrs->skin_code[k])
                     : gdata->default_skins[slot][1 + (k % sk_len)];
@@ -176,7 +235,6 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
                                     {we, we, we, alpha}});
   }
 
-  /* Eyes and accessory follow the head angle. */
   default_skin_data* dfs = gdata->dfs + (custom ? 0 : (1 + slot));
   float ssc = size / 29.0f;
   float ed = 6 * ssc, esp = 6 * ssc;
@@ -185,16 +243,12 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
   for (int side = -1; side <= 1; side += 2) {
     float ox = ed, oy = side * (esp + 0.5f);
     float ex = hx + ox * ca - oy * sa, ey = hy + ox * sa + oy * ca;
-    bp_renderer_push(usr->r->bpr,
-                     &(bp_instance){{ex - iris_r, ey - iris_r, iris_r * 2},
-                                    gdata->cg_uvs[BLANK_UV],
-                                    {dfs->ec.r, dfs->ec.g, dfs->ec.b, alpha}});
+    sk_dot(env, wheel, ex, ey, iris_r,
+           (vec4s){dfs->ec.r, dfs->ec.g, dfs->ec.b, alpha});
     float px_ = ed + 0.5f + 2 * ssc, py_ = side * esp;
     float qx = hx + px_ * ca - py_ * sa, qy = hy + px_ * sa + py_ * ca;
-    bp_renderer_push(usr->r->bpr,
-                     &(bp_instance){{qx - pupil_r, qy - pupil_r, pupil_r * 2},
-                                    gdata->cg_uvs[BLANK_UV],
-                                    {dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, alpha}});
+    sk_dot(env, wheel, qx, qy, pupil_r,
+           (vec4s){dfs->ppc.r, dfs->ppc.g, dfs->ppc.b, alpha});
   }
 
   if (usrs->accessory < NUM_ACCESSORIES) {
@@ -202,10 +256,14 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
     float m = size * 0.5f * acc->sc;
     float aox = acc->of * ed;
     float acx = hx + aox * ca, acy = hy + aox * sa;
-    bp_renderer_push(usr->r->bpr,
-                     &(bp_instance){{acx - m, acy - m, m * 2, ang},
-                                    acc->uv,
-                                    {1, 1, 1, alpha}});
+    if (wheel)
+      sk_wheel_draw_accessory(env, acc->uv.x, acc->uv.y, acc->uv.z, acc->uv.w,
+                              acx, acy, m, ang, alpha);
+    else
+      bp_renderer_push(usr->r->bpr,
+                       &(bp_instance){{acx - m, acy - m, m * 2, ang},
+                                      acc->uv,
+                                      {1, 1, 1, alpha}});
   }
 
   if (is_main) {
@@ -217,9 +275,6 @@ static void sk_draw_snake(tenv* env, int slot, float cx, float cy, float size,
 
 typedef struct { float x0, y0, x1, y1; } sk_clip;
 
-/* Visible area of the current (child) window, used to hide sprites that have
-   scrolled out of it: sprites are drawn by the batch renderer underneath
-   ImGui, so ImGui's own clipping does not apply to them. */
 static sk_clip sk_child_clip(void) {
   ImVec2 p, sz;
   igGetWindowPos(&p);
@@ -232,9 +287,6 @@ static bool sk_in_clip(const sk_clip* c, float x, float y, float w, float h) {
   return x >= c->x0 && y >= c->y0 && x + w <= c->x1 && y + h <= c->y1;
 }
 
-/* Translucent panel drawn as a sprite (so it sits UNDER the colour and
-   accessory sprites, which ImGui windows would otherwise cover). It is a
-   capsule stretched so its rounded ends fall off-screen. */
 static void sk_push_panel(tenv* env, float x, float y, float w, float h,
                           bool vertical_edge) {
   tuser_data* usr = env->usr;
@@ -259,7 +311,6 @@ static void sk_push_panel(tenv* env, float x, float y, float w, float h,
   }
 }
 
-/* Rounded "pill" button used for the four corner buttons. */
 static bool sk_pill(const char* label, float x, float y, float w, float h,
                     bool primary) {
   igSetCursorPos((ImVec2){x, y});
@@ -276,8 +327,9 @@ static bool sk_pill(const char* label, float x, float y, float w, float h,
 
 static void sk_leave(tenv* env) {
   user_settings* usrs = &env->usr->usrs;
-  if (usrs->skin_code[0] == 0) usrs->custom_skin = false;
+  if (!sk_has_custom(usrs)) usrs->custom_skin = false;
   env->usr->gdata.curr_screen = TITLE_SCREEN;
+  sk_wheel_save();
   save_user_settings(usrs);
   s_mode = SK_BROWSE;
   s_inited = false;
@@ -303,7 +355,7 @@ static void sk_accessory_sheet(tenv* env, float scale, float panel_w) {
 
   ImVec2 origin;
   sk_clip clip = sk_child_clip();
-  int total = NUM_ACCESSORIES + 1; /* last cell = "no accessory" */
+  int total = NUM_ACCESSORIES + 1;
   for (int aid = 0; aid < total; aid++) {
     bool none = aid == NUM_ACCESSORIES;
     if (aid % per_row != 0) igSameLine(0, -1);
@@ -361,13 +413,43 @@ static void sk_build_sheet(tenv* env, float scale, float panel_w) {
                       skin_code_filter, NULL);
   igSameLine(0, -1);
   igPushStyleVarX(ImGuiStyleVar_FramePadding, 0);
-  if (igButton("C", (ImVec2){btn, btn}) && len > 0)
-    usrs->skin_code[len - 1] = 0;
+  if (igButton("C", (ImVec2){btn, btn})) {
+    if (s_more_colors)
+      sk_wheel_undo();
+    else if (len > 0)
+      usrs->skin_code[len - 1] = 0;
+  }
   igSameLine(0, -1);
-  if (igButton("\ue9ac", (ImVec2){btn, btn})) usrs->skin_code[0] = 0;
+  if (igButton("\ue9ac", (ImVec2){btn, btn})) {
+    if (s_more_colors)
+      sk_wheel_clear();
+    else
+      usrs->skin_code[0] = 0;
+  }
   igPopStyleVar(1);
-  igTextDisabled("Tap colours to add segments, head first.");
   len = (int)strlen(usrs->skin_code);
+
+  {
+    const char* label = s_more_colors ? "Classic Colors" : "More Colors";
+    ImVec2 ts, avail;
+    igCalcTextSize(&ts, label, NULL, false, -1.0f);
+    igGetContentRegionAvail(&avail);
+    float bw = ts.x + style->FramePadding.x * 3.0f;
+    if (bw > avail.x) bw = avail.x;
+    igSetCursorPosX(igGetCursorPosX() + (avail.x - bw) * 0.5f);
+    igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, frame_height * 0.5f);
+    if (igButton(label, (ImVec2){bw, 0})) s_more_colors = !s_more_colors;
+    igPopStyleVar(1);
+    ImVec2 mn, mx;
+    igGetItemRectMin(&mn);
+    igGetItemRectMax(&mx);
+    sk_rgb_outline(igGetWindowDrawList(), mn, mx, (float)igGetTime());
+  }
+  if (s_more_colors) {
+    sk_wheel_panel(env, panel_w);
+    return;
+  }
+  igTextDisabled("Tap colours to add segments, head first.");
 
   int per_row = (int)((panel_w - style->WindowPadding.x * 2 - style->ScrollbarSize) /
                       (scale + style->ItemSpacing.x));
@@ -443,9 +525,8 @@ void ui_skin_editor(tenv* env) {
   const float btn_w = sk_clampf(fminf(W, H * 1.4f) * 0.30f, 150.0f, 340.0f);
   float dt = io->DeltaTime > 0.0f ? io->DeltaTime : 1.0f / 60.0f;
   if (dt > 0.1f) dt = 0.1f;
-  const float f = dt * 60.0f; /* frames at 60 Hz */
+  const float f = dt * 60.0f;
 
-  /* Entering the page: start on the skin currently in use. */
   if (!s_inited) {
     s_inited = true;
     s_mode = SK_BROWSE;
@@ -456,8 +537,6 @@ void ui_skin_editor(tenv* env) {
     s_last_n = sk_slot_count(usrs);
   }
 
-  /* The custom slot appears/disappears with the skin code. Keep the carousel
-     on a valid slot, then fold the position back into [0, n). */
   int n = sk_slot_count(usrs);
   if (n != s_last_n) {
     if (n < s_last_n && sk_round_slot(s_pos, s_last_n) >= n) {
@@ -472,16 +551,11 @@ void ui_skin_editor(tenv* env) {
     if (s_has_target) s_target -= shift;
   }
 
-  /* ---------------------------------------------------------------- *
-   * Layout and animation.
-   *   portrait : sheet slides up from the bottom, snake moves up
-   *   landscape: sheet slides in from the right, snake moves left
-   * ---------------------------------------------------------------- */
   const bool sheet_open = s_mode != SK_BROWSE;
   s_anim += ((sheet_open ? 1.0f : 0.0f) - s_anim) *
             sk_clampf(dt * 9.0f, 0.0f, 1.0f);
   const float a = sk_ease(s_anim);
-  s_phase += dt * (125.0f / 23.0f); /* Slither: csfr += vfr/23, vfr = ms/8 */
+  s_phase += dt * (125.0f / 23.0f);
   if (s_phase > 6.2831853f) s_phase = fmodf(s_phase, 6.2831853f);
 
   float sheet_w = W, sheet_h;
@@ -495,7 +569,6 @@ void ui_skin_editor(tenv* env) {
   float big = sk_clampf(W * 0.05f, 30.0f, 84.0f);
   if (big > H * 0.07f) big = H * 0.07f;
   const float row_h = big * 3.0f;
-  /* Keep the whole snake (about 12.8 sprites long) inside the free area. */
   const float free_w = landscape ? (W - sheet_w - margin * 2.0f) : (W - margin * 2.0f);
   const float big_open = fminf(big, free_w / 13.0f);
   const float big_now = big + (big_open - big) * a;
@@ -509,10 +582,6 @@ void ui_skin_editor(tenv* env) {
     cy = H * 0.5f + (open_cy - H * 0.5f) * a;
   }
 
-  /* ---------------------------------------------------------------- *
-   * Carousel input (browse only): drag by touch/mouse, mouse wheel, and a
-   * tap on a neighbouring snake brings it to the centre.
-   * ---------------------------------------------------------------- */
   float region_y0 = top_bar;
   float region_y1 = H - (btn_h + margin * 1.5f);
   float region_w = W;
@@ -544,9 +613,6 @@ void ui_skin_editor(tenv* env) {
       s_vel += (v - s_vel) * 0.5f;
       s_has_target = false;
     } else {
-      /* On Android a finger drag also reports mouse-wheel motion; that only
-         reaches here while the carousel is NOT being dragged (touch is
-         active then), so there is no double counting. */
       if (hovered && io->MouseWheel != 0.0f) {
         s_vel += -io->MouseWheel * 0.22f;
         s_has_target = false;
@@ -566,22 +632,16 @@ void ui_skin_editor(tenv* env) {
         s_has_target = false;
     }
   } else {
-    /* Sheets open: park on the nearest slot. */
     s_vel = 0.0f;
     s_has_target = false;
     s_pos += (floorf(s_pos + 0.5f) - s_pos) * sk_clampf(dt * 12.0f, 0.0f, 1.0f);
   }
 
-  /* The slot nearest the centre is the selected skin. */
   int sel = sk_round_slot(s_pos, n);
   if (s_mode == SK_BROWSE) sk_apply_slot(usrs, sel);
 
-  /* ---------------------------------------------------------------- *
-   * Draw the snakes: centre full size, neighbours half size.
-   * ---------------------------------------------------------------- */
   if (s_mode == SK_BUILD) {
-    /* Build edits the custom skin; show only that snake. */
-    if (usrs->skin_code[0])
+    if (s_more_colors ? sk_wheel_count() > 0 : usrs->skin_code[0] != 0)
       sk_draw_snake(env, NUM_DEFAULT_SKINS, cx, cy, big_now, 1.0f,
                     usrs->own_skin_invisible ? 0.25f : 1.0f, true);
   } else {
@@ -600,9 +660,6 @@ void ui_skin_editor(tenv* env) {
     }
   }
 
-  /* ---------------------------------------------------------------- *
-   * Corner buttons (browse only).
-   * ---------------------------------------------------------------- */
   if (s_mode == SK_BROWSE) {
     if (sk_pill("Tags", margin, margin, btn_w, btn_h, false)) s_mode = SK_TAGS;
     if (sk_pill("Accessory", W - margin - btn_w, margin, btn_w, btn_h, false))
@@ -612,18 +669,14 @@ void ui_skin_editor(tenv* env) {
     if (sk_pill("Build skin", W - margin - btn_w, H - margin - btn_h, btn_w,
                 btn_h, false)) {
       s_mode = SK_BUILD;
-      usrs->custom_skin = true; /* build edits the custom skin */
+      usrs->custom_skin = true;
+      s_more_colors = sk_wheel_active();
     }
   }
 
-  /* ---------------------------------------------------------------- *
-   * Sheet: Tags / Accessory / Build.
-   * ---------------------------------------------------------------- */
   if (s_mode != SK_BROWSE) {
     ImVec2 sheet_pos = landscape ? (ImVec2){W - sheet_w * a, 0.0f}
                                  : (ImVec2){0.0f, H - sheet_h * a};
-    /* Backdrop first, so the colour/accessory sprites pushed later draw on
-       top of it. The ImGui window itself stays transparent. */
     sk_push_panel(env, sheet_pos.x, sheet_pos.y, sheet_w, sheet_h, landscape);
     igSetNextWindowPos(sheet_pos, ImGuiCond_Always, (ImVec2){0, 0});
     igSetNextWindowSize((ImVec2){sheet_w, sheet_h}, ImGuiCond_Always);
@@ -684,10 +737,18 @@ void ui_skin_editor(tenv* env) {
       }
       igPopStyleVar(1);
 
-      if (erase) usrs->skin_code[0] = 0;
+      if (erase) {
+        if (s_more_colors)
+          sk_wheel_clear();
+        else
+          usrs->skin_code[0] = 0;
+      }
       if (ok) {
-        if (s_mode == SK_BUILD && !usrs->skin_code[0])
-          usrs->custom_skin = false;
+        if (s_mode == SK_BUILD) {
+          sk_wheel_set_active(s_more_colors && sk_wheel_count() > 0);
+          sk_wheel_save();
+          if (!sk_has_custom(usrs)) usrs->custom_skin = false;
+        }
         s_mode = SK_BROWSE;
         s_pos = (float)sk_selected_slot(usrs);
         s_last_n = sk_slot_count(usrs);
@@ -701,4 +762,4 @@ void ui_skin_editor(tenv* env) {
   igPopFont();
 }
 
-void ui_skin_editor_destroy(tenv* env) {}
+void ui_skin_editor_destroy(tenv* env) { sk_wheel_destroy(env); }

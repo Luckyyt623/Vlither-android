@@ -19,8 +19,8 @@ struct vs_output {
 
 [[vk::binding(0, 0)]] ConstantBuffer<Global> global;
 [[vk::binding(1, 0)]] Sampler2D tex_atlas;
-// Orb texture atlas (7 shades x 41 colours). Used when shape.y > 1.5.
 [[vk::binding(4, 0)]] Sampler2D tex_orb;
+[[vk::binding(5, 0)]] Sampler2D tex_seg;
 
 vs_output vs_main(vs_input input) {
   vs_output output;
@@ -39,7 +39,6 @@ vs_output vs_main(vs_input input) {
     r = float2(p.x * c - p.y * s, p.x * s + p.y * c) +
         0.5 * dimensions;
   } else {
-    // Preserve the original circle-sprite positioning exactly.
     r = float2(p.x * c - p.y * s, p.x * s + p.y * c) +
         0.5 * (input.circ.z + EDGE_SOFTNESS * 0.5);
   }
@@ -69,6 +68,10 @@ float4 fs_main(vs_output input) {
     float aa = max(length(float2(ddx(distance_to_edge), ddy(distance_to_edge))), 0.75);
     float alpha = 1.0 - smoothstep(-aa, aa, distance_to_edge);
     return float4(input.color.rgb, input.color.a * alpha);
+  }
+
+  if (input.shape.y > 2.5) {
+    return input.color * tex_seg.Sample(input.uv2).rgba;
   }
 
   float4 c = input.shape.y > 1.5 ? tex_orb.Sample(input.uv2).rgba

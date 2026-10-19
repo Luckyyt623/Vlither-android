@@ -28,7 +28,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.8"
+        private const val CURRENT_VERSION   = "4.7.9"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
         const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
@@ -65,12 +65,12 @@ class MainActivity : Activity() {
     private lateinit var btnWatchAd:    Button
     private lateinit var tvTimer:       TextView
     private lateinit var btnChangelog:  Button
-    private lateinit var layoutUpdate:  LinearLayout  // update panel, hidden by default
+    private lateinit var layoutUpdate:  LinearLayout
     private lateinit var tvUpdateMsg:   TextView
     private lateinit var btnDownload:   Button
     private lateinit var btnLater:      Button
-    private lateinit var progressUpdate: ProgressBar   // real download progress bar
-    private lateinit var tvProgress:    TextView       // "Downloading 10%  (3.2 / 32 MB)"
+    private lateinit var progressUpdate: ProgressBar
+    private lateinit var tvProgress:    TextView
     private var updateAvailable = false
     private var progressPolling = false
 
@@ -82,7 +82,6 @@ class MainActivity : Activity() {
     private val executor    = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Fires the moment DownloadManager finishes the update APK — auto-opens the install prompt. */
     private val downloadCompleteReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
@@ -119,7 +118,6 @@ class MainActivity : Activity() {
         receiverRegistered = true
     }
 
-    /** Handles the case where the app was closed/killed while an update was still downloading. */
     private fun resumePendingDownloadIfAny() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val savedId = prefs.getLong(PREF_PENDING_DL_ID, -1L)
@@ -135,7 +133,6 @@ class MainActivity : Activity() {
         handleUnlockDeepLink(intent)
     }
 
-    /** Catches vlither://unlock coming back from the browser after the ad page's timer finishes. */
     private fun handleUnlockDeepLink(intent: Intent?) {
         val data = intent?.data
         if (data != null && data.scheme == "vlither" && data.host == "unlock") {
@@ -158,13 +155,11 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         if (receiverRegistered) {
-            try { unregisterReceiver(downloadCompleteReceiver) } catch (e: Exception) { /* already gone */ }
+            try { unregisterReceiver(downloadCompleteReceiver) } catch (e: Exception) {  }
             receiverRegistered = false
         }
         executor.shutdown()
     }
-
-    // ── Update checker ─────────────────────────────────────────────────
 
     private fun checkForUpdate() {
         if (pendingDownloadId == -1L) {
@@ -194,7 +189,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Update panel is ALWAYS visible; these set its idle states. */
     private fun showUpToDate() {
         updateAvailable = false
         if (pendingDownloadId != -1L) return
@@ -212,8 +206,6 @@ class MainActivity : Activity() {
         btnDownload.isEnabled = true
         btnLater.visibility = View.GONE
     }
-
-    // ── Real download progress (reads DownloadManager's byte counters) ──
 
     private fun startProgressPolling(id: Long) {
         if (progressPolling) return
@@ -249,13 +241,12 @@ class MainActivity : Activity() {
                             progressUpdate.progress = pct
                             tvProgress.text = "Downloading $pct%  (${fmtMb(got)} / ${fmtMb(total)})"
                         } else {
-                            progressUpdate.isIndeterminate = true   // size unknown: don't fake a %
+                            progressUpdate.isIndeterminate = true
                             tvProgress.text = "Downloading… ${fmtMb(got)}"
                         }
                     }
                     DownloadManager.STATUS_SUCCESSFUL, DownloadManager.STATUS_FAILED, -1 -> {
                         progressPolling = false
-                        // Receiver normally handles this; cover the missed-broadcast case.
                         executor.execute { handleDownloadFinished(id) }
                         return
                     }
@@ -306,26 +297,24 @@ class MainActivity : Activity() {
             btnDownload.isEnabled = true
         }
         btnChangelog.visibility = View.VISIBLE
-        // Dim play button to hint user about update
         btnPlay.alpha = 0.6f
     }
 
     private fun showChangelog() {
         val message = """
-Update 4.7.8
+Update 4.7.9
 What's new
-• New skin page: swipe through skins, with Tags, Accessory and Build skin all in one place. It works in portrait and landscape.
-• Joystick Assist: the laser guide now follows your joystick, and a ring on the joystick shows when Assist is on.
-• Bigger joystick: the size slider now goes much higher.
-• Improved bot behaviour.
-• Stats on the homepage: after every game you can see your last score and kills next to your best.
+• New skins: fresh designs you can pick for your own snake. Only you can see them.
+• Leaderboard servers: add any server to the leaderboard and check its leaderboard and minimap.
+• Smarter bot: it now moves much better during normal play. I'm still improving it.
+• Skinless snakes: the shaders are fixed and look better now.
 
 Thanks for playing Vlither Android!
 Changes by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.8")
+            .setTitle("What's New in v4.7.9")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()
@@ -362,16 +351,14 @@ Changes by Lucky
                 android.widget.Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Log.e(TAG, "Download failed: ${e.message}")
-            // Fallback: open browser
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             catch (e2: Exception) { Log.e(TAG, "Browser fallback failed: ${e2.message}") }
         }
     }
 
-    /** Called once DownloadManager reports the update APK finished (or on relaunch, if it finished while we were gone). */
     @Synchronized
     private fun handleDownloadFinished(id: Long) {
-        if (pendingDownloadId != id) return   // already handled (receiver vs. poller)
+        if (pendingDownloadId != id) return
         val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val cursor = dm.query(DownloadManager.Query().setFilterById(id))
         var status = -1
@@ -382,16 +369,12 @@ Changes by Lucky
             }
         }
 
-        // Not in DownloadManager's table anymore, or still running/queued/paused —
-        // this only happens on the relaunch-resume path, so just leave it be;
-        // the broadcast receiver (already registered) will catch it once it truly finishes.
         if (status == DownloadManager.STATUS_RUNNING ||
             status == DownloadManager.STATUS_PENDING ||
             status == DownloadManager.STATUS_PAUSED) {
             return
         }
 
-        // Terminal state (success or failure) — clear the persisted id either way.
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .remove(PREF_PENDING_DL_ID).apply()
         pendingDownloadId = -1L
@@ -410,7 +393,6 @@ Changes by Lucky
         }
     }
 
-    /** Opens the system "Install app" screen for the just-downloaded APK. */
     private fun promptInstall(dm: DownloadManager, id: Long) {
         mainHandler.post {
             hideProgress()
@@ -434,8 +416,6 @@ Changes by Lucky
         }
     }
 
-    // ── UI ─────────────────────────────────────────────────────────────
-
     private fun buildUi() {
         val root = FrameLayout(this)
         root.setBackgroundColor(0xFF0D0E14.toInt())
@@ -449,7 +429,6 @@ Changes by Lucky
             FrameLayout.LayoutParams.WRAP_CONTENT
         ).also { it.gravity = android.view.Gravity.CENTER }
 
-        // Title
         val tvTitle = AnimatedLogoView(this)
         tvTitle.setPadding(0, 0, 0, 48)
 
@@ -458,7 +437,6 @@ Changes by Lucky
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).also { it.setMargins(0, 8, 0, 8) }
 
-        // Watch ad to unlock — opens the Adsterra unlock page in the browser
         btnWatchAd = Button(this)
         btnWatchAd.text = "🌐  Watch Ad to Unlock"
         btnWatchAd.textSize = 15f
@@ -468,11 +446,9 @@ Changes by Lucky
         btnWatchAd.alpha = 1.0f
         btnWatchAd.setOnClickListener { onWatchAdClicked() }
 
-        // Hidden timer placeholder
         tvTimer = TextView(this)
         tvTimer.visibility = View.GONE
 
-        // Play button — gated behind an active unlock (must watch an ad first)
         btnPlay = Button(this)
         btnPlay.text = "▶  PLAY"
         btnPlay.textSize = 18f
@@ -480,7 +456,6 @@ Changes by Lucky
         btnPlay.layoutParams = btnParams
         btnPlay.setOnClickListener { onPlayClicked() }
 
-        // Changelog — always visible (was: hidden until an update is detected)
         btnChangelog = Button(this)
         btnChangelog.text = "📋  What's New"
         btnChangelog.textSize = 13f
@@ -491,13 +466,11 @@ Changes by Lucky
         btnChangelog.visibility = View.VISIBLE
         btnChangelog.setOnClickListener { showChangelog() }
 
-        // ── Update panel — hidden until update found ──────────────────
         layoutUpdate = LinearLayout(this)
         layoutUpdate.orientation = LinearLayout.VERTICAL
-        layoutUpdate.visibility = View.VISIBLE   // always visible on the home page
+        layoutUpdate.visibility = View.VISIBLE
         layoutUpdate.setPadding(0, 16, 0, 0)
 
-        // Divider line
         val divider = View(this)
         divider.setBackgroundColor(0xFF2BAA60.toInt())
         val divParams = LinearLayout.LayoutParams(
@@ -526,7 +499,7 @@ Changes by Lucky
 
         btnDownload = Button(this)
         btnDownload.text = "🔄  Check for Update"
-        btnDownload.isEnabled = false      // enabled once the check finishes
+        btnDownload.isEnabled = false
         btnDownload.textSize = 14f
         btnDownload.setPadding(0, 20, 0, 20)
         btnDownload.layoutParams = btnParams
@@ -542,9 +515,8 @@ Changes by Lucky
         btnLater.setPadding(0, 16, 0, 16)
         btnLater.layoutParams = btnParams
         btnLater.alpha = 0.6f
-        btnLater.visibility = View.GONE    // only meaningful when an update exists
+        btnLater.visibility = View.GONE
         btnLater.setOnClickListener {
-            // Hide update panel and restore play button
             btnLater.visibility = View.GONE
             btnPlay.alpha = 1.0f
         }
@@ -562,8 +534,6 @@ Changes by Lucky
         col.addView(btnPlay)
         col.addView(btnChangelog)
         col.addView(layoutUpdate)
-        // Scrollable + vertically centred so EVERY button stays reachable
-        // (update panel, landscape, small screens).
         col.gravity = android.view.Gravity.CENTER_VERTICAL
         val scroll = android.widget.ScrollView(this)
         scroll.isFillViewport = true
@@ -598,8 +568,6 @@ Changes by Lucky
         }
     }
 
-    // ── Ads (Adsterra, via browser + deep-link callback) ────────────────
-
     private fun onWatchAdClicked() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ADSTERRA_UNLOCK_PAGE_URL)))
@@ -611,7 +579,6 @@ Changes by Lucky
         }
     }
 
-    /** Reflects current unlock status on btnWatchAd / btnPlay / tvTimer. */
     private fun refreshUnlockUi() {
         val remaining = getUnlockRemainingMs(this)
         if (remaining > 0) {

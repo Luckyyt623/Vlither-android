@@ -10,11 +10,8 @@ void ntl_tags_init(tenv *env);
 void ntl_tags_update(tenv *env);
 void ntl_tags_destroy(tenv *env);
 
-/* Returns true when input was consumed as a local NTL tag command. */
 bool ntl_tags_handle_command(const char *input);
 
-/* UI helpers used by the skin editor. Public tags apply immediately and are
-   encoded in the next spawn packet. Private tags are authorized by NTL. */
 bool ntl_tags_select_public(int id);
 bool ntl_tags_request_private(int id, const char *password);
 void ntl_tags_disable(void);
