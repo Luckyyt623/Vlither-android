@@ -80,6 +80,9 @@ class GameActivity : NativeActivity() {
         private const val SETTINGS_BACKUP_CREATE_REQUEST = 4404
         private const val SETTINGS_BACKUP_OPEN_REQUEST = 4405
         private const val CUSTOM_BACKGROUND_REQUEST = 4406
+        private const val PROFILE_IMAGE_REQUEST = 4407
+        private const val PROFILE_IMAGE_FILE_NAME = "profile_image"
+        private const val PROFILE_IMAGE_SIZE = 256
         private const val SETTINGS_FILE_NAME = "user.dat"
         private const val CUSTOM_ARROW_FILE_NAME = "custom_arrow_image"
         private const val CUSTOM_BACKGROUND_FILE_NAME = "custom_background_image"
@@ -286,6 +289,23 @@ class GameActivity : NativeActivity() {
         }
 
         @JvmStatic
+        fun requestProfileImage(activity: Activity): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                    }
+                    activity.startActivityForResult(intent, PROFILE_IMAGE_REQUEST)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open profile-image picker", e)
+                false
+            }
+        }
+
+        @JvmStatic
         fun requestCustomBackground(activity: Activity): Boolean {
             return try {
                 activity.runOnUiThread {
@@ -396,16 +416,6 @@ class GameActivity : NativeActivity() {
         }
 
         @JvmStatic
-        fun getUnlockRemainingMs(activity: Activity): Long {
-            return try {
-                MainActivity.getUnlockRemainingMsStatic(activity.applicationContext)
-            } catch (e: Exception) {
-                Log.e(TAG, "getUnlockRemainingMs error: ${e.message}")
-                -1L
-            }
-        }
-
-        @JvmStatic
         fun getClipboardText(activity: Activity): String {
             return try {
                 val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE)
@@ -445,17 +455,6 @@ class GameActivity : NativeActivity() {
         }
 
         @JvmStatic
-        fun requestAdFromC(activity: Activity) {
-            try {
-                val intent = android.content.Intent(activity, MainActivity::class.java)
-                intent.flags = android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                activity.startActivity(intent)
-            } catch (e: Exception) {
-                Log.e(TAG, "requestAdFromC error: ${e.message}")
-            }
-        }
-
-        @JvmStatic
         fun syncGameplayCapture(
             activity: Activity,
             recordingEnabled: Boolean,
@@ -468,6 +467,24 @@ class GameActivity : NativeActivity() {
                     game, recordingEnabled, screenshotsEnabled, sessionActive
                 )
             }
+        }
+
+        @JvmStatic
+        fun openAudioSettings(activity: Activity): Boolean {
+            return try {
+                activity.runOnUiThread {
+                    activity.startActivity(Intent(activity, AudioSettingsActivity::class.java))
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not open Sound/Song management", e)
+                false
+            }
+        }
+
+        @JvmStatic
+        fun onAudioEvent(activity: Activity, event: Int, arg: Int) {
+            GameAudio.event(activity.applicationContext, event, arg)
         }
 
         @JvmStatic
@@ -1302,6 +1319,63 @@ class GameActivity : NativeActivity() {
         FileOutputStream(staticFile).use { output -> output.write(bytes) }
     }
 
+    /** Decode the picked image, fix EXIF rotation, centre-crop to a square and
+     *  store a small PNG in app storage so the avatar loads fast and persists. */
+    private fun saveProfileImage(uri: android.net.Uri) {
+        try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0)
+                throw IllegalArgumentException("Not a readable image")
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= PROFILE_IMAGE_SIZE * 2 &&
+                   bounds.outHeight / (sample * 2) >= PROFILE_IMAGE_SIZE * 2) sample *= 2
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            var bmp = contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            } ?: throw IllegalArgumentException("Could not decode image")
+
+            val rotation = try {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    when (android.media.ExifInterface(input).getAttributeInt(
+                        android.media.ExifInterface.TAG_ORIENTATION,
+                        android.media.ExifInterface.ORIENTATION_NORMAL)) {
+                        android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                        android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                        android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                        else -> 0f
+                    }
+                } ?: 0f
+            } catch (e: Exception) { 0f }
+            if (rotation != 0f) {
+                val m = android.graphics.Matrix().apply { postRotate(rotation) }
+                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+            }
+
+            val side = minOf(bmp.width, bmp.height)
+            val square = Bitmap.createBitmap(
+                bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side)
+            val scaled = Bitmap.createScaledBitmap(
+                square, PROFILE_IMAGE_SIZE, PROFILE_IMAGE_SIZE, true)
+
+            val tmp = filesDir.resolve("$PROFILE_IMAGE_FILE_NAME.tmp")
+            FileOutputStream(tmp).use { out ->
+                scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
+                out.flush()
+            }
+            val dest = filesDir.resolve(PROFILE_IMAGE_FILE_NAME)
+            if (!tmp.renameTo(dest)) {
+                tmp.copyTo(dest, overwrite = true)
+                tmp.delete()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not save profile image", e)
+            runOnUiThread {
+                Toast.makeText(this, "Couldn't use that image", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     @Deprecated("Activity result compatibility for NativeActivity")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -1317,6 +1391,11 @@ class GameActivity : NativeActivity() {
         if (requestCode == SETTINGS_BACKUP_OPEN_REQUEST) {
             if (resultCode == Activity.RESULT_OK)
                 data?.data?.let { restoreSettingsBackup(it) }
+            return
+        }
+        if (requestCode == PROFILE_IMAGE_REQUEST) {
+            if (resultCode == Activity.RESULT_OK)
+                data?.data?.let { saveProfileImage(it) }
             return
         }
         if (requestCode == CUSTOM_BACKGROUND_REQUEST && resultCode == Activity.RESULT_OK) {
@@ -1419,10 +1498,12 @@ class GameActivity : NativeActivity() {
     override fun onResume() {
         super.onResume()
         hideSystemBars()
+        GameAudio.resume()
     }
 
     override fun onPause() {
         super.onPause()
+        GameAudio.pause()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -1433,6 +1514,7 @@ class GameActivity : NativeActivity() {
     }
 
     override fun onDestroy() {
+        GameAudio.release()
         GameplayCaptureController.onActivityDestroyed(this)
         setTextInputActiveOnUi(false)
         clearImeEvents(this)

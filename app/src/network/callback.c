@@ -443,6 +443,10 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
 
         gdata->data.snake_id = id;
         gdata->data.dead = false;
+#ifdef ANDROID
+        if (!gdata->preview_active)
+          android_jni_audio_event(AJNI_AUDIO_GAME_START, 0);
+#endif
         gdata->data.follow_view = true;
 
         gdata->data.view_xx = xx;
@@ -528,6 +532,13 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
           } else
             o->id = -1234;
           if (is_kill) {
+#ifdef ANDROID
+            if (!gdata->preview_active && o->iiv && gdata->data.mscps > 0) {
+              float lf = (float)o->sct / (float)gdata->data.mscps;
+              lf = lf < 0.0f ? 0.0f : (lf > 1.0f ? 1.0f : lf);
+              android_jni_audio_event(AJNI_AUDIO_SNAKE_DEAD, (int)(lf * 1000.0f));
+            }
+#endif
             o->dead = true;
             o->dead_amt = 0;
             o->edir = 0;
@@ -1080,6 +1091,14 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       food* fo = gdata->data.foods + i;
       if (fo->id == id) {
         fo->eaten = true;
+#ifdef ANDROID
+        if (ebid >= 0 && ebid == gdata->data.snake_id && !gdata->data.dead &&
+            !gdata->preview_active) {
+          float t = (fo->sz - 0.209f) / (0.652f - 0.209f);
+          t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+          android_jni_audio_event(AJNI_AUDIO_EAT, (int)((0.15f + 0.85f * t) * 1000.0f));
+        }
+#endif
         if (ebid >= 0) {
           fo->ebid = ebid;
           fo->eaten_fr = 0;
@@ -1387,8 +1406,13 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
 #ifdef ANDROID
     if (!gdata->preview_active && gdata->curr_screen == PLAYING)
       android_jni_capture_confirmed_kill();
+    if (!gdata->preview_active && gdata->curr_screen == PLAYING)
+      android_jni_audio_event(AJNI_AUDIO_KILL, 0);
 #endif
   } else if (cmd == 'v') {
+#ifdef ANDROID
+    if (!gdata->preview_active) android_jni_audio_event(AJNI_AUDIO_DIE, 0);
+#endif
     gdata->data.follow_view = false;
     gdata->data.lview_xx = gdata->data.view_xx;
     gdata->data.lview_yy = gdata->data.view_yy;
@@ -1470,5 +1494,8 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
     printf("Connection closed\n");
     if (gdata->connection == c) gdata->connection = NULL;
     gdata->closed = true;
+#ifdef ANDROID
+    if (!gdata->preview_active) android_jni_audio_event(AJNI_AUDIO_GAME_STOP, 0);
+#endif
   }
 }

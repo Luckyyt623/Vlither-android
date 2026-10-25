@@ -169,7 +169,8 @@ void ui_overlay(tenv* env) {
                                   : (ddx < -1e-4f ? (0.0f - sx) / ddx : 1e9f);
           float ty_ = ddy > 1e-4f ? (sh_ - sy) / ddy
                                   : (ddy < -1e-4f ? (0.0f - sy) / ddy : 1e9f);
-          float len = fminf(fminf(tx_, ty_), 0.95f * fminf(sw_, sh_));
+          float len = fminf(fminf(tx_, ty_),
+                            (user_laser_len_pct(usrs) / 100.0f) * fminf(sw_, sh_));
           if (len < 0.0f) len = 0.0f;
           laser_tx = sx + ddx * len;
           laser_ty = sy + ddy * len;
@@ -864,9 +865,11 @@ void ui_overlay(tenv* env) {
     }
   }
 
-  if (usrs->hotkeys[HOTKEY_BOT].active && usrs->bot_vis) {
+  const bool vis_shadow = !usrs->hotkeys[HOTKEY_BOT].active;
+  if ((!vis_shadow && usrs->bot_vis) || (vis_shadow && usrs->vis_manual)) {
     extern sbot_dbg g_bot_dbg;
     if (g_bot_dbg.active) {
+#define VE(e) (usrs->vis_el[(e)])
       ImDrawList* bdl = igGetWindowDrawList();
       float gsc = gdata->data.gsc;
       float vx  = gdata->data.view_xx;
@@ -879,6 +882,7 @@ void ui_overlay(tenv* env) {
       float shx = W2SX(g_bot_dbg.bx);
       float shy = W2SY(g_bot_dbg.by);
 
+      if (VE(VIS_EL_PREY_FILL))
       for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
         if (g_bot_dbg.coll_type[_i] != 1) continue;
         float cx = W2SX(g_bot_dbg.coll_x[_i]);
@@ -889,6 +893,7 @@ void ui_overlay(tenv* env) {
           IM_COL32(50, 120, 255, 128), 16);
       }
 
+      if (VE(VIS_EL_THREAT_LINES))
       for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
         float cx  = W2SX(g_bot_dbg.coll_x[_i]);
         float cy  = W2SY(g_bot_dbg.coll_y[_i]);
@@ -912,6 +917,7 @@ void ui_overlay(tenv* env) {
         ImDrawList_AddLine(bdl, (ImVec2){shx, shy}, (ImVec2){cx, cy}, col, 1.5f);
       }
 
+      if (VE(VIS_EL_COLLIDERS))
       for (int _i = 0; _i < g_bot_dbg.coll_n; _i++) {
         float cx = W2SX(g_bot_dbg.coll_x[_i]);
         float cy = W2SY(g_bot_dbg.coll_y[_i]);
@@ -926,12 +932,15 @@ void ui_overlay(tenv* env) {
         }
       }
 
+      if (VE(VIS_EL_HEAD_CIRCLE)) {
       float hcx = W2SX(g_bot_dbg.head_cx);
       float hcy = W2SY(g_bot_dbg.head_cy);
       float hcr = g_bot_dbg.head_cr * gsc;
       ImDrawList_AddCircle(bdl, (ImVec2){hcx, hcy}, hcr,
         IM_COL32(255, 230, 0, (int)(PULSE(200.0f, 2.0f))), 32, 1.5f);
+      }
 
+      if (VE(VIS_EL_ENCIRCLE_ZONE)) {
       float er1 = g_bot_dbg.encircle_r1 * gsc;
       float er2 = g_bot_dbg.encircle_r2 * gsc;
       if (g_bot_dbg.encircle_state == 1) {
@@ -949,7 +958,9 @@ void ui_overlay(tenv* env) {
           IM_COL32(80, 180, 255, (int)(PULSE(120.0f, 1.0f))), 48, 1.5f);
       }
 
-      if (g_bot_dbg.avoid_active) {
+      }
+
+      if (g_bot_dbg.avoid_active && VE(VIS_EL_AVOID_VECTORS)) {
         float fwdx = W2SX(g_bot_dbg.avoid_fwd_x);
         float fwdy = W2SY(g_bot_dbg.avoid_fwd_y);
         float aix  = W2SX(g_bot_dbg.avoid_ix);
@@ -962,7 +973,7 @@ void ui_overlay(tenv* env) {
           IM_COL32(255, 40, 40, 255), 12);
       }
 
-      if (g_bot_dbg.has_food) {
+      if (g_bot_dbg.has_food && VE(VIS_EL_FOOD_TARGET)) {
         float fx  = W2SX(g_bot_dbg.food_x);
         float fy  = W2SY(g_bot_dbg.food_y);
         float fcs = 12.0f;
@@ -976,6 +987,7 @@ void ui_overlay(tenv* env) {
           IM_COL32(50,255,100,230),1.8f);
       }
 
+      if (VE(VIS_EL_GOAL_MARKER)) {
       float gx  = W2SX(g_bot_dbg.goal_x);
       float gy  = W2SY(g_bot_dbg.goal_y);
       float gcs = 14.0f;
@@ -987,10 +999,16 @@ void ui_overlay(tenv* env) {
         IM_COL32(255,80,255,255),2.0f);
       ImDrawList_AddCircle(bdl,(ImVec2){gx,gy},6.0f,
         IM_COL32(255,80,255,255),12,2.0f);
+      }
 
-      const char* stage_lbl = g_bot_dbg.stage == 2 ? "BOT: COIL"
-                            : g_bot_dbg.stage == 1 ? "BOT: ENCIRCLE"
-                            :                        "BOT: AVOID";
+      if (VE(VIS_EL_STATUS_BADGE)) {
+      const char* stage_lbl = vis_shadow
+          ? (g_bot_dbg.stage == 2 ? "VIEW: COIL"
+           : g_bot_dbg.stage == 1 ? "VIEW: ENCIRCLE"
+           :                        "VIEW: DANGER")
+          : (g_bot_dbg.stage == 2 ? "BOT: COIL"
+           : g_bot_dbg.stage == 1 ? "BOT: ENCIRCLE"
+           :                        "BOT: AVOID");
       ImU32 stage_col = g_bot_dbg.stage == 2 ? IM_COL32(255,160, 40,255)
                       : g_bot_dbg.stage == 1 ? IM_COL32(255, 80, 80,255)
                       :                        IM_COL32( 80,200,255,255);
@@ -1002,12 +1020,16 @@ void ui_overlay(tenv* env) {
         IM_COL32(0,0,0,160), 4.0f, 0);
       ImDrawList_AddText_FontPtr(bdl, NULL, 18.0f,
         (ImVec2){badge_x, badge_y}, stage_col, stage_lbl, NULL, 0, NULL);
+      if (!vis_shadow) {
       const char* accel_lbl = g_bot_dbg.accel ? "  BOOST" : "  coast";
       ImU32 accel_col = g_bot_dbg.accel ? IM_COL32(255,220,50,255)
                                          : IM_COL32(160,160,160,180);
       ImDrawList_AddText_FontPtr(bdl, NULL, 16.0f,
         (ImVec2){badge_x, badge_y + 24}, accel_col, accel_lbl, NULL, 0, NULL);
+      }
+      }
 
+#undef VE
 #undef PULSE
 #undef W2SX
 #undef W2SY

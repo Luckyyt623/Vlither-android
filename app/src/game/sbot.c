@@ -42,6 +42,19 @@ sbot_dbg g_bot_dbg;
 #endif
 #define HUG_BODY_MULT 0.10f
 #define HUG_BODY_OD0 0.06f
+
+/* NTL MOD parity: while coiling (stage 2) run only NTL's follow-circle
+   logic. No safety_steer, no boost-lane override, no border emergency,
+   no hug, no forage. Build with -DSBOT_NTL_PURE=0 to get the old layers. */
+#ifndef SBOT_NTL_PURE
+#define SBOT_NTL_PURE 1
+#endif
+#if SBOT_NTL_PURE
+#undef SBOT_HUG
+#define SBOT_HUG 0
+#undef SBOT_FORAGE
+#define SBOT_FORAGE 0
+#endif
 #define TRAPPED_HOLD_MS 1500.0
 #define TO_CIRCLE_I8 25.0f
 #define SELF_CHECK_FRAC 0.85f
@@ -687,7 +700,7 @@ static void body_danger_zone(float offset, v2 target_pt,
                              float close_dist,
                              v2 past_target, v2 close_pt, poly_box* out) {
   int o = B.circle_dir;
-  const float hx = hx + B.fx, hy = hy + B.fy;
+  const float hx = B.x + B.fx, hy = B.y + B.fy;
   v2 raw[10];
   raw[0] = (v2){hx - o * offset * B.sa, hy + o * offset * B.ca};
   raw[1] = (v2){hx + B.width * B.ca + offset * (B.ca - o * B.sa),
@@ -1332,6 +1345,7 @@ static void to_circle(game_data* gdata) {
   int div = (int)(wsz / 100.0f * TO_CIRCLE_I8);
   if (div < 8) div = 8;
 
+#if !SBOT_NTL_PURE
   {
     const float grd = gdata->data.grd;
     if (grd > 0.0f && B.wall_dist_grd < WALL_RANGE) {
@@ -1344,6 +1358,7 @@ static void to_circle(game_data* gdata) {
       }
     }
   }
+#endif
 
   gdata->bot.output.accel = (bool)B.default_accel;
   B.goal = heading_rel(((float)B.circle_dir * (float)M_PI) / (float)div);
@@ -1620,7 +1635,7 @@ void sbot_go(tenv* env) {
   if (B.has_food && B.stage != 0) B.has_food = false;
 
 #if SBOT_BORDER_EMERGENCY
-  if (avoid_border_emergency(gdata)) {
+  if (!(SBOT_NTL_PURE && B.stage == 2) && avoid_border_emergency(gdata)) {
   } else
 #endif
   if (B.stage == 2) {
@@ -1639,8 +1654,10 @@ void sbot_go(tenv* env) {
   }
   if (B.stage != 2) g_inside_valid = false;
 
-  if (safety_steer()) bot->output.accel = true;
-  if (bot->output.accel && !boost_lane_ok(gdata)) bot->output.accel = false;
+  if (!(SBOT_NTL_PURE && B.stage == 2)) {
+    if (safety_steer()) bot->output.accel = true;
+    if (bot->output.accel && !boost_lane_ok(gdata)) bot->output.accel = false;
+  }
 
   bot->output.xm = (B.goal.x - gdata->data.view_xx) * gdata->data.gsc;
   bot->output.ym = (B.goal.y - gdata->data.view_yy) * gdata->data.gsc;

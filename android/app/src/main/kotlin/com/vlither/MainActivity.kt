@@ -19,7 +19,6 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -28,42 +27,15 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.7.9"
+        private const val CURRENT_VERSION   = "4.8.0"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
-        const val UNLOCK_FILENAME           = "vlither_unlock_expiry.txt"
 
         private const val PREFS_NAME         = "vlither_update_prefs"
         private const val PREF_PENDING_DL_ID = "pending_download_id"
-
-        private const val ADSTERRA_UNLOCK_PAGE_URL = "https://vlither-ads.onrender.com"
-
-        fun getUnlockRemainingMs(context: Context): Long {
-            val file = File(context.filesDir, UNLOCK_FILENAME)
-            if (file.exists()) {
-                try {
-                    val expiry = file.readText().trim().toLong()
-                    val remaining = expiry - System.currentTimeMillis()
-                    if (remaining > 0) return remaining
-                } catch (e: Exception) { Log.w(TAG, "read error: ${e.message}") }
-            }
-            return -1L
-        }
-
-        @JvmStatic
-        fun getUnlockRemainingMsStatic(context: Context): Long =
-            getUnlockRemainingMs(context)
-
-        fun saveUnlock(context: Context) {
-            val expiryMs = System.currentTimeMillis() + 24L * 60L * 60L * 1000L
-            try { File(context.filesDir, UNLOCK_FILENAME).writeText(expiryMs.toString()) }
-            catch (e: Exception) { Log.e(TAG, "save error: ${e.message}") }
-        }
     }
 
     private lateinit var btnPlay:       Button
-    private lateinit var btnWatchAd:    Button
-    private lateinit var tvTimer:       TextView
     private lateinit var btnChangelog:  Button
     private lateinit var layoutUpdate:  LinearLayout
     private lateinit var tvUpdateMsg:   TextView
@@ -102,8 +74,6 @@ class MainActivity : Activity() {
         registerDownloadReceiver()
         resumePendingDownloadIfAny()
         checkForUpdate()
-        handleUnlockDeepLink(intent)
-        refreshUnlockUi()
     }
 
     private fun registerDownloadReceiver() {
@@ -130,16 +100,6 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleUnlockDeepLink(intent)
-    }
-
-    private fun handleUnlockDeepLink(intent: Intent?) {
-        val data = intent?.data
-        if (data != null && data.scheme == "vlither" && data.host == "unlock") {
-            saveUnlock(this)
-            android.widget.Toast.makeText(this, "Unlocked for 24 hours!", android.widget.Toast.LENGTH_SHORT).show()
-            refreshUnlockUi()
-        }
     }
 
     override fun onResume() {
@@ -149,7 +109,6 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
-        refreshUnlockUi()
     }
 
     override fun onDestroy() {
@@ -302,19 +261,31 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Update 4.7.9
-What's new
-• New skins: fresh designs you can pick for your own snake. Only you can see them.
-• Leaderboard servers: add any server to the leaderboard and check its leaderboard and minimap.
-• Smarter bot: it now moves much better during normal play. I'm still improving it.
-• Skinless snakes: the shaders are fixed and look better now.
+Vlither 4.8.0
+New
+Homepage menu redesigned. Upload your profile picture from there.
+Decision Visuals: see the bot's thinking with the bot off. Turn on "Show visuals without bot" in Controls. Each visual toggles separately.
+Danger lines show enemy distance by colour: red is closest, green is farthest.
+Joystick laser: adjust how far it reaches.
+Skinless opacity: adjustable.
+Settings search: type a word to find any setting.
+New songs. Upload your own from local storage and play it during games.
+New app logo.
 
-Thanks for playing Vlither Android!
+Improved
+Bot circling is smarter.
+Ads removed.
+
+Fixed
+Skin scroll glitch.
+Colour wheel bug.
+Players list bug.
+
 Changes by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.7.9")
+            .setTitle("What's New in v4.8.0")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()
@@ -437,24 +408,12 @@ Changes by Lucky
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).also { it.setMargins(0, 8, 0, 8) }
 
-        btnWatchAd = Button(this)
-        btnWatchAd.text = "🌐  Watch Ad to Unlock"
-        btnWatchAd.textSize = 15f
-        btnWatchAd.setPadding(0, 20, 0, 20)
-        btnWatchAd.layoutParams = btnParams
-        btnWatchAd.isEnabled = true
-        btnWatchAd.alpha = 1.0f
-        btnWatchAd.setOnClickListener { onWatchAdClicked() }
-
-        tvTimer = TextView(this)
-        tvTimer.visibility = View.GONE
-
         btnPlay = Button(this)
         btnPlay.text = "▶  PLAY"
         btnPlay.textSize = 18f
         btnPlay.setPadding(0, 28, 0, 28)
         btnPlay.layoutParams = btnParams
-        btnPlay.setOnClickListener { onPlayClicked() }
+        btnPlay.setOnClickListener { launchGame() }
 
         btnChangelog = Button(this)
         btnChangelog.text = "📋  What's New"
@@ -529,8 +488,6 @@ Changes by Lucky
         layoutUpdate.addView(btnLater)
 
         col.addView(tvTitle)
-        col.addView(btnWatchAd)
-        col.addView(tvTimer)
         col.addView(btnPlay)
         col.addView(btnChangelog)
         col.addView(layoutUpdate)
@@ -547,14 +504,6 @@ Changes by Lucky
         setContentView(root)
     }
 
-    private fun onPlayClicked() {
-        if (getUnlockRemainingMs(this) > 0) {
-            launchGame()
-        } else {
-            onWatchAdClicked()
-        }
-    }
-
     private fun launchGame() {
         try {
             val intent = Intent(this, GameActivity::class.java)
@@ -565,42 +514,6 @@ Changes by Lucky
             android.widget.Toast.makeText(this,
                 "Failed to start game: ${e.message}",
                 android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun onWatchAdClicked() {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ADSTERRA_UNLOCK_PAGE_URL)))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open unlock page: ${e.message}")
-            android.widget.Toast.makeText(this,
-                "Couldn't open the browser: ${e.message}",
-                android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun refreshUnlockUi() {
-        val remaining = getUnlockRemainingMs(this)
-        if (remaining > 0) {
-            val totalMinutes = remaining / 60000L
-            val hours = totalMinutes / 60
-            val minutes = totalMinutes % 60
-            btnWatchAd.text = "✓  Unlocked"
-            btnWatchAd.isEnabled = false
-            btnWatchAd.alpha = 0.6f
-            tvTimer.visibility = View.VISIBLE
-            tvTimer.text = "Unlocked — ${hours}h ${minutes}m left"
-            btnPlay.text = "▶  PLAY"
-            btnPlay.isEnabled = true
-            btnPlay.alpha = 1.0f
-        } else {
-            btnWatchAd.text = "🌐  Watch Ad to Unlock"
-            btnWatchAd.isEnabled = true
-            btnWatchAd.alpha = 1.0f
-            tvTimer.visibility = View.GONE
-            btnPlay.text = "🔒  Watch Ad to Play"
-            btnPlay.isEnabled = true
-            btnPlay.alpha = 1.0f
         }
     }
 }

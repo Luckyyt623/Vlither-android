@@ -278,6 +278,7 @@ void imgui_prerender(void) {
             io->DisplaySize = (ImVec2){(float)wnd->size[0], (float)wnd->size[1]};
 
         extern bool g_panel_open;
+        extern int g_skin_wheel_drag_frame;
         static float s_scroll_last_y   = 0.0f;
         static bool  s_scroll_was_down = false;
         if (g_panel_open) {
@@ -286,7 +287,9 @@ void imgui_prerender(void) {
             if (down_now && s_scroll_was_down) {
                 float dy = pointer_y - s_scroll_last_y;
 
-                if (dy < -2.0f || dy > 2.0f)
+                bool wheel_dragging =
+                    (igGetFrameCount() - g_skin_wheel_drag_frame) <= 1;
+                if (!wheel_dragging && (dy < -2.0f || dy > 2.0f))
                     io->MouseWheel += dy / 30.0f;
             }
             s_scroll_was_down = down_now;

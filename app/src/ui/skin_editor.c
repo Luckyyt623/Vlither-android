@@ -606,12 +606,21 @@ void ui_skin_editor(tenv* env) {
 
   if (s_mode == SK_BROWSE) {
     if (active) {
-      float dy = io->MouseDelta.y;
-      s_drag_total += fabsf(dy);
-      s_pos -= dy / row_h;
-      float v = (-dy / row_h) / f;
-      s_vel += (v - s_vel) * 0.5f;
-      s_has_target = false;
+      if (igIsItemActivated()) {
+        /* First frame of a touch: the pointer teleports from where the last
+         * touch ended to the new finger position in the same frame as the
+         * press, so MouseDelta is a huge fake drag. Ignore it and just
+         * catch the wheel (stop any momentum). */
+        s_vel = 0.0f;
+        s_has_target = false;
+      } else {
+        float dy = io->MouseDelta.y;
+        s_drag_total += fabsf(dy);
+        s_pos -= dy / row_h;
+        float v = (-dy / row_h) / f;
+        s_vel += (v - s_vel) * 0.5f;
+        s_has_target = false;
+      }
     } else {
       if (hovered && io->MouseWheel != 0.0f) {
         s_vel += -io->MouseWheel * 0.22f;

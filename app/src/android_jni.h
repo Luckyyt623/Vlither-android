@@ -6,18 +6,18 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-long android_jni_get_unlock_remaining_ms(void);
 
-void android_jni_request_ad(void);
 
 void android_jni_notify_game_ready(void);
 
 void android_jni_open_url(const char* url);
 void android_jni_open_webview(const char* url);
+void android_jni_open_audio_settings(void);
 int  android_jni_get_screen_orientation_mode(void);
 bool android_jni_set_screen_orientation_mode(int mode);
 
 bool android_jni_request_custom_arrow(void);
+bool android_jni_request_profile_image(void);
 bool android_jni_request_custom_background(void);
 bool android_jni_request_settings_backup(void);
 bool android_jni_request_settings_restore(void);
@@ -65,6 +65,19 @@ void android_jni_capture_sync(bool recording_enabled,
                               bool screenshots_enabled,
                               bool session_active);
 void android_jni_capture_confirmed_kill(void);
+
+/* Audio events -> GameActivity.onAudioEvent -> GameAudio (Kotlin) */
+enum {
+    AJNI_AUDIO_EAT = 0,        /* arg: 0..1000 food size factor */
+    AJNI_AUDIO_DIE = 1,
+    AJNI_AUDIO_KILL = 2,
+    AJNI_AUDIO_GAME_START = 3,
+    AJNI_AUDIO_GAME_STOP = 4,
+    AJNI_AUDIO_BOOST_ON = 5,
+    AJNI_AUDIO_BOOST_OFF = 6,
+    AJNI_AUDIO_SNAKE_DEAD = 7, /* arg: 0..1000 snake length / max length */
+};
+void android_jni_audio_event(int ev, int arg);
 
 #endif
 #endif

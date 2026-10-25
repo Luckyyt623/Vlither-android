@@ -283,6 +283,10 @@ static void wl_image(ImDrawList* dl, int ax, int ay, int aw, int ah, ImVec2 p0,
                       (ImVec2){(float)(ax + aw) / AT_W, v1}, col);
 }
 
+/* Frame in which the colour wheel was last being dragged. The Android touch
+ * shim reads this so a drag on the wheel does not also scroll the panel. */
+int g_skin_wheel_drag_frame = -100;
+
 static void wl_wheel(tenv* env, float avail) {
   float maxh = env->ctx->size[1] * 0.46f;
   float side = fminf(avail, fmaxf(160.0f, maxh));
@@ -294,6 +298,7 @@ static void wl_wheel(tenv* env, float avail) {
 
   igSetCursorScreenPos((ImVec2){p0.x + (avail - side) * 0.5f, p0.y});
   igInvisibleButton("##skin_wheel", (ImVec2){side, side}, 0);
+  if (igIsItemActive()) g_skin_wheel_drag_frame = igGetFrameCount();
   ImVec2 mouse;
   igGetMousePos(&mouse);
   float dx = (mouse.x - centre.x) / u, dy = (mouse.y - centre.y) / u;

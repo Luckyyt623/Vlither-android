@@ -67,6 +67,9 @@ typedef struct renderer {
   texture* custom_arrow_tex;
   VkDescriptorSet custom_arrow_ds;
   long long custom_arrow_signature;
+  texture* profile_tex;
+  VkDescriptorSet profile_ds;
+  long long profile_signature;
   texture* discord_tex;
   VkDescriptorSet discord_ds;
 
@@ -101,5 +104,6 @@ void renderer_destroy(renderer* r, tcontext* ctx);
 void renderer_resize(renderer* r, tcontext* ctx, ivec2 size);
 void renderer_clear_instances(renderer* r);
 bool renderer_reload_custom_arrow(renderer* r, tcontext* ctx);
+bool renderer_reload_profile_image(renderer* r, tcontext* ctx);
 
 #endif

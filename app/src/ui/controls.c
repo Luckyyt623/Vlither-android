@@ -1,6 +1,8 @@
 #include "controls.h"
 
+#include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../arrow_styles.h"
 #include "../user.h"
@@ -13,6 +15,104 @@ static const char* const ARROW_STYLE_NAMES[ARROW_STYLE_COUNT] = {
     "Red Arrow", "Red 3D", "Blue 3D", "Blue Neon", "Colourful",
     "Wing 3D", "Yellow Double", "Purple", "Magenta",
 };
+
+
+/* ---- Decision Visuals: searchable list ---------------------------------- */
+enum { VROW_BOT_VIS = -2, VROW_MANUAL = -1 }; /* >=0 are vis_element ids */
+
+typedef struct {
+  int id;
+  const char* label;
+  const char* keywords; /* extra words the search bar matches against */
+} vis_row;
+
+static const vis_row VIS_ROWS[] = {
+    {VROW_MANUAL, "Show visuals without bot",
+     "manual shadow play gameplay own snake no bot master off default"},
+    {VROW_BOT_VIS, "Show bot thinking",
+     "bot auto autopilot hotkey thinking decisions"},
+    {VIS_EL_PREY_FILL, "Prey fill (blue)",
+     "blue fill prey target edible snake body points"},
+    {VIS_EL_THREAT_LINES, "Danger lines + glow",
+     "danger threat lines glow heat red orange yellow green distance warning"},
+    {VIS_EL_COLLIDERS, "Collision rings",
+     "collision collider rings red yellow circle hit crash enemy"},
+    {VIS_EL_HEAD_CIRCLE, "Head circle",
+     "head circle pulse yellow turn radius"},
+    {VIS_EL_ENCIRCLE_ZONE, "Encircle / coil zone",
+     "encircle coil zone radius circle trap surround ring blue"},
+    {VIS_EL_AVOID_VECTORS, "Avoid arrows",
+     "avoid avoidance arrow vector direction escape line dodge"},
+    {VIS_EL_FOOD_TARGET, "Food target",
+     "food target green cross pellet eat"},
+    {VIS_EL_GOAL_MARKER, "Goal marker",
+     "goal destination magenta pink cross where going aim"},
+    {VIS_EL_STATUS_BADGE, "Status badge",
+     "status badge label text corner stage boost coast avoid"},
+};
+#define VIS_ROW_COUNT ((int)(sizeof VIS_ROWS / sizeof VIS_ROWS[0]))
+
+static bool vis_ci_has(const char* hay, const char* needle, size_t nlen) {
+  if (nlen == 0) return true;
+  for (; *hay; ++hay) {
+    size_t i = 0;
+    while (i < nlen && hay[i] &&
+           tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i]))
+      ++i;
+    if (i == nlen) return true;
+  }
+  return false;
+}
+
+/* Every space-separated word typed must appear in label or keywords. */
+static bool vis_row_matches(const vis_row* r, const char* query) {
+  const char* p = query;
+  while (*p) {
+    while (*p == ' ') ++p;
+    if (!*p) break;
+    const char* e = p;
+    while (*e && *e != ' ') ++e;
+    size_t n = (size_t)(e - p);
+    if (!vis_ci_has(r->label, p, n) && !vis_ci_has(r->keywords, p, n))
+      return false;
+    p = e;
+  }
+  return true;
+}
+
+static void vis_draw_row(user_settings* usrs, const vis_row* r) {
+  bool v;
+  if (r->id == VROW_MANUAL)       v = usrs->vis_manual;
+  else if (r->id == VROW_BOT_VIS) v = usrs->bot_vis;
+  else                            v = usrs->vis_el[r->id] != 0;
+  if (igCheckbox(r->label, &v)) {
+    if (r->id == VROW_MANUAL)       usrs->vis_manual = v;
+    else if (r->id == VROW_BOT_VIS) usrs->bot_vis = v;
+    else                            usrs->vis_el[r->id] = v ? 1 : 0;
+  }
+}
+
+static void ui_decision_visuals(user_settings* usrs) {
+  static char query[48];
+
+  igSeparatorText("Decision Visuals");
+
+  igSetNextItemWidth(-1);
+  igInputTextWithHint("##vis_search", "Search settings (e.g. danger, food)",
+                      query, sizeof query, ImGuiInputTextFlags_None, NULL,
+                      NULL);
+  if (query[0]) {
+    if (igSmallButton("Clear search")) query[0] = 0;
+  }
+
+  int shown = 0;
+  for (int i = 0; i < VIS_ROW_COUNT; ++i) {
+    if (!vis_row_matches(&VIS_ROWS[i], query)) continue;
+    vis_draw_row(usrs, &VIS_ROWS[i]);
+    ++shown;
+  }
+  if (shown == 0) igTextDisabled("No setting matches \"%s\"", query);
+}
 
 void ui_controls_init(tenv* env) {}
 
@@ -174,8 +274,7 @@ void ui_controls(tenv* env) {
         }
         igSpacing();
 
-        igSeparatorText("Bot");
-        igCheckbox("Show bot thinking", &usrs->bot_vis);
+        ui_decision_visuals(usrs);
 
         igEndChild();
 
@@ -512,6 +611,8 @@ void ui_controls(tenv* env) {
         usrs->head_dot_color[1]  = 1.0f;
         usrs->head_dot_color[2]  = 1.0f;
         usrs->bot_vis            = true;
+        usrs->vis_manual         = false;
+        for (int _v = 0; _v < VIS_EL_COUNT; ++_v) usrs->vis_el[_v] = 1;
         usrs->zslider_rel_x      = 0.968f;
         usrs->zslider_rel_y      = 0.500f;
         usrs->zslider_rel_h      = 0.280f;

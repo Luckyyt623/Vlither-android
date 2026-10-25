@@ -6,6 +6,9 @@
 #define DLOG(fmt,...) do{}while(0)
 #endif
 #include "loop.h"
+#ifdef ANDROID
+#include "../android_jni.h"
+#endif
 
 #include "../network/server.h"
 #include "../user.h"
@@ -79,6 +82,18 @@ void game_loop(tenv* env) {
     case CONNECTED:
       time_step(env);
       input(env);
+#ifdef ANDROID
+      {
+        static bool was_boost = false;
+        bool boost = !gdata->preview_active && gdata->data.wmd &&
+                     !gdata->data.dead && gdata->data.snake_id >= 0;
+        if (boost != was_boost) {
+          was_boost = boost;
+          android_jni_audio_event(boost ? AJNI_AUDIO_BOOST_ON
+                                        : AJNI_AUDIO_BOOST_OFF, 0);
+        }
+      }
+#endif
       server_poll(env);
       oef(env);
       redraw(env);

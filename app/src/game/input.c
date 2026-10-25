@@ -214,12 +214,14 @@ void input(tenv* env) {
           tkeyboard_key_pressed(env->kb, GLFW_KEY_UP);
     }
     gdata->data.wmd = env->wnd->touch.boost_down || external_boost ||
-                      gdata->bot.output.accel;
+                      (usrs->hotkeys[HOTKEY_BOT].active &&
+                       gdata->bot.output.accel);
 #else
     gdata->data.wmd = twindow_button_down(env->wnd, GLFW_MOUSE_BUTTON_LEFT) ||
                       twindow_key_down(env->wnd, GLFW_KEY_SPACE) ||
                       twindow_key_down(env->wnd, GLFW_KEY_UP) ||
-                      gdata->bot.output.accel;
+                      (usrs->hotkeys[HOTKEY_BOT].active &&
+                       gdata->bot.output.accel);
 #endif
 
     if (gdata->data.md != gdata->data.wmd &&

@@ -55,6 +55,47 @@ bool renderer_reload_custom_arrow(renderer* r, tcontext* ctx) {
   return r->custom_arrow_tex != NULL;
 }
 
+bool renderer_reload_profile_image(renderer* r, tcontext* ctx) {
+  if (!r || !ctx) return false;
+#ifdef ANDROID
+  const char *files = android_get_files_dir();
+  if (!files || !files[0]) return r->profile_tex != NULL;
+  char path[640];
+  snprintf(path, sizeof path, "%s/profile_image", files);
+  struct stat st;
+  if (stat(path, &st) != 0 || st.st_size <= 0) {
+    if (r->profile_tex) {   /* file removed -> drop the texture */
+      vkQueueWaitIdle(ctx->queue);
+      if (r->profile_ds) igImplVulkan_RemoveTexture(r->profile_ds);
+      destroy_texture(ctx, r->profile_tex);
+      r->profile_tex = NULL;
+      r->profile_ds = VK_NULL_HANDLE;
+      r->profile_signature = 0;
+    }
+    return false;
+  }
+  long long signature = ((long long)st.st_mtime << 32) ^
+                        ((long long)st.st_mtim.tv_nsec << 12) ^
+                        (long long)st.st_size;
+  if (signature == r->profile_signature) return r->profile_tex != NULL;
+  texture *fresh = create_mipmap_texture(ctx, path);
+  if (!fresh) return r->profile_tex != NULL;
+  VkDescriptorSet fresh_ds = igImplVulkan_AddTexture(
+      r->linear_sampler, fresh->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  if (!fresh_ds) {
+    destroy_texture(ctx, fresh);
+    return r->profile_tex != NULL;
+  }
+  vkQueueWaitIdle(ctx->queue);
+  if (r->profile_ds) igImplVulkan_RemoveTexture(r->profile_ds);
+  if (r->profile_tex) destroy_texture(ctx, r->profile_tex);
+  r->profile_tex = fresh;
+  r->profile_ds = fresh_ds;
+  r->profile_signature = signature;
+#endif
+  return r->profile_tex != NULL;
+}
+
 void _create_image_data(renderer* r, tcontext* ctx, ivec2 size) {
   glm_ivec2_copy(size, r->size);
   for (int i = 0; i < ctx->fif; i++) {
@@ -245,6 +286,10 @@ renderer* renderer_create(tenv* env) {
   r->custom_arrow_ds = VK_NULL_HANDLE;
   r->custom_arrow_signature = 0;
   renderer_reload_custom_arrow(r, ctx);
+  r->profile_tex = NULL;
+  r->profile_ds = VK_NULL_HANDLE;
+  r->profile_signature = 0;
+  renderer_reload_profile_image(r, ctx);
 
   r->boost_button_ds = igImplVulkan_AddTexture(
       r->linear_sampler, r->boost_button_tex->view,
@@ -832,6 +877,8 @@ void renderer_destroy(renderer* r, tcontext* ctx) {
     igImplVulkan_RemoveTexture(r->custom_arrow_ds);
   if (r->custom_arrow_tex)
     destroy_texture(ctx, r->custom_arrow_tex);
+  if (r->profile_ds) igImplVulkan_RemoveTexture(r->profile_ds);
+  if (r->profile_tex) destroy_texture(ctx, r->profile_tex);
   if (r->arrow_atlas_tex)
     destroy_texture(ctx, r->arrow_atlas_tex);
   if (r->discord_tex) destroy_texture(ctx, r->discord_tex);

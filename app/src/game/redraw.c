@@ -1463,7 +1463,10 @@ void redraw(tenv* env) {
                           : gdata->default_skins[o->cv][1];
           vec3s* cg_col = gdata->cg_colors + sk_cg;
           vl_skinless_strip(gdata, (int)bp, mww2, mhh2, lsz, cg_col->r,
-                            cg_col->g, cg_col->b, a * skin_alpha,
+                            cg_col->g, cg_col->b,
+                            a * skin_alpha *
+                                (user_skinless_opacity_pct(usrs, mode_index) /
+                                 100.0f),
                             o->tsp > o->fsp, mode->show_boost);
         }
 
@@ -1520,7 +1523,11 @@ void redraw(tenv* env) {
                      center_y - line_thickness * 0.5f, capsule_length,
                      line_angle},
                     gdata->cg_uvs[BLANK_UV],
-                    {line_rgb, line_rgb, line_rgb, 0.85f * a},
+                    {line_rgb, line_rgb, line_rgb,
+                     /* Skinless / transparent skin: center line fully visible */
+                     ((snake_render_mode == 3 || mode->transparent_skin)
+                          ? 1.0f
+                          : 0.85f) * a},
                     {line_thickness, 1}});
           }
         }

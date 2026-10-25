@@ -342,6 +342,11 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->normal_food_scale[1] = 1.0f;
   usr_settings->boost_food_scale[0] = 1.0f;
   usr_settings->boost_food_scale[1] = 1.0f;
+
+  memset(usr_settings->vis_settings_reserved, 0,
+         sizeof usr_settings->vis_settings_reserved);
+  usr_settings->vis_manual = false;
+  for (int i = 0; i < VIS_EL_COUNT; ++i) usr_settings->vis_el[i] = 1;
 }
 
 static bool bd_client_id_is_valid(const char* id) {
@@ -455,11 +460,15 @@ void read_user_settings(user_settings* usr_settings) {
       offsetof(user_settings, instant_death_settings_reserved);
   size_t v48_prefix =
       offsetof(user_settings, food_origin_scale_settings_reserved);
+  size_t v49_prefix =
+      offsetof(user_settings, vis_settings_reserved);
   bool migrate_single_mode_features =
       (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v49_prefix)
+    bytes_to_read = v49_prefix;
   else if ((size_t)file_size >= v48_prefix)
     bytes_to_read = v48_prefix;
   else if ((size_t)file_size >= v47_prefix)
@@ -538,6 +547,9 @@ void read_user_settings(user_settings* usr_settings) {
         loaded.transparent_skin_opacity[i] > 0.85f)
       loaded.transparent_skin_opacity[i] = 0.35f;
   }
+  for (int i = 0; i < VIS_EL_COUNT; ++i)
+    loaded.vis_el[i] = loaded.vis_el[i] ? 1 : 0;
+  loaded.vis_manual = loaded.vis_manual ? true : false;
   if (loaded.fps_limit != 0 && loaded.fps_limit != 60 &&
       loaded.fps_limit != 90 && loaded.fps_limit != 120 &&
       loaded.fps_limit != 144 && loaded.fps_limit != 165 &&

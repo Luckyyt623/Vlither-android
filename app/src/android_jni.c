@@ -15,7 +15,6 @@
 #define AJNI_LOG(...) \
     __android_log_print(ANDROID_LOG_DEBUG, AJNI_TAG, __VA_ARGS__)
 
-#define UNLOCK_FILENAME "vlither_unlock_expiry.txt"
 
 
 extern struct android_app* g_android_app;
@@ -92,6 +91,41 @@ void android_jni_capture_confirmed_kill(void) {
     if (attached) (*vm)->DetachCurrentThread(vm);
 }
 
+void android_jni_audio_event(int ev, int arg) {
+    if (ev == AJNI_AUDIO_EAT) {
+        /* many foods can be eaten per second: cap the eat sound rate */
+        static long long last_ms = 0;
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        long long now = (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL;
+        if (now - last_ms < 40) return;
+        last_ms = now;
+    }
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        attached = true;
+    } else if (status != JNI_OK || !env) return;
+
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "onAudioEvent", "(Landroid/app/Activity;II)V");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticVoidMethod(
+                env, cls, mid, g_android_app->activity->clazz, (jint)ev, (jint)arg);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+}
+
 bool android_jni_request_custom_arrow(void) {
     if (!g_android_app || !g_android_app->activity ||
         !g_android_app->activity->vm || !g_android_app->activity->clazz)
@@ -109,6 +143,33 @@ bool android_jni_request_custom_arrow(void) {
     if (cls && !(*env)->ExceptionCheck(env)) {
         jmethodID mid = (*env)->GetStaticMethodID(
             env, cls, "requestCustomArrow", "(Landroid/app/Activity;)Z");
+        if (mid && !(*env)->ExceptionCheck(env))
+            result = (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz) == JNI_TRUE;
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+    return result;
+}
+
+bool android_jni_request_profile_image(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return false;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return false;
+        attached = true;
+    } else if (status != JNI_OK || !env) return false;
+    bool result = false;
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "requestProfileImage", "(Landroid/app/Activity;)Z");
         if (mid && !(*env)->ExceptionCheck(env))
             result = (*env)->CallStaticBooleanMethod(
                 env, cls, mid, g_android_app->activity->clazz) == JNI_TRUE;
@@ -360,84 +421,6 @@ void android_jni_release_ime_event(android_ime_event* event) {
     memset(event, 0, sizeof(*event));
 }
 
-long android_jni_get_unlock_remaining_ms(void) {
-    const char* files_dir = android_get_files_dir();
-    if (!files_dir || files_dir[0] == '\0') {
-        AJNI_LOG("get_unlock: files_dir not set yet");
-        return -1L;
-    }
-
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%s", files_dir, UNLOCK_FILENAME);
-
-    FILE* f = fopen(path, "r");
-    if (!f) return -1L;
-
-    long long expiry_ms = 0LL;
-    int n = fscanf(f, "%lld", &expiry_ms);
-    fclose(f);
-
-    if (n != 1 || expiry_ms <= 0LL) {
-        AJNI_LOG("get_unlock: bad file content");
-        return -1L;
-    }
-
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    long long now_ms = (long long)ts.tv_sec * 1000LL +
-                       (long long)(ts.tv_nsec / 1000000LL);
-
-    long long remaining = expiry_ms - now_ms;
-    return (remaining > 0LL) ? (long)remaining : -1L;
-}
-
-void android_jni_request_ad(void) {
-    if (!g_android_app || !g_android_app->activity ||
-        !g_android_app->activity->vm) {
-        AJNI_LOG("request_ad: g_android_app not ready");
-        return;
-    }
-
-    JavaVM*  vm  = g_android_app->activity->vm;
-    jobject  obj = g_android_app->activity->clazz;
-    JNIEnv*  env = NULL;
-    bool did_attach = false;
-
-    int status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
-    if (status == JNI_EDETACHED) {
-        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) {
-            AJNI_LOG("request_ad: AttachCurrentThread failed");
-            return;
-        }
-        did_attach = true;
-    } else if (status != JNI_OK || !env) {
-        AJNI_LOG("request_ad: GetEnv failed status=%d", status);
-        return;
-    }
-
-    jclass cls = (*env)->FindClass(env, "com/vlither/GameActivity");
-    if (!cls) {
-        AJNI_LOG("request_ad: GameActivity class not found");
-        (*env)->ExceptionClear(env);
-        goto cleanup;
-    }
-
-    {
-        jmethodID mid = (*env)->GetStaticMethodID(
-            env, cls, "requestAdFromC", "(Landroid/app/Activity;)V");
-        if (!mid) {
-            AJNI_LOG("request_ad: method not found");
-            (*env)->ExceptionClear(env);
-            goto cleanup;
-        }
-        (*env)->CallStaticVoidMethod(env, cls, mid, obj);
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-    }
-
-cleanup:
-    if (did_attach) (*vm)->DetachCurrentThread(vm);
-}
-
 void android_jni_notify_game_ready(void) {
     if (!g_android_app || !g_android_app->activity ||
         !g_android_app->activity->vm) {
@@ -587,6 +570,32 @@ void android_jni_open_webview(const char* url) {
                 env, cls, mid, g_android_app->activity->clazz, url_jstr);
             (*env)->DeleteLocalRef(env, url_jstr);
         }
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (cls) (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*vm)->DetachCurrentThread(vm);
+}
+
+void android_jni_open_audio_settings(void) {
+    if (!g_android_app || !g_android_app->activity ||
+        !g_android_app->activity->vm || !g_android_app->activity->clazz)
+        return;
+    JavaVM* vm = g_android_app->activity->vm;
+    JNIEnv* env = NULL;
+    bool attached = false;
+    jint status = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
+    if (status == JNI_EDETACHED) {
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+        attached = true;
+    } else if (status != JNI_OK || !env) return;
+
+    jclass cls = (*env)->GetObjectClass(env, g_android_app->activity->clazz);
+    if (cls && !(*env)->ExceptionCheck(env)) {
+        jmethodID mid = (*env)->GetStaticMethodID(
+            env, cls, "openAudioSettings", "(Landroid/app/Activity;)Z");
+        if (mid && !(*env)->ExceptionCheck(env))
+            (*env)->CallStaticBooleanMethod(
+                env, cls, mid, g_android_app->activity->clazz);
     }
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     if (cls) (*env)->DeleteLocalRef(env, cls);

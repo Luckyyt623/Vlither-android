@@ -1064,7 +1064,9 @@ void ntl_team_init(tenv *env) {
     strncpy(S.profile_name, profile->name, sizeof S.profile_name - 1);
     S.profile_name[sizeof S.profile_name - 1] = 0;
   }
-  S.players_open = true;
+  /* Player list visibility is remembered in byte 0 of chat_hud_settings_reserved
+   * (1 = hidden). Zero (default / old settings files) keeps it visible. */
+  S.players_open = !(env && env->usr && env->usr->usrs.chat_hud_settings_reserved[0]);
 }
 void ntl_team_update(tenv *env) {
   if (!S.ready || !env || !env->usr) return;
@@ -1894,6 +1896,14 @@ void ntl_team_draw(tenv *env) {
       if (submitted) chat_submit_current(us);
     }
     igEnd();
+  }
+
+  {
+    uint8_t hidden = S.players_open ? 0 : 1;
+    if (us->chat_hud_settings_reserved[0] != hidden) {
+      us->chat_hud_settings_reserved[0] = hidden;
+      save_user_settings(us);
+    }
   }
 
   if (S.players_open && !settings_open) {

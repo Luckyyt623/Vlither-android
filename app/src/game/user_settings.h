@@ -56,6 +56,20 @@ typedef struct custom_key_btn {
   float opacity;
 } custom_key_btn;
 
+/* Decision Visuals: individual overlay elements (each can be toggled). */
+typedef enum vis_element {
+  VIS_EL_PREY_FILL = 0,   /* blue fill on edible/prey points */
+  VIS_EL_THREAT_LINES,    /* colored lines + glow to nearby dangers */
+  VIS_EL_COLLIDERS,       /* red/yellow rings on collision points */
+  VIS_EL_HEAD_CIRCLE,     /* pulsing yellow head circle */
+  VIS_EL_ENCIRCLE_ZONE,   /* encircle / coil radius zone */
+  VIS_EL_AVOID_VECTORS,   /* avoidance direction arrows */
+  VIS_EL_FOOD_TARGET,     /* green food target marker */
+  VIS_EL_GOAL_MARKER,     /* magenta goal crosshair */
+  VIS_EL_STATUS_BADGE,    /* top-left status badge */
+  VIS_EL_COUNT
+} vis_element;
+
 typedef struct user_settings {
   char version[4];
   char nickname[MAX_NICKNAME_LEN + 1];
@@ -294,7 +308,38 @@ typedef struct user_settings {
   float death_food_scale[2];
   float normal_food_scale[2];
   float boost_food_scale[2];
+
+  uint8_t vis_settings_reserved[16];
+  bool    vis_manual;              /* draw decision visuals without the bot */
+  uint8_t vis_el[VIS_EL_COUNT];    /* per-element on/off */
 } user_settings;
+
+/* Opacity of the "Skinless" render mode, per gameplay mode (0 = Normal,
+ * 1 = Assist), in percent 5..100. Kept in the first two bytes of
+ * food_origin_scale_settings_reserved so the saved settings layout does not
+ * change. 0 (unset / old settings files) means 100%. */
+static inline int user_skinless_opacity_pct(const user_settings* u, int mode) {
+  int v = u->food_origin_scale_settings_reserved[mode & 1];
+  return (v >= 5 && v <= 100) ? v : 100;
+}
+/* Joystick assist laser length, percent of the screen's shorter side
+ * (10..200). Stored in instant_death_settings_reserved[0]; 0 (unset / old
+ * settings files) means 95%, the previous fixed length. */
+static inline int user_laser_len_pct(const user_settings* u) {
+  int v = u->instant_death_settings_reserved[0];
+  return (v >= 10 && v <= 200) ? v : 95;
+}
+static inline void user_set_laser_len_pct(user_settings* u, int pct) {
+  if (pct < 10) pct = 10;
+  if (pct > 200) pct = 200;
+  u->instant_death_settings_reserved[0] = (uint8_t)pct;
+}
+static inline void user_set_skinless_opacity_pct(user_settings* u, int mode,
+                                                 int pct) {
+  if (pct < 5) pct = 5;
+  if (pct > 100) pct = 100;
+  u->food_origin_scale_settings_reserved[mode & 1] = (uint8_t)pct;
+}
 
 void user_settings_default(user_settings* usr_settings);
 void read_user_settings(user_settings* usr_settings);
