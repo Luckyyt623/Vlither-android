@@ -1,5 +1,6 @@
 #include "vlither_tags.h"
 #include "tag_follow.h"
+#include "tag_cord.h"
 
 #include "ntl_team.h"
 #include "../user.h"
@@ -26,6 +27,9 @@
 #define VLITHER_CHAT_HISTORY_MAX 80
 #define VLITHER_CHAT_PLAYER_MAX 128
 #define VLITHER_EVENT_MAX 24
+#define VLITHER_NTL_EVENTS_URL "http://81.169.165.225:447/events.json"
+#define VLITHER_NTL_EVENT_MAX 40
+#define VLITHER_NTL_REFRESH_SECONDS 120.0
 
 static const char *VLITHER_PROFILE_EMOJIS[] = {
     "", "☺", "☻", "♥", "♦", "♠", "♣", "♪", "♫", "♀", "♂"};
@@ -92,6 +96,24 @@ typedef struct vlither_event {
   int interested_count;
 } vlither_event;
 
+typedef struct vlither_ntl_event {
+  char id[40];
+  char type[48];
+  char server[MAX_SERVER_IP_LEN + 1];
+  char tier[16];
+  char currency[8];
+  char description[1601];
+  long long start_ms;
+  long long end_ms;
+  long long planned_ms;
+  long event_id;
+  int people;
+  int game;
+  bool has_prize;
+  double prize_amount;
+  double prize_usd;
+} vlither_ntl_event;
+
 typedef struct vlither_tags_state {
   bool ready;
   tenv *env;
@@ -128,6 +150,13 @@ typedef struct vlither_tags_state {
   int event_count;
   char event_status[192];
   long long event_server_now_ms;
+
+  vlither_ntl_event ntl[VLITHER_NTL_EVENT_MAX];
+  int ntl_count;
+  struct mg_connection *ntl_http;
+  double ntl_started;
+  double ntl_last_fetch;
+  char ntl_status[128];
 
   long long local_sos_until_ms;
 } vlither_tags_state;
@@ -905,11 +934,237 @@ static bool redeem_code(const char *code) {
   return true;
 }
 
+/* ---- NTL events feed (plain JSON array over HTTP) ---- */
+
+static long long json_secs_to_ms(struct mg_str json, const char *path) {
+  double value = 0.0;
+  if (!mg_json_get_num(json, path, &value) || !isfinite(value) || value <= 0.0)
+    return 0;
+  return (long long)value * 1000LL;
+}
+
+static void ntl_set_status(const char *text) {
+  strncpy(S.ntl_status, text ? text : "", sizeof S.ntl_status - 1);
+  S.ntl_status[sizeof S.ntl_status - 1] = 0;
+}
+
+/* Drops Discord mentions (<@id>, <@&id>, <#id>, <:emoji:id>), CRs and swaps the
+   rupee sign for "Rs." since the UI font has no glyph for it. */
+static void ntl_clean_description(char *text, size_t cap) {
+  char out[1601];
+  size_t n = 0;
+  for (size_t i = 0; text[i] && n + 4 < sizeof out && n + 4 < cap; ++i) {
+    unsigned char ch = (unsigned char)text[i];
+    if (ch == '<' && (text[i + 1] == '@' || text[i + 1] == '#' ||
+                      text[i + 1] == ':' || text[i + 1] == '&')) {
+      size_t j = i + 1;
+      while (text[j] && text[j] != '>' && text[j] != '\n' && j - i < 48) ++j;
+      if (text[j] == '>') {
+        i = j;
+        continue;
+      }
+    }
+    if (ch == '\r') continue;
+    if (ch == 0xE2 && (unsigned char)text[i + 1] == 0x82 &&
+        (unsigned char)text[i + 2] == 0xB9) {
+      memcpy(out + n, "Rs.", 3);
+      n += 3;
+      i += 2;
+      continue;
+    }
+    out[n++] = (char)ch;
+  }
+  out[n] = 0;
+  strncpy(text, out, cap - 1);
+  text[cap - 1] = 0;
+}
+
+static void ntl_strip_scheme(const char *url, char *out, size_t cap) {
+  if (!strncmp(url, "http://", 7)) url += 7;
+  else if (!strncmp(url, "https://", 8)) url += 8;
+  strncpy(out, url, cap - 1);
+  out[cap - 1] = 0;
+  size_t len = strlen(out);
+  while (len && out[len - 1] == '/') out[--len] = 0;
+}
+
+static int ntl_event_cmp(const void *a, const void *b) {
+  const vlither_ntl_event *x = a, *y = b;
+  long long bx = x->start_ms > 0 ? x->start_ms : x->planned_ms;
+  long long by = y->start_ms > 0 ? y->start_ms : y->planned_ms;
+  return (by > bx) - (by < bx); /* newest first */
+}
+
+static void parse_ntl_events(struct mg_str json) {
+  memset(S.ntl, 0, sizeof S.ntl);
+  S.ntl_count = 0;
+  for (int i = 0; i < VLITHER_NTL_EVENT_MAX; ++i) {
+    char path[24];
+    snprintf(path, sizeof path, "$[%d]", i);
+    struct mg_str item = mg_json_get_tok(json, path);
+    if (!item.buf || item.len < 2) break;
+    vlither_ntl_event *e = &S.ntl[S.ntl_count];
+    copy_json_string(item, "$.id", e->id, sizeof e->id, "");
+    if (!e->id[0]) continue;
+    copy_json_string(item, "$.type", e->type, sizeof e->type, "EVENT");
+    char url[96];
+    copy_json_string(item, "$.url", url, sizeof url, "");
+    ntl_strip_scheme(url, e->server, sizeof e->server);
+    copy_json_string(item, "$.prize_tier", e->tier, sizeof e->tier, "");
+    copy_json_string(item, "$.prize_currency", e->currency,
+                     sizeof e->currency, "");
+    e->start_ms = json_secs_to_ms(item, "$.start");
+    e->end_ms = json_secs_to_ms(item, "$.end");
+    e->planned_ms = json_secs_to_ms(item, "$.planned_start");
+    e->people = (int)mg_json_get_long(item, "$.people", 0);
+    e->game = (int)mg_json_get_long(item, "$.game", 0);
+    e->event_id = mg_json_get_long(item, "$.event_id", -1);
+    double amount = 0.0, usd = 0.0;
+    if (mg_json_get_num(item, "$.prize_amount", &amount) && amount > 0.0) {
+      e->has_prize = true;
+      e->prize_amount = amount;
+    }
+    if (mg_json_get_num(item, "$.prize_usd", &usd) && usd > 0.0) {
+      e->has_prize = true;
+      e->prize_usd = usd;
+    }
+    char *desc = mg_json_get_str(item, "$.description");
+    if (desc) {
+      strncpy(e->description, desc, sizeof e->description - 1);
+      mg_free(desc);
+      ntl_clean_description(e->description, sizeof e->description);
+    }
+    ++S.ntl_count;
+  }
+  if (S.ntl_count > 1)
+    qsort(S.ntl, (size_t)S.ntl_count, sizeof S.ntl[0], ntl_event_cmp);
+  char msg[96];
+  if (S.ntl_count == 0)
+    snprintf(msg, sizeof msg, "No events found.");
+  else
+    snprintf(msg, sizeof msg, "%d event%s loaded.", S.ntl_count,
+             S.ntl_count == 1 ? "" : "s");
+  ntl_set_status(msg);
+}
+
+static void ntl_events_cb(struct mg_connection *c, int ev, void *ev_data) {
+  if (c != S.ntl_http) return;
+  if (ev == MG_EV_CONNECT) {
+    struct mg_str host = mg_url_host(VLITHER_NTL_EVENTS_URL);
+    mg_printf(c,
+              "GET %s HTTP/1.1\r\nHost: %.*s\r\n"
+              "User-Agent: Vlither/Events\r\nAccept: application/json\r\n"
+              "Connection: close\r\n\r\n",
+              mg_url_uri(VLITHER_NTL_EVENTS_URL), (int)host.len, host.buf);
+  } else if (ev == MG_EV_HTTP_MSG) {
+    struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+    int status = mg_http_status(hm);
+    if (status >= 200 && status < 300) {
+      parse_ntl_events(hm->body);
+    } else {
+      char msg[96];
+      snprintf(msg, sizeof msg, "Events failed (HTTP %d).", status);
+      ntl_set_status(msg);
+    }
+    S.ntl_http = NULL;
+    S.ntl_started = 0;
+    c->is_draining = 1;
+  } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+    S.ntl_http = NULL;
+    S.ntl_started = 0;
+    ntl_set_status("Events request failed.");
+  }
+}
+
+bool vlither_ntl_events_refresh(void) {
+  if (!S.ready || S.ntl_http) return false;
+  double now = mg_millis() / 1000.0;
+  if (S.ntl_last_fetch > 0 && now - S.ntl_last_fetch < 3.0) return false;
+  S.ntl_http = mg_http_connect(&S.mgr, VLITHER_NTL_EVENTS_URL,
+                               ntl_events_cb, NULL);
+  S.ntl_last_fetch = now > 0 ? now : 0.001;
+  if (!S.ntl_http) {
+    ntl_set_status("Could not start events request.");
+    return false;
+  }
+  S.ntl_started = now;
+  if (S.ntl_count == 0) ntl_set_status("Loading events...");
+  return true;
+}
+
+static const vlither_ntl_event *ntl_at(int i) {
+  return i >= 0 && i < S.ntl_count ? &S.ntl[i] : NULL;
+}
+int vlither_ntl_event_count(void) { return S.ntl_count; }
+const char *vlither_ntl_events_status(void) { return S.ntl_status; }
+const char *vlither_ntl_event_id_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->id : "";
+}
+const char *vlither_ntl_event_type_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->type : "";
+}
+const char *vlither_ntl_event_server_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->server : "";
+}
+const char *vlither_ntl_event_description_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->description : "";
+}
+const char *vlither_ntl_event_tier_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->tier : "";
+}
+long long vlither_ntl_event_start_at_ms(int i) {
+  const vlither_ntl_event *e = ntl_at(i);
+  if (!e) return 0;
+  return e->start_ms > 0 ? e->start_ms : e->planned_ms;
+}
+long long vlither_ntl_event_end_at_ms(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->end_ms : 0;
+}
+int vlither_ntl_event_people_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? e->people : 0;
+}
+int vlither_ntl_event_number_at(int i) {
+  const vlither_ntl_event *e = ntl_at(i); return e ? (int)e->event_id : -1;
+}
+bool vlither_ntl_event_prize_text_at(int i, char *out, size_t cap) {
+  if (!out || !cap) return false;
+  out[0] = 0;
+  const vlither_ntl_event *e = ntl_at(i);
+  if (!e || !e->has_prize) return false;
+  if (e->prize_amount > 0.0)
+    snprintf(out, cap, "%.2f %s", e->prize_amount,
+             e->currency[0] ? e->currency : "USD");
+  else
+    snprintf(out, cap, "%.2f USD", e->prize_usd);
+  if (e->prize_amount > 0.0 && e->prize_usd > 0.0 &&
+      e->currency[0] && strcmp(e->currency, "USD"))
+    snprintf(out + strlen(out), cap - strlen(out), " (~$%.2f)", e->prize_usd);
+  return true;
+}
+/* Live event first, otherwise the soonest one that has not begun. */
+int vlither_ntl_event_featured(long long now_ms) {
+  int best = -1;
+  long long best_start = 0;
+  for (int i = 0; i < S.ntl_count; ++i) {
+    const vlither_ntl_event *e = &S.ntl[i];
+    long long begin = e->start_ms > 0 ? e->start_ms : e->planned_ms;
+    if (begin <= 0) continue;
+    long long end = e->end_ms > 0 ? e->end_ms : begin + 2LL * 3600LL * 1000LL;
+    if (begin <= now_ms && now_ms < end) return i;
+    if (begin > now_ms && (best < 0 || begin < best_start)) {
+      best = i;
+      best_start = begin;
+    }
+  }
+  return best;
+}
+
 void vlither_tags_init(tenv *env) {
   memset(&S, 0, sizeof S);
   S.env = env;
   set_status("Enter your Vlither tag activation code.");
   strncpy(S.event_status, "Loading events...", sizeof S.event_status - 1);
+  ntl_set_status("Loading events...");
   mg_mgr_init(&S.mgr);
   S.ready = true;
 }
@@ -928,6 +1183,16 @@ void vlither_tags_update(tenv *env) {
     S.http_started = 0;
     set_status("Vlither tag request timed out.");
   }
+  if (S.ntl_http && S.ntl_started > 0 &&
+      now - S.ntl_started > VLITHER_TAG_HTTP_TIMEOUT_SECONDS) {
+    S.ntl_http->is_closing = 1;
+    S.ntl_http = NULL;
+    S.ntl_started = 0;
+    ntl_set_status("Events request timed out.");
+  }
+  if (!S.ntl_http && (S.ntl_last_fetch <= 0 ||
+                      now - S.ntl_last_fetch >= VLITHER_NTL_REFRESH_SECONDS))
+    vlither_ntl_events_refresh();
   if (!S.http && S.pending_atlas_version[0] &&
       (!S.atlas_tex || strcmp(S.pending_atlas_version, S.atlas_version)))
     request_atlas(S.pending_atlas_version);
@@ -1298,6 +1563,7 @@ static bool send_event_json(const char *json) {
 }
 
 bool vlither_event_refresh(void) {
+  vlither_ntl_events_refresh();
   return send_event_json("{\"type\":\"events_get\"}");
 }
 
@@ -1352,21 +1618,30 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
                          ? GLM_MAX(0.58f, GLM_MIN(1.75f, o->sc * g->data.gsc))
                          : 1.0f;
   float body_scale = zoom_scale * custom_scale;
-  float hx = mww2 + (o->xx + o->fx - g->data.view_xx) * g->data.gsc;
-  float hy = mhh2 + (o->yy + o->fy - g->data.view_yy) * g->data.gsc;
-
-  float follow_ang = tag_follow_angle(
-      &o->vlither_tag_follow_ang, &o->vlither_tag_follow_mtm,
-      &o->vlither_tag_follow_ready, o->ang, g->data.ctm, 8.0f);
-  float head_back_x = -cosf(o->ang), head_back_y = -sinf(o->ang);
-  float tag_back_x = -cosf(follow_ang), tag_back_y = -sinf(follow_ang);
-  float tag_side_x = -tag_back_y, tag_side_y = tag_back_x;
-
   float width = entry->display_width * body_scale;
   float height = entry->display_height * body_scale;
   float hw = width * 0.5f, hh = height * 0.5f;
 
-  float angle = follow_ang + PI * 0.5f;
+  // antenna: shared cord (follows the head trail), same as vlither-main.
+  // When an NTL tag is also shown, fan this cord to the side so they don't overlap.
+  float rad = roundf(o->sc * 29.0f) * 0.5f;
+  float fan = (o->ntl_tag_id >= 0 && env->usr->usrs.show_ntl_tags)
+                  ? -(8.0f * body_scale + width * 0.34f)
+                  : 0.0f;
+  tag_cord_view view = {mww2, mhh2, g->data.view_xx, g->data.view_yy,
+                        g->data.gsc};
+  tag_cord cord;
+  tag_cord_build(&cord, o->id, 1, o->xx + o->fx, o->yy + o->fy, rad, o->ang,
+                 &view, fan);
+
+  ImDrawList *dl = igGetWindowDrawList();
+  const float mc[3] = {0.02f, 0.30f, 0.18f};  // mint green cord
+  const float ec[3] = {0.35f, 1.0f, 0.68f};
+  tag_cord_draw(dl, &cord, mc, ec, alpha);
+
+  // tag hangs from the cord end, oriented along the cord
+  ImVec2 tip = cord.pls[cord.np - 1];
+  float angle = cord.ang - PI * 0.5f;
   float ux = cosf(angle), uy = sinf(angle);
   float vx = -uy, vy = ux;
 
@@ -1374,24 +1649,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   float attach_y = entry->attach_y;
   if (!isfinite(attach_x) || attach_x < 0.0f || attach_x > 1.0f) attach_x = 0.5f;
   if (!isfinite(attach_y) || attach_y < 0.0f || attach_y > 1.0f) attach_y = 0.12f;
-
-  float distance = 28.0f * body_scale + height * 0.10f;
-  float lateral = (o->ntl_tag_id >= 0)
-                      ? -(8.0f * body_scale + width * 0.34f)
-                      : 0.0f;
-  ImVec2 target_tip = {hx + tag_back_x * distance + tag_side_x * lateral,
-                       hy + tag_back_y * distance + tag_side_y * lateral};
-
-  float sway_x = sinf(g->data.ctm * 0.0021f + o->xx * 0.01f) * 1.6f * body_scale;
-  float sway_y = cosf(g->data.ctm * 0.0027f + o->yy * 0.01f) * 1.6f * body_scale;
-  target_tip.x += sway_x;
-  target_tip.y += sway_y;
-
-  tag_follow_point(&o->vlither_tag_tip_x, &o->vlither_tag_tip_y,
-                   &o->vlither_tag_tip_vx, &o->vlither_tag_tip_vy,
-                   &o->vlither_tag_tip_mtm, &o->vlither_tag_tip_ready,
-                   target_tip.x, target_tip.y, g->data.ctm, 170.0f, 11.0f);
-  ImVec2 tip = {o->vlither_tag_tip_x, o->vlither_tag_tip_y};
   float local_attach_x = (attach_x - 0.5f) * width;
   float local_attach_y = (attach_y - 0.5f) * height;
   ImVec2 center = {tip.x - (ux * local_attach_x + vx * local_attach_y),
@@ -1404,25 +1661,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
                center.y + uy * hw + vy * hh};
   ImVec2 q4 = {center.x - ux * hw + vx * hh,
                center.y - uy * hw + vy * hh};
-
-  ImVec2 p0 = {hx + head_back_x * 9.0f * body_scale,
-               hy + head_back_y * 9.0f * body_scale};
-  ImVec2 p1 = {p0.x + head_back_x * distance * 0.34f,
-               p0.y + head_back_y * distance * 0.34f};
-  ImVec2 p2 = {tip.x - tag_back_x * distance * 0.26f,
-               tip.y - tag_back_y * distance * 0.26f};
-  ImDrawList *dl = igGetWindowDrawList();
-  ImDrawList_AddBezierCubic(
-      dl, p0, p1, p2, tip,
-      igColorConvertFloat4ToU32((ImVec4){0.02f, 0.08f, 0.06f, alpha * 0.92f}),
-      6.0f * body_scale, 16);
-  ImDrawList_AddBezierCubic(
-      dl, p0, p1, p2, tip,
-      igColorConvertFloat4ToU32((ImVec4){0.35f, 1.0f, 0.68f, alpha}),
-      2.8f * body_scale, 16);
-  ImDrawList_AddCircleFilled(
-      dl, tip, 3.5f * body_scale,
-      igColorConvertFloat4ToU32((ImVec4){0.55f, 1.0f, 0.78f, alpha}), 12);
 
   ImTextureRef tex = {NULL, (ImTextureID)S.atlas_ds};
   ImDrawList_AddImageQuad(

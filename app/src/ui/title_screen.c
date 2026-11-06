@@ -399,9 +399,8 @@ static void event_format_countdown(long long remaining_ms,
     snprintf(out, cap, "%02lld:%02lld:%02lld", hours, minutes, seconds);
 }
 
-static void join_event(tenv *env, int index) {
+static void join_server_address(tenv *env, const char *server_ip) {
   if (!env || !env->usr) return;
-  const char *server_ip = vlither_event_server_at(index);
   if (!server_ip || !server_ip[0]) return;
   tuser_data *usr = env->usr;
   strncpy(usr->usrs.server_address, server_ip, MAX_SERVER_IP_LEN);
@@ -411,6 +410,170 @@ static void join_event(tenv *env, int index) {
   usr->gdata.curr_screen = PLAYING;
   glfwSetTime(0);
   server_connect(env);
+}
+
+static void join_event(tenv *env, int index) {
+  join_server_address(env, vlither_event_server_at(index));
+}
+
+/* First http(s) link inside an event description (registration, bot channel). */
+static bool event_find_link(const char *text, char *out, size_t cap) {
+  const char *p = text ? strstr(text, "https://") : NULL;
+  if (!p) return false;
+  size_t n = 0;
+  while (p[n] && p[n] != ' ' && p[n] != '\n' && p[n] != ')' &&
+         p[n] != '>' && n + 1 < cap) {
+    out[n] = p[n];
+    ++n;
+  }
+  out[n] = 0;
+  return n > 8;
+}
+
+static ImVec4 ntl_tier_color(const char *tier) {
+  if (!strcmp(tier, "high")) return (ImVec4){1.0f, 0.84f, 0.22f, 1.0f};
+  if (!strcmp(tier, "medium")) return (ImVec4){0.38f, 0.86f, 1.0f, 1.0f};
+  return (ImVec4){0.78f, 0.80f, 0.84f, 1.0f};
+}
+
+/* One card. state: 0 = live, 1 = upcoming, 2 = ended */
+static void ntl_event_card(tenv *env, int i, int state, long long now_ms) {
+  ImGuiStyle *style = igGetStyle();
+  (void)style;
+  igPushID_Int(i);
+  const long long start_ms = vlither_ntl_event_start_at_ms(i);
+  const long long end_ms = vlither_ntl_event_end_at_ms(i);
+  char title[128], start_text[96], end_text[96], countdown[64], prize[96];
+  char date_only[32] = "";
+  event_format_local_time(start_ms, start_text, sizeof start_text);
+  event_format_local_time(end_ms, end_text, sizeof end_text);
+  if (start_ms > 0) {
+    time_t sec = (time_t)(start_ms / 1000LL);
+    struct tm lt;
+#ifdef _WIN32
+    localtime_s(&lt, &sec);
+#else
+    localtime_r(&sec, &lt);
+#endif
+    strftime(date_only, sizeof date_only, "%d %b", &lt);
+  }
+  int num = vlither_ntl_event_number_at(i);
+  if (num >= 0)
+    snprintf(title, sizeof title, "%s #%d  -  %s",
+             vlither_ntl_event_type_at(i), num, date_only);
+  else
+    snprintf(title, sizeof title, "%s  -  %s", vlither_ntl_event_type_at(i),
+             date_only);
+  igSeparatorText(title);
+
+  if (state == 0)
+    igTextColored((ImVec4){0.20f, 0.92f, 0.55f, 1.0f}, "LIVE NOW");
+  else if (state == 1) {
+    event_format_countdown(start_ms - now_ms, countdown, sizeof countdown);
+    igTextColored((ImVec4){0.95f, 0.78f, 0.28f, 1.0f}, "Starts in %s",
+                  countdown);
+  } else {
+    igTextDisabled("Ended");
+  }
+  igText("Start: %s", start_text);
+  if (end_ms > 0) {
+    igText("End: %s", end_text);
+    long long mins = (end_ms - start_ms) / 60000LL;
+    if (mins > 0) igText("Duration: %lld min", mins);
+  }
+  if (vlither_ntl_event_people_at(i) > 0)
+    igText("Players: %d", vlither_ntl_event_people_at(i));
+  if (vlither_ntl_event_prize_text_at(i, prize, sizeof prize)) {
+    const char *tier = vlither_ntl_event_tier_at(i);
+    igTextColored(ntl_tier_color(tier), "Prize: %s%s%s%s", prize,
+                  tier[0] ? "  [" : "", tier, tier[0] ? "]" : "");
+  }
+  const char *server = vlither_ntl_event_server_at(i);
+  if (server[0]) igText("Server: %s", server);
+
+  const char *desc = vlither_ntl_event_description_at(i);
+  if (desc[0]) {
+    if (igCollapsingHeader_TreeNodeFlags("Details & Rules", 0)) {
+      igPushTextWrapPos(0.0f);
+      igTextWrapped("%s", desc);
+      igPopTextWrapPos();
+      char link[200];
+      if (event_find_link(desc, link, sizeof link) &&
+          igButton("Open registration link", (ImVec2){0, 0}))
+        android_jni_open_url(link);
+    }
+  }
+  if (server[0] && state != 2) {
+    if (igButton(state == 0 ? "Join Event" : "Join early",
+                 (ImVec2){homepage_px(180.0f), 0}))
+      join_server_address(env, server);
+    igSameLine(0, -1);
+    if (igButton("Copy server", (ImVec2){homepage_px(150.0f), 0}))
+      igSetClipboardText(server);
+  }
+  igSpacing();
+  igPopID();
+}
+
+static void ntl_events_section(tenv *env, long long now_ms) {
+  igSpacing();
+  igTextColored((ImVec4){0.45f, 0.88f, 0.70f, 1.0f}, "Events");
+  igTextDisabled("Live, upcoming and past events.");
+  const int total = vlither_ntl_event_count();
+  if (total <= 0) {
+    igTextWrapped("%s", vlither_ntl_events_status());
+    return;
+  }
+  /* summary */
+  int live = 0, upcoming = 0, past = 0, players = 0, counted = 0;
+  for (int i = 0; i < total; ++i) {
+    long long s = vlither_ntl_event_start_at_ms(i);
+    long long e = vlither_ntl_event_end_at_ms(i);
+    if (s > now_ms) ++upcoming;
+    else if (e <= 0 || now_ms < e) ++live;
+    else ++past;
+    if (vlither_ntl_event_people_at(i) > 0) {
+      players += vlither_ntl_event_people_at(i);
+      ++counted;
+    }
+  }
+  igTextDisabled("%d live | %d upcoming | %d past | avg %d players", live,
+                 upcoming, past, counted ? players / counted : 0);
+
+  if (igBeginTabBar("##ntl_event_tabs", 0)) {
+    if (igBeginTabItem("Live & Upcoming", NULL, 0)) {
+      bool any = false;
+      for (int i = 0; i < total; ++i) {
+        long long s = vlither_ntl_event_start_at_ms(i);
+        long long e = vlither_ntl_event_end_at_ms(i);
+        if (s <= now_ms && e > 0 && now_ms >= e) continue;
+        if (s <= now_ms) { ntl_event_card(env, i, 0, now_ms); any = true; }
+      }
+      /* soonest upcoming first (list is newest first) */
+      for (int i = total - 1; i >= 0; --i) {
+        if (vlither_ntl_event_start_at_ms(i) > now_ms) {
+          ntl_event_card(env, i, 1, now_ms);
+          any = true;
+        }
+      }
+      if (!any) igTextDisabled("Nothing live or scheduled right now.");
+      igEndTabItem();
+    }
+    if (igBeginTabItem("Past", NULL, 0)) {
+      bool any = false;
+      for (int i = 0; i < total; ++i) {
+        long long s = vlither_ntl_event_start_at_ms(i);
+        long long e = vlither_ntl_event_end_at_ms(i);
+        if (s <= now_ms && e > 0 && now_ms >= e) {
+          ntl_event_card(env, i, 2, now_ms);
+          any = true;
+        }
+      }
+      if (!any) igTextDisabled("No past events yet.");
+      igEndTabItem();
+    }
+    igEndTabBar();
+  }
 }
 
 void ui_events_panel(tenv *env) {
@@ -496,6 +659,7 @@ void ui_events_panel(tenv *env) {
     igSpacing();
     igPopID();
   }
+  ntl_events_section(env, now_ms);
   igEndChild();
   igPopFont();
 }
@@ -1380,6 +1544,29 @@ void ui_title_screen(tenv* env) {
       }
       igPopTextWrapPos();
       igPopFont();
+    } else {
+      int ntl_idx = vlither_ntl_event_featured(event_now_ms());
+      if (ntl_idx >= 0) {
+        long long start_ms = vlither_ntl_event_start_at_ms(ntl_idx);
+        long long now_ms = event_now_ms();
+        char countdown[64];
+        igSetCursorPos(hp_cp(ex, ey - 62.0f));
+        igPushFont(usr->imgui_data.regular_font[FONT_SIZE_SMALL],
+                   usr->imgui_data.regular_font[FONT_SIZE_SMALL]->LegacySize);
+        igPushTextWrapPos(ex * u + 300.0f * u);
+        if (start_ms <= now_ms) {
+          igTextColored((ImVec4){0.20f, 0.95f, 0.56f, 1.0f}, "LIVE: %s",
+                        vlither_ntl_event_type_at(ntl_idx));
+        } else {
+          event_format_countdown(start_ms - now_ms, countdown,
+                                 sizeof countdown);
+          igTextColored((ImVec4){0.96f, 0.78f, 0.28f, 1.0f},
+                        "%s\nStarts in %s",
+                        vlither_ntl_event_type_at(ntl_idx), countdown);
+        }
+        igPopTextWrapPos();
+        igPopFont();
+      }
     }
 
     char ratings_label[64];

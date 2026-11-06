@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.8.0"
+        private const val CURRENT_VERSION   = "4.8.1"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
 
@@ -261,31 +261,18 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Vlither 4.8.0
-New
-Homepage menu redesigned. Upload your profile picture from there.
-Decision Visuals: see the bot's thinking with the bot off. Turn on "Show visuals without bot" in Controls. Each visual toggles separately.
-Danger lines show enemy distance by colour: red is closest, green is farthest.
-Joystick laser: adjust how far it reaches.
-Skinless opacity: adjustable.
-Settings search: type a word to find any setting.
-New songs. Upload your own from local storage and play it during games.
-New app logo.
-
-Improved
-Bot circling is smarter.
-Ads removed.
-
-Fixed
-Skin scroll glitch.
-Colour wheel bug.
-Players list bug.
+Vlither 4.8.1
+• Tags are fixable 
+• NTL private tags are load only on your side neither NTL players nor Vlither android players can see that
+• Only older NTL tags are supported 
+• More NTL public tags are added
+• Changes made in event page.
 
 Changes by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.8.0")
+            .setTitle("What's New in v4.8.1")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

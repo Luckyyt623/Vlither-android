@@ -1,6 +1,7 @@
 #ifndef VLITHER_TAGS_H
 #define VLITHER_TAGS_H
 
+#include <stddef.h>
 #include <stdbool.h>
 #include <thermite.h>
 
@@ -66,5 +67,21 @@ const char *vlither_event_status(void);
 int vlither_event_next_interested(void);
 bool vlither_event_set_interested(int index, bool interested);
 bool vlither_event_refresh(void);
+
+/* NTL events feed (history, live and upcoming) */
+bool vlither_ntl_events_refresh(void);
+int vlither_ntl_event_count(void);
+const char *vlither_ntl_events_status(void);
+const char *vlither_ntl_event_id_at(int index);
+const char *vlither_ntl_event_type_at(int index);
+const char *vlither_ntl_event_server_at(int index);
+const char *vlither_ntl_event_description_at(int index);
+const char *vlither_ntl_event_tier_at(int index);
+long long vlither_ntl_event_start_at_ms(int index);
+long long vlither_ntl_event_end_at_ms(int index);
+int vlither_ntl_event_people_at(int index);
+int vlither_ntl_event_number_at(int index);
+bool vlither_ntl_event_prize_text_at(int index, char *out, size_t cap);
+int vlither_ntl_event_featured(long long now_ms);
 
 #endif
