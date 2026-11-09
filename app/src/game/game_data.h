@@ -108,6 +108,10 @@ typedef struct game_data {
   double connect_started_at;
   uint64_t network_rx_bytes;
   bool closed;
+  bool ws_opened;
+  bool conn_tls;
+  int conn_attempt;
+  char tls_pref_addr[MAX_SERVER_IP_LEN + 1];
 
   struct {
     float grd;

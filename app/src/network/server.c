@@ -15,6 +15,13 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
+#ifdef ANDROID
+#include <android/log.h>
+#define DLOG(fmt,...) do{char _b[256];snprintf(_b,sizeof(_b),fmt,##__VA_ARGS__);    __android_log_print(ANDROID_LOG_ERROR,"vlither","%s",_b);}while(0)
+#else
+#define DLOG(fmt,...) do{}while(0)
+#endif
+
 static void normalize_server_authority(const char *input, char *out,
                                        size_t out_size) {
   if (!input || !out || out_size == 0) return;
@@ -38,7 +45,13 @@ void server_init(tenv* env) {
   mg_mgr_init(&gdata->network_manager);
 }
 
-void server_connect(tenv* env) {
+static bool addr_is_local(const char* a) {
+  return strncmp(a, "127.", 4) == 0 || strncmp(a, "[::1]", 5) == 0 ||
+         strncmp(a, "localhost", 9) == 0 || strncmp(a, "192.168.", 8) == 0 ||
+         strncmp(a, "10.", 3) == 0;
+}
+
+static void server_connect_ex(tenv* env, bool want_tls, int attempt) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
   user_settings* usrs = &usr->usrs;
@@ -46,7 +59,16 @@ void server_connect(tenv* env) {
   if (gdata->curr_screen == PLAYING)
     gdata->server_list.ping_stop = 1;
 
+  /* A second socket to the same game server is what gets one of the two
+     dropped by the server, so never leave the previous one running. */
+  if (gdata->connection) {
+    gdata->connection->is_closing = true;
+    gdata->connection = NULL;
+  }
+
   gdata->closed = false;
+  gdata->ws_opened = false;
+  gdata->conn_attempt = attempt;
   gdata->connect_started_at = glfwGetTime();
   if (!gdata->restart_req) {
     gdata->suppress_reconnect = false;
@@ -55,21 +77,21 @@ void server_connect(tenv* env) {
 
   char url[256] = {};
 
-  bool is_local = (strncmp(usrs->server_address, "127.", 4) == 0 ||
-                   strncmp(usrs->server_address, "[::1]", 5) == 0 ||
-                   strncmp(usrs->server_address, "localhost", 9) == 0 ||
-                   strncmp(usrs->server_address, "192.168.", 8) == 0 ||
-                   strncmp(usrs->server_address, "10.", 3) == 0);
+  bool is_local = addr_is_local(usrs->server_address);
+  bool tls = want_tls && !is_local;
+  gdata->conn_tls = tls;
   char authority[MAX_SERVER_IP_LEN + 8] = {};
   normalize_server_authority(usrs->server_address, authority,
                              sizeof authority);
-  snprintf(url, sizeof url, "%s://%s/slither", is_local ? "ws" : "wss",
-           authority);
+  snprintf(url, sizeof url, "%s://%s/slither", tls ? "wss" : "ws", authority);
+  DLOG("conn: connecting %s (try %d)", url, attempt);
+  /* mongoose already writes "Host: <ip>:<port>" itself. The old code added a
+     second, different "Host: slither.com" line, i.e. two Host headers, which
+     strict servers/proxies answer with 400 and a closed socket before the
+     WebSocket is ever opened. Only Origin is added here. */
   gdata->connection =
     mg_ws_connect(&gdata->network_manager, url, server_callback, env,
-                  "%s:%s\r\n%s:%s\r\n",
-                  "Origin", "https://slither.com",
-                  "Host", "slither.com");
+                  "Origin: https://slither.com\r\n");
   if (!gdata->connection) {
     gdata->closed = true;
     return;
@@ -79,6 +101,28 @@ void server_connect(tenv* env) {
   mg_mgr_poll(&gdata->network_manager, 5);
   mg_mgr_poll(&gdata->network_manager, 5);
 #endif
+}
+
+void server_connect(tenv* env) {
+  tuser_data* usr = env->usr;
+  game_data* gdata = &usr->gdata;
+  bool tls = gdata->tls_pref_addr[0] &&
+             strcmp(gdata->tls_pref_addr, usr->usrs.server_address) == 0;
+  server_connect_ex(env, tls, 0);
+}
+
+/* Called when a connection died before the WebSocket upgrade finished.
+   Retries once with the other transport (plain <-> TLS). */
+bool server_connect_fallback(tenv* env) {
+  tuser_data* usr = env->usr;
+  game_data* gdata = &usr->gdata;
+  if (gdata->preview_active || gdata->ws_opened || gdata->conn_attempt != 0 ||
+      gdata->suppress_reconnect || addr_is_local(usr->usrs.server_address))
+    return false;
+  DLOG("conn: closed before WebSocket opened, retrying with %s",
+       gdata->conn_tls ? "plain ws" : "TLS");
+  server_connect_ex(env, !gdata->conn_tls, 1);
+  return true;
 }
 
 void server_poll(tenv* env) {
@@ -682,9 +726,7 @@ static void* sl_ping_thread(void* arg) {
                  ip_buf);
         c = mg_ws_connect(
           &ping_mgr, url, sl_ping_ws_cb, &probes[j],
-          "%s:%s\r\n%s:%s\r\n",
-          "Origin", "https://slither.com",
-          "Host", "slither.com");
+          "Origin: https://slither.com\r\n");
       }
 
       if (!c) {

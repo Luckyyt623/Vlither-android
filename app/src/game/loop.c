@@ -65,6 +65,9 @@ void game_loop(tenv* env) {
       if (gdata->closed) {
         gdata->connection = NULL;
         gdata->closed = false;
+        DLOG("conn: closed while CONNECTING (ws_opened=%d, try=%d, tls=%d)",
+             (int)gdata->ws_opened, gdata->conn_attempt, (int)gdata->conn_tls);
+        if (server_connect_fallback(env)) break;
         if (gdata->restart_req && !gdata->suppress_reconnect &&
             gdata->reconnect_attempts < 12) {
           gdata->reconnect_attempts++;

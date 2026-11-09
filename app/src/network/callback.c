@@ -465,6 +465,8 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
         gdata->conn = CONNECTED;
         if (gdata->data.protocol_version != PROTOCOL_VERSION) {
           printf("Protocol version %d is not supported.\n", gdata->data.protocol_version);
+          DLOG("conn: server protocol %d != client %d, closing",
+               gdata->data.protocol_version, PROTOCOL_VERSION);
           gdata->restart_req = false;
           gdata->suppress_reconnect = true;
           c->is_closing = true;
@@ -1451,9 +1453,22 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
   if (ev == MG_EV_OPEN) {
     DLOG("conn: TCP connected");
     printf("Connection opened\n");
+  } else if (ev == MG_EV_CONNECT) {
+    DLOG("conn: TCP connect done (tls=%d)", (int)gdata->conn_tls);
+    if (c->is_tls && gdata->conn_tls) {
+      struct mg_tls_opts tls = {.skip_verification = 1};
+      mg_tls_init(c, &tls);
+    }
   } else if (ev == MG_EV_WS_OPEN) {
     DLOG("conn: WebSocket opened!");
     printf("Connection established\n");
+    gdata->ws_opened = true;
+    if (gdata->conn_tls) {
+      snprintf(gdata->tls_pref_addr, sizeof gdata->tls_pref_addr, "%s",
+               env->usr->usrs.server_address);
+    } else if (!strcmp(gdata->tls_pref_addr, env->usr->usrs.server_address)) {
+      gdata->tls_pref_addr[0] = 0;
+    }
 
     mg_ws_send(c, (uint8_t[]){1}, 1, WEBSOCKET_OP_BINARY);
     mg_ws_send(c, (uint8_t[]){'c', 0}, 2, WEBSOCKET_OP_BINARY);
@@ -1490,7 +1505,8 @@ void server_callback(struct mg_connection* c, int ev, void* ev_data) {
     printf("Connection error: %s, closing connection...\n", (char*)ev_data);
     c->is_closing = true;
   } else if (ev == MG_EV_CLOSE) {
-    DLOG("conn closed");
+    DLOG("conn closed (ws_opened=%d, connected=%d)", (int)gdata->ws_opened,
+         (int)(gdata->conn == CONNECTED));
     printf("Connection closed\n");
     if (gdata->connection == c) gdata->connection = NULL;
     gdata->closed = true;

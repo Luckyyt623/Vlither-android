@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.8.1"
+        private const val CURRENT_VERSION   = "4.8.2"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
 
@@ -261,18 +261,14 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Vlither 4.8.1
-• Tags are fixable 
-• NTL private tags are load only on your side neither NTL players nor Vlither android players can see that
-• Only older NTL tags are supported 
-• More NTL public tags are added
-• Changes made in event page.
+Vlither 4.8.2
+Server disconnect issue fixedm
 
 Changes by Lucky
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.8.1")
+            .setTitle("What's New in v4.8.2")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

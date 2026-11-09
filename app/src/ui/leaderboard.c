@@ -526,8 +526,7 @@ static void lb_connect(int i) {
   rt->running = true;
   rt->started_ms = mg_millis();
   rt->c = mg_ws_connect(&s_mgr, url, lb_cb, (void*)(intptr_t)(i + 1),
-                        "%s:%s\r\n%s:%s\r\n", "Origin", "https://slither.com",
-                        "Host", "slither.com");
+                        "Origin: https://slither.com\r\n");
   if (!rt->c) lb_finish(i, false, "Could not connect to the server");
 }
 
