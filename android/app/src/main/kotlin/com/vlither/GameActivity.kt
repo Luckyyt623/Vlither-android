@@ -666,14 +666,18 @@ class GameActivity : NativeActivity() {
         private var composingCodePoints = 0
 
         init {
-            isFocusable = true
-            isFocusableInTouchMode = true
+            // Only focusable while a text field is active. A focusable editor
+            // grabs focus when a hardware keyboard takes the window out of
+            // touch mode, and then the IME eats letters/space before the game
+            // sees them.
+            isFocusable = false
+            isFocusableInTouchMode = false
             isClickable = false
             alpha = 0.01f
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         }
 
-        override fun onCheckIsTextEditor(): Boolean = true
+        override fun onCheckIsTextEditor(): Boolean = textInputActive
 
         private fun codePointCount(text: CharSequence): Int =
             Character.codePointCount(text, 0, text.length)
@@ -824,6 +828,8 @@ class GameActivity : NativeActivity() {
             if (active) {
                 clearImeEvents(this@GameActivity)
                 bridge.resetComposition()
+                bridge.isFocusable = true
+                bridge.isFocusableInTouchMode = true
                 bridge.requestFocus()
                 imm.restartInput(bridge)
                 bridge.post {
@@ -835,6 +841,8 @@ class GameActivity : NativeActivity() {
                 bridge.resetComposition()
                 imm.hideSoftInputFromWindow(bridge.windowToken, 0)
                 bridge.clearFocus()
+                bridge.isFocusable = false
+                bridge.isFocusableInTouchMode = false
                 window.decorView.requestFocus()
             }
         }

@@ -7,6 +7,7 @@
 #include "tag_cord.h"
 #include "ntl_tag_render.h"
 #include "../user.h"
+#include "../android_jni.h"
 #include "../rendering/texture.h"
 #include "../cimgui/cimgui_impl.h"
 
@@ -90,6 +91,7 @@ typedef struct ntl_tags_state {
   double next_fixed_catalog_sync;
   long fixed_catalog_version;
   int public_tag_max;
+  int public_hi_max;  // top of NTL's second public range (668..)
   int private_tag_min;
   int dynamic_tag_count;
   ntl_tag_meta dynamic_meta[NTL_DYNAMIC_TAG_MAX];
@@ -115,6 +117,8 @@ typedef struct ntl_tags_state {
   ntl_tag_atlas_entry fixed_atlas_pending[NTL_FIXED_TAG_MAX];
   int fixed_tag_count_pending;
   int public_tag_max_pending;
+  int public_hi_max_pending;
+  int code_result;  // tag code box: 0 nothing, 1 ok, 2 error
   int mapped_tag_count;
   double last_mapping_received;
   char status[192];
@@ -224,11 +228,23 @@ static VkDescriptorSet atlas_descriptor(tenv *env,
 bool ntl_tags_is_packet_tag(int id) {
   if (id >= 0 && id <= 59) return true;
   int public_max = S.public_tag_max >= 303 ? S.public_tag_max : 367;
-  return id >= 200 && id <= public_max;
+  if (id >= 200 && id <= public_max) return true;
+  // NTL's public tags continue at 668 once 200..367 is full
+  int hi_max = S.public_hi_max >= 667 ? S.public_hi_max : 671;
+  return id >= 668 && id <= hi_max;
+}
+
+// NTL gives catalog entries below id 368 a second range: 1123 - id, i.e. 756+.
+// Those ids exist only once the live catalogue has been loaded.
+static bool dynamic_has_id(int id) {
+  for (int i = 0; i < S.dynamic_tag_count; ++i)
+    if (S.dynamic_meta[i].id == id) return true;
+  return false;
 }
 
 bool ntl_tags_is_protected_tag(int id) {
-  int private_min = S.private_tag_min > 0 ? S.private_tag_min : 374;
+  int private_min = S.private_tag_min > 0 ? S.private_tag_min : 368;
+  if (id >= 756) return dynamic_has_id(id) || main_tag_lookup(id) != NULL;
   return (id >= 60 && id <= 199) || (id >= private_min && id <= 665);
 }
 
@@ -410,6 +426,18 @@ static bool install_dynamic_catalog(struct mg_str json) {
     if (!src) break;
     ++source_count;
 
+    // same id rule as NTL's main-mt.js: an explicit id wins, otherwise
+    // 580 - index; anything that lands below 368 wraps to 1123 - id (>= 756).
+    // ids 667..755 and anything still below 368 are not valid private tags.
+    snprintf(path, sizeof path, "$.d[%d].id", source_index);
+    long json_id = json_long_flexible(json, path, 0);
+    int id = json_id > 0 ? (int)json_id : 580 - source_index;
+    if (json_id <= 0 && id < 368) id = 1123 - id;
+    if (id < 368 || id == 667 || (id > 667 && id < 756)) {
+      mg_free(src);
+      continue;
+    }
+
     int image_w = 0, image_h = 0;
     unsigned char *rgba = decode_data_uri_rgba(src, &image_w, &image_h);
     mg_free(src);
@@ -418,7 +446,6 @@ static bool install_dynamic_catalog(struct mg_str json) {
       continue;
     }
 
-    int id = 580 - source_index;
     ntl_tag_meta meta;
     memset(&meta, 0, sizeof meta);
     meta.id = id;
@@ -468,7 +495,7 @@ static bool install_dynamic_catalog(struct mg_str json) {
   memcpy(S.dynamic_atlas_pending, parsed_atlas,
          sizeof parsed_atlas[0] * (size_t)parsed_count);
   S.dynamic_tag_count_pending = parsed_count;
-  S.private_tag_min_pending = GLM_MAX(304, 581 - source_count);
+  S.private_tag_min_pending = GLM_MAX(368, 581 - source_count);
   S.dynamic_atlas_tex_pending = new_tex;
   S.dynamic_swap_pending = true;
   return true;
@@ -506,7 +533,8 @@ static bool install_fixed_catalog(struct mg_str json) {
 
     ntl_tag_meta meta;
     memset(&meta, 0, sizeof meta);
-    meta.id = 304 + source_index;
+    // NTL: fstags index 104+k -> id 304+k up to 367, then 668+ (see main-mt.js)
+    meta.id = source_index < 64 ? 304 + source_index : 668 + (source_index - 64);
     snprintf(path, sizeof path, "$.d[%d].fst_blbw", source_index);
     long display_w = json_long_flexible(json, path, image_w);
     snprintf(path, sizeof path, "$.d[%d].fst_blbh", source_index);
@@ -553,7 +581,8 @@ static bool install_fixed_catalog(struct mg_str json) {
   memcpy(S.fixed_atlas_pending, parsed_atlas,
          sizeof parsed_atlas[0] * (size_t)parsed_count);
   S.fixed_tag_count_pending = parsed_count;
-  S.public_tag_max_pending = 303 + source_count;
+  S.public_tag_max_pending = 303 + GLM_MIN(source_count, 64);
+  S.public_hi_max_pending = 667 + GLM_MAX(0, source_count - 64);
   S.fixed_atlas_tex_pending = new_tex;
   S.fixed_swap_pending = true;
   return true;
@@ -706,6 +735,7 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
     bool rejected = status >= 200 && status < 300 && !ok;
     if (ok) {
       int id = S.pending_tag_id;
+      S.code_result = 1;
       commit_tag(id, S.pending_hash);
       S.authz_next = 0.0;
       start_authorize();
@@ -716,6 +746,7 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
       set_status(msg);
       ntl_team_system_message(msg);
     } else {
+      S.code_result = 2;
       char msg[224];
       if (rejected)
         snprintf(msg, sizeof msg,
@@ -740,6 +771,7 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
       S.auth = NULL;
       S.pending_tag_id = -1;
       S.auth_started = 0.0;
+      S.code_result = 2;
       set_status("NTL private-tag server connection failed.");
       ntl_team_system_message(S.status);
     }
@@ -922,7 +954,8 @@ static void apply_mapping(const uint8_t *data, size_t len) {
 
 static int map_lookup_exact(int id) {
   for (int i = 0; i < S.map_count; i++)
-    if (S.map[i].id == id && S.map[i].tag >= 0 && S.map[i].tag <= 666)
+    if (S.map[i].id == id && S.map[i].tag >= 0 &&
+        (S.map[i].tag <= 666 || S.map[i].tag >= 756))
       return S.map[i].tag;
   return -1;
 }
@@ -934,7 +967,7 @@ static int map_lookup_low10(int id) {
   if ((id & 1023) == 0) return -1;
   for (int i = 0; i < S.map_count; i++)
     if ((S.map[i].id & 1023) == (id & 1023) && S.map[i].tag >= 0 &&
-        S.map[i].tag <= 666)
+        (S.map[i].tag <= 666 || S.map[i].tag >= 756))
       return S.map[i].tag;
   return -1;
 }
@@ -1067,7 +1100,8 @@ void ntl_tags_init(tenv *env) {
   S.catalog_version = 1;
   S.fixed_catalog_version = 1;
   S.public_tag_max = 367;
-  S.private_tag_min = 374;
+  S.public_hi_max = 671;
+  S.private_tag_min = 368;
   S.next_catalog_sync = 0.0;
   S.next_fixed_catalog_sync = 0.0;
   set_status("Syncing the latest NTL public and private tags...");
@@ -1118,6 +1152,7 @@ static void finalize_pending_catalog_swaps(tenv *env) {
                  (size_t)S.fixed_tag_count_pending);
       S.fixed_tag_count = S.fixed_tag_count_pending;
       S.public_tag_max = S.public_tag_max_pending;
+      S.public_hi_max = S.public_hi_max_pending;
       S.fixed_atlas_tex = S.fixed_atlas_tex_pending;
       S.fixed_atlas_ds = new_ds;
     } else {
@@ -1142,6 +1177,7 @@ void ntl_tags_update(tenv *env) {
     S.auth->is_closing = 1;
     S.auth = NULL;
     S.pending_tag_id = -1;
+    S.code_result = 2;
     set_status("NTL private-tag authorization timed out.");
     ntl_team_system_message(S.status);
   }
@@ -1334,11 +1370,13 @@ bool ntl_tags_request_private(int id, const char *password_in) {
       break;
     }
   if (!S.env || !S.env->usr || !ntl_tags_is_protected_tag(id)) {
+    S.code_result = 2;
     set_status("Enter a valid private NTL tag ID.");
     ntl_team_system_message(S.status);
     return false;
   }
   if (!password || !password[0]) {
+    S.code_result = 2;
     set_status("A password is required for a private tag.");
     ntl_team_system_message(S.status);
     return false;
@@ -1349,6 +1387,7 @@ bool ntl_tags_request_private(int id, const char *password_in) {
     return false;
   }
 
+  S.code_result = 0;
   private_id = id;
   strncpy(private_password, password, sizeof private_password - 1);
   private_password[sizeof private_password - 1] = 0;
@@ -1360,6 +1399,7 @@ bool ntl_tags_request_private(int id, const char *password_in) {
   S.auth_started = mg_millis() / 1000.0;
   if (!S.auth) {
     S.pending_tag_id = -1;
+    S.code_result = 2;
     set_status("Could not contact the NTL private-tag server.");
     ntl_team_system_message(S.status);
     return false;
@@ -1407,20 +1447,58 @@ bool ntl_tags_handle_command(const char *input) {
 
   char *end = NULL;
   long parsed = strtol(id_text, &end, 10);
-  if (!end || *end || parsed < 0 || parsed > 666 ||
+  if (!end || *end || parsed < 0 || (parsed > 666 && parsed < 756) || parsed > 4095 ||
       !ntl_tags_exists((int)parsed)) {
+    S.code_result = 2;
     ntl_team_system_message("Unknown NTL tag ID.");
     return true;
   }
   int id = (int)parsed;
 
   if (ntl_tags_is_packet_tag(id)) {
-    ntl_tags_select_public(id);
+    S.code_result = ntl_tags_select_public(id) ? 1 : 2;
     return true;
   }
 
   ntl_tags_request_private(id, password);
   return true;
+}
+
+// The tag box takes what people paste in NTL chat: "!tag 380 code", "380 code"
+// or only the code (then the Tag ID field is used). Returns true when the text
+// names a tag id itself; *has_prefix tells whether it started with !tag.
+static bool split_tag_input(const char *text, int *id, char *code,
+                            size_t code_size, bool *has_prefix) {
+  char copy[160];
+  strncpy(copy, text ? text : "", sizeof copy - 1);
+  copy[sizeof copy - 1] = 0;
+  char *tok[3] = {NULL, NULL, NULL};
+  int n = 0;
+  char *save = NULL;
+  for (char *t = strtok_r(copy, " \t\r\n", &save); t && n < 3;
+       t = strtok_r(NULL, " \t\r\n", &save))
+    tok[n++] = t;
+  int i = 0;
+  bool prefixed = n > 0 && !strcmp(tok[0], "!tag");
+  if (prefixed) i = 1;
+  if (has_prefix) *has_prefix = prefixed;
+  code[0] = 0;
+  bool got_id = false;
+  if (i < n) {
+    char *end = NULL;
+    long v = strtol(tok[i], &end, 10);
+    bool numeric = end && end != tok[i] && !*end;
+    if (numeric && (prefixed || i + 1 < n)) {
+      if (id) *id = (int)v;
+      got_id = true;
+      ++i;
+    }
+  }
+  if (i < n) {
+    strncpy(code, tok[i], code_size - 1);
+    code[code_size - 1] = 0;
+  }
+  return got_id;
 }
 
 void ntl_tags_skin_panel(tenv *env) {
@@ -1483,27 +1561,79 @@ void ntl_tags_skin_panel(tenv *env) {
   if (igInputInt("Tag ID", &private_id, 1, 10,
                  ImGuiInputTextFlags_None)) {
     if (private_id < 0) private_id = 0;
-    if (private_id > 666) private_id = 666;
+    if (private_id > 4095) private_id = 4095;
     if (ntl_tags_is_protected_tag(private_id) && find_atlas_entry(private_id))
       S.preview_tag_id = private_id;
   }
   if (private_id < 0) private_id = 0;
-  if (private_id > 666) private_id = 666;
+  if (private_id > 4095) private_id = 4095;
+  // tag code box: the code stays visible, Enter/Done applies it, Paste reads
+  // the clipboard directly (the on-screen keyboard cannot paste here)
   igSetNextItemWidth(-1.0f);
-  igInputTextWithHint("##private_tag_password", "Private tag password",
-                      private_password, sizeof private_password,
-                      ImGuiInputTextFlags_Password, NULL, NULL);
+  bool code_enter = igInputTextWithHint(
+      "##private_tag_password", "Type or paste: !tag 380 code", private_password,
+      sizeof private_password, ImGuiInputTextFlags_EnterReturnsTrue, NULL,
+      NULL);
+  if (igIsItemEdited()) S.code_result = 0;
+  if (igButton("Paste", (ImVec2){0, 0})) {
+    const char *clip = android_jni_get_clipboard_text();
+    if (clip && clip[0]) {
+      trim_copy(private_password, sizeof private_password, clip, strlen(clip));
+      for (char *c = private_password; *c; ++c)
+        if (isspace((unsigned char)*c)) {
+          *c = 0;
+          break;
+        }
+      S.code_result = 0;
+    }
+  }
+  igSameLine(0, 8);
+  if (igButton("Clear", (ImVec2){0, 0})) {
+    memset(private_password, 0, sizeof private_password);
+    S.code_result = 0;
+  }
   bool valid_private = ntl_tags_is_protected_tag(private_id);
-  igBeginDisabled(!valid_private || S.auth != NULL);
+  int box_id = private_id;
+  char box_code[96];
+  bool box_prefix = false;
+  bool box_has_id = split_tag_input(private_password, &box_id, box_code,
+                                    sizeof box_code, &box_prefix);
+  bool apply_code = code_enter;
+  igBeginDisabled(S.auth != NULL);
   if (igButton(S.auth ? "Checking..." : "Apply private tag",
-               (ImVec2){0, 0})) {
-    char cmd[160];
-    snprintf(cmd, sizeof cmd, "!tag %d %s", private_id, private_password);
+               (ImVec2){0, 0}))
+    apply_code = true;
+  igEndDisabled();
+  if (apply_code && !S.auth) {
+    char typed[96];
+    strncpy(typed, private_password, sizeof typed - 1);
+    typed[sizeof typed - 1] = 0;
+    if (box_has_id) {
+      if (box_id < 0) box_id = 0;
+      if (box_id > 4095) box_id = 4095;
+      private_id = box_id;
+    }
+    char cmd[200];
+    if (box_prefix)
+      snprintf(cmd, sizeof cmd, "%s", typed);  // exactly what NTL chat gets
+    else
+      snprintf(cmd, sizeof cmd, "!tag %d %s", private_id, box_code);
     ntl_tags_handle_command(cmd);
     memset(cmd, 0, sizeof cmd);
+    // keep what the person typed instead of cutting it down to one word
+    strncpy(private_password, typed, sizeof private_password - 1);
+    private_password[sizeof private_password - 1] = 0;
+    memset(typed, 0, sizeof typed);
   }
-  igEndDisabled();
-  if (!valid_private)
+  // result of the last check, right next to the box
+  igSameLine(0, 12);
+  if (S.auth)
+    igTextDisabled("...");
+  else if (S.code_result == 1)
+    igTextColored((ImVec4){0.25f, 0.95f, 0.35f, 1.0f}, "ok");
+  else if (S.code_result == 2)
+    igTextColored((ImVec4){1.0f, 0.3f, 0.3f, 1.0f}, "error");
+  if (!valid_private && !box_has_id)
     igTextColored((ImVec4){1.0f, 0.55f, 0.25f, 1.0f},
                   "This ID is public or outside the private-tag ranges.");
 
@@ -1531,6 +1661,7 @@ void ntl_tags_skin_panel(tenv *env) {
     key = (key ^ (unsigned)S.fixed_tag_count) * 16777619u;
     key = (key ^ (unsigned)S.dynamic_tag_count) * 16777619u;
     key = (key ^ (unsigned)S.public_tag_max) * 16777619u;
+    key = (key ^ (unsigned)S.public_hi_max) * 16777619u;
     for (int i = 0; i < S.fixed_tag_count; ++i)
       key = (key ^ (unsigned)S.fixed_atlas[i].id) * 16777619u;
     for (int i = 0; i < S.dynamic_tag_count; ++i)

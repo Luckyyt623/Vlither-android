@@ -577,7 +577,7 @@ int ntl_team_tag_for_snake(uint16_t ntl_id, const char *server) {
   for (int i = 0; i < S.count; ++i) {
     ntl_member *m = &S.members[i];
     if (m->sid == (int)ntl_id && same_server(m->srv, server) &&
-        m->tg >= 0 && m->tg <= 666)
+        m->tg >= 0 && (m->tg <= 666 || m->tg >= 756))
       return m->tg;
   }
   return -1;

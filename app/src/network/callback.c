@@ -230,7 +230,8 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
       } else if (packet_tag) {
         marker0 = 255;
         marker1 = 38;
-        marker6 = (uint8_t)(selected_tag - 200);
+        marker6 = (uint8_t)(selected_tag >= 668 ? selected_tag - 500
+                                                : selected_tag - 200);
       }
 
       ba[m++] = marker0;
@@ -338,7 +339,8 @@ void got_packet(tenv* env, uint8_t* a, int a_len) {
         if (a[m] == 254 && a[m + 1] == 18 && a[m + 6] <= 59) {
           o.ntl_packet_tag_id = (int)a[m + 6];
         } else if (a[m] == 255 && a[m + 1] == 38) {
-          int public_tag = 200 + (int)a[m + 6];
+          int pidx = (int)a[m + 6];
+          int public_tag = pidx < 168 ? 200 + pidx : 500 + pidx;
           if (ntl_tags_exists(public_tag)) o.ntl_packet_tag_id = public_tag;
         }
         o.ntl_tag_id = o.ntl_packet_tag_id;

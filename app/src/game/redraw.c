@@ -353,6 +353,31 @@ static void vl_skinless_strip(game_data* gdata, int bp, float cx, float cy,
   }
 }
 
+// The skinless body is an ImGui draw list, and ImGui is drawn after the whole
+// body-part renderer. A centre line pushed through the body-part renderer
+// would end up under the translucent body, so in Skinless it is drawn on the
+// same list, after the body.
+static void vl_skinless_center_line(game_data* gdata, int bp, float cx,
+                                    float cy, float shade, float alpha,
+                                    float thickness) {
+  ImDrawList* draw = igGetWindowDrawList();
+  ImVec2 buf[SKINLESS_RUN];
+  ImU32 col = igColorConvertFloat4ToU32((ImVec4){shade, shade, shade, alpha});
+  int n = 0;
+  int i;
+  for (i = 0; i < bp; ++i) {
+    buf[n].x = cx + (gdata->data.pbx[i] - gdata->data.view_xx) * gdata->data.gsc;
+    buf[n].y = cy + (gdata->data.pby[i] - gdata->data.view_yy) * gdata->data.gsc;
+    n += 1;
+    if (n == SKINLESS_RUN || i == bp - 1) {
+      if (n >= 2)
+        ImDrawList_AddPolyline(draw, buf, n, col, ImDrawFlags_None, thickness);
+      buf[0] = buf[n - 1];
+      n = 1;
+    }
+  }
+}
+
 void redraw(tenv* env) {
   tuser_data* usr = env->usr;
   tcontext* ctx = env->ctx;
@@ -1483,6 +1508,10 @@ void redraw(tenv* env) {
                             line_base.b * 0.0722f;
           float line_rgb = luminance > 0.82f ? 0.0f : 1.0f;
           const float line_thickness = 2.0f;
+          if (snake_render_mode == 3)
+            vl_skinless_center_line(gdata, (int)bp, mww2, mhh2, line_rgb, a,
+                                    line_thickness);
+          else
           for (j = 1; j < bp; j++) {
             float x1 = ((gdata->data.pbx[(int)j - 1] - gdata->data.view_xx) *
                         gdata->data.gsc) +

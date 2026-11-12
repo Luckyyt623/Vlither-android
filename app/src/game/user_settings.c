@@ -634,7 +634,7 @@ void read_user_settings(user_settings* usr_settings) {
     valid_tag_hash = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
   }
   if (!valid_tag_hash) loaded.ntl_tag_password_md5[0] = 0;
-  if (loaded.ntl_tag_id < -1 || loaded.ntl_tag_id > 666) {
+  if (loaded.ntl_tag_id < -1 || loaded.ntl_tag_id > 4095) {
     loaded.ntl_tag_id = -1;
     loaded.ntl_tag_password_md5[0] = 0;
   }
