@@ -27,7 +27,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TAG               = "VlitherMain"
-        private const val CURRENT_VERSION   = "4.8.3"
+        private const val CURRENT_VERSION   = "4.8.4"
         private const val VERSION_URL       = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/version.txt"
         private const val DOWNLOAD_URL_FILE = "https://raw.githubusercontent.com/Luckyyt623/Vlither_android/main/download_url.txt"
 
@@ -261,16 +261,20 @@ class MainActivity : Activity() {
 
     private fun showChangelog() {
         val message = """
-Vlither 4.8.3
-• More tags added
-• Physics keyboard is working properly now
-• Centre line visibility in skinless is fixed 
+Vlither 4.8.4 
+
+- Now you can open settings and control in game just press "O" for settings and "C" for controls
+- you can load all private tags that only visible to you 
+- Whenever you apply for tag that will save on tag page (In NTL tag) 
+- in game chat remove that top 2 NTL and Vlither button for clear visibility now just type"/NTL" to switch to NTL chat and "/Vlither" for Vlither chat.
+- You can make highlighted Battledome ring, by default it on you can off it from settings>gernal slide scroll down at bottom.
+(This only works in some Battledome)
 
 Changes by Insane.
         """.trimIndent()
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("What's New in v4.8.3")
+            .setTitle("What's New in v4.8.4")
             .setMessage(message)
             .setPositiveButton("Got it") { dialog, _ -> dialog.dismiss() }
             .show()

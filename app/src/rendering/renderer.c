@@ -64,7 +64,7 @@ bool renderer_reload_profile_image(renderer* r, tcontext* ctx) {
   snprintf(path, sizeof path, "%s/profile_image", files);
   struct stat st;
   if (stat(path, &st) != 0 || st.st_size <= 0) {
-    if (r->profile_tex) {   /* file removed -> drop the texture */
+    if (r->profile_tex) {
       vkQueueWaitIdle(ctx->queue);
       if (r->profile_ds) igImplVulkan_RemoveTexture(r->profile_ds);
       destroy_texture(ctx, r->profile_tex);

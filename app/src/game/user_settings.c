@@ -240,6 +240,11 @@ void user_settings_default(user_settings* usr_settings) {
   usr_settings->vlither_chat_joined = true;
   usr_settings->shader_cycle_key = GLFW_KEY_G;
   usr_settings->invisible_skin_key = GLFW_KEY_I;
+  usr_settings->settings_key = GLFW_KEY_O;
+  usr_settings->controls_key = GLFW_KEY_C;
+  usr_settings->ntl_own_tag_count = 0;
+  memset(usr_settings->ntl_own_tags, 0, sizeof usr_settings->ntl_own_tags);
+  usr_settings->ntl_load_all_tags = false;
   usr_settings->shader_cycle_index = -1;
   usr_settings->own_skin_invisible = false;
   usr_settings->zslider_thickness = 1.0f;
@@ -462,11 +467,15 @@ void read_user_settings(user_settings* usr_settings) {
       offsetof(user_settings, food_origin_scale_settings_reserved);
   size_t v49_prefix =
       offsetof(user_settings, vis_settings_reserved);
+  size_t v50_prefix =
+      offsetof(user_settings, ntl_own_tags_reserved);
   bool migrate_single_mode_features =
       (size_t)file_size >= v37_prefix && (size_t)file_size < v38_prefix;
   size_t bytes_to_read;
   if ((size_t)file_size >= sizeof loaded)
     bytes_to_read = sizeof loaded;
+  else if ((size_t)file_size >= v50_prefix)
+    bytes_to_read = v50_prefix;
   else if ((size_t)file_size >= v49_prefix)
     bytes_to_read = v49_prefix;
   else if ((size_t)file_size >= v48_prefix)
@@ -849,6 +858,16 @@ void read_user_settings(user_settings* usr_settings) {
 
   loaded.instant_death = !!loaded.instant_death;
   loaded.show_own_nickname_ingame = !!loaded.show_own_nickname_ingame;
+  if (loaded.ntl_own_tag_count < 0 || loaded.ntl_own_tag_count > 32)
+    loaded.ntl_own_tag_count = 0;
+  for (int i = 0; i < loaded.ntl_own_tag_count; ++i) {
+    loaded.ntl_own_tags[i].password_md5[32] = 0;
+  }
+  loaded.ntl_load_all_tags = !!loaded.ntl_load_all_tags;
+  if (loaded.settings_key < GLFW_KEY_0 || loaded.settings_key > GLFW_KEY_Z)
+    loaded.settings_key = GLFW_KEY_O;
+  if (loaded.controls_key < GLFW_KEY_0 || loaded.controls_key > GLFW_KEY_Z)
+    loaded.controls_key = GLFW_KEY_C;
 
   *usr_settings = loaded;
 }

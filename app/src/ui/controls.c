@@ -16,14 +16,12 @@ static const char* const ARROW_STYLE_NAMES[ARROW_STYLE_COUNT] = {
     "Wing 3D", "Yellow Double", "Purple", "Magenta",
 };
 
-
-/* ---- Decision Visuals: searchable list ---------------------------------- */
-enum { VROW_BOT_VIS = -2, VROW_MANUAL = -1 }; /* >=0 are vis_element ids */
+enum { VROW_BOT_VIS = -2, VROW_MANUAL = -1 };
 
 typedef struct {
   int id;
   const char* label;
-  const char* keywords; /* extra words the search bar matches against */
+  const char* keywords;
 } vis_row;
 
 static const vis_row VIS_ROWS[] = {
@@ -64,7 +62,6 @@ static bool vis_ci_has(const char* hay, const char* needle, size_t nlen) {
   return false;
 }
 
-/* Every space-separated word typed must appear in label or keywords. */
 static bool vis_row_matches(const vis_row* r, const char* query) {
   const char* p = query;
   while (*p) {
@@ -628,7 +625,11 @@ void ui_controls(tenv* env) {
       igSameLine(0, btn_gap);
       if (igButton("OK", (ImVec2){btn_w, btn_h})) {
         save_user_settings(usrs);
-        gdata->curr_screen = TITLE_SCREEN;
+        gdata->curr_screen =
+            (!gdata->preview_active &&
+             (gdata->conn == CONNECTED || gdata->conn == CONNECTING))
+                ? PLAYING
+                : TITLE_SCREEN;
       }
     }
   }

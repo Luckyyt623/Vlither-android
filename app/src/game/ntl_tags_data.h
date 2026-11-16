@@ -10,7 +10,6 @@ typedef struct ntl_tag_meta {
   uint8_t c1[3], c2[3];
 } ntl_tag_meta;
 
-// Generated from vlither-main ntl_tags_main_data.h (c1 = core colour, c2 = rim colour)
 static const ntl_tag_meta NTL_TAG_METADATA[] = {
   {0, 101, 119, 0.000f, 0.000f, {236, 36, 28}, {244, 36, 28}},
   {1, 130, 71, 0.000f, 0.000f, {84, 28, 4}, {252, 220, 164}},

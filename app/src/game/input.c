@@ -301,6 +301,46 @@ void input(tenv* env) {
     save_user_settings(usrs);
   }
 
+  int settings_key = usrs->settings_key;
+  bool settings_pressed = !typing &&
+      ((physical_keys_enabled &&
+        tkeyboard_key_pressed(env->kb, settings_key)) ||
+       (settings_key >= 0 && settings_key < 512 &&
+        gdata->data.fake_key_pressed[settings_key]));
+  if (settings_pressed) {
+    if (gdata->curr_screen == SETTINGS) {
+      save_user_settings(usrs);
+      gdata->curr_screen =
+          (!gdata->preview_active &&
+           (gdata->conn == CONNECTED || gdata->conn == CONNECTING))
+              ? PLAYING
+              : TITLE_SCREEN;
+    } else if (gdata->curr_screen == PLAYING ||
+               gdata->curr_screen == CONTROLS) {
+      gdata->curr_screen = SETTINGS;
+    }
+  }
+
+  int controls_key = usrs->controls_key;
+  bool controls_pressed = !typing &&
+      ((physical_keys_enabled &&
+        tkeyboard_key_pressed(env->kb, controls_key)) ||
+       (controls_key >= 0 && controls_key < 512 &&
+        gdata->data.fake_key_pressed[controls_key]));
+  if (controls_pressed) {
+    if (gdata->curr_screen == CONTROLS) {
+      save_user_settings(usrs);
+      gdata->curr_screen =
+          (!gdata->preview_active &&
+           (gdata->conn == CONNECTED || gdata->conn == CONNECTING))
+              ? PLAYING
+              : TITLE_SCREEN;
+    } else if (gdata->curr_screen == PLAYING ||
+               gdata->curr_screen == SETTINGS) {
+      gdata->curr_screen = CONTROLS;
+    }
+  }
+
   bool sos_pressed = !typing &&
       ((physical_keys_enabled &&
         tkeyboard_key_pressed(env->kb, GLFW_KEY_S)) ||
@@ -310,6 +350,7 @@ void input(tenv* env) {
   usrs->hotkeys[HOTKEY_RESTART].active = false;
   usrs->hotkeys[HOTKEY_QUIT].active = false;
 
+  if (gdata->curr_screen == PLAYING) {
   for (int i = 0; i < NUM_HOTKEYS; i++) {
     hotkey* hk = usrs->hotkeys + i;
     bool real_down    = physical_keys_enabled && twindow_key_down(env->wnd, hk->key);
@@ -322,6 +363,7 @@ void input(tenv* env) {
       hk->active = real_down || fake_down;
     else
       hk->active ^= (real_pressed || fake_pressed);
+  }
   }
 
   memset(gdata->data.fake_key_pressed, 0,

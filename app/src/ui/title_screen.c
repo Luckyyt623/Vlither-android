@@ -36,14 +36,14 @@ static const char* const HOMEPAGE_BACKGROUND_NAMES[] = {
 
 static ImVec4 homepage_accent(int background) {
   static const ImVec4 accents[] = {
-      {0.62f, 0.52f, 0.98f, 1.0f},  /* Normal Vlither   - violet  */
-      {0.36f, 0.82f, 0.48f, 1.0f},  /* Alpine Valley    - green   */
-      {0.98f, 0.66f, 0.34f, 1.0f},  /* Himalayan Dawn   - amber   */
-      {0.30f, 0.70f, 1.00f, 1.0f},  /* Cloudsea Sunrise - sky     */
-      {0.92f, 0.40f, 0.98f, 1.0f},  /* Neon Bridge      - magenta */
-      {0.40f, 0.55f, 1.00f, 1.0f},  /* Galaxy           - indigo  */
-      {0.97f, 0.72f, 0.28f, 1.0f},  /* Fuji Sunset      - gold    */
-      {0.82f, 0.84f, 0.90f, 1.0f},  /* Custom           - silver  */
+      {0.62f, 0.52f, 0.98f, 1.0f},
+      {0.36f, 0.82f, 0.48f, 1.0f},
+      {0.98f, 0.66f, 0.34f, 1.0f},
+      {0.30f, 0.70f, 1.00f, 1.0f},
+      {0.92f, 0.40f, 0.98f, 1.0f},
+      {0.40f, 0.55f, 1.00f, 1.0f},
+      {0.97f, 0.72f, 0.28f, 1.0f},
+      {0.82f, 0.84f, 0.90f, 1.0f},
   };
   if (background < 0 || background > 7) background = 5;
   return accents[background];
@@ -121,12 +121,11 @@ static float homepage_px(float value) {
 static float homepage_min(float a, float b) { return a < b ? a : b; }
 static float homepage_max(float a, float b) { return a > b ? a : b; }
 
-/* ===== glass / accent homepage style helpers ===== */
-static float g_hp_u = 1.0f;            /* design-unit -> pixel scale             */
-static float g_ox = 0.0f, g_oy = 0.0f; /* pixel offset of the design origin      */
+static float g_hp_u = 1.0f;
+static float g_ox = 0.0f, g_oy = 0.0f;
 static bool  g_hp_portrait = false;
-static float g_hp_w = 0.0f;            /* screen width in pixels                 */
-static ImVec4 g_acc = {0.97f, 0.72f, 0.28f, 1.0f}; /* accent for this background */
+static float g_hp_w = 0.0f;
+static ImVec4 g_acc = {0.97f, 0.72f, 0.28f, 1.0f};
 static float g_tog_x[3], g_tog_y[3], g_tog_w_p;
 
 static float hp_toggle_w(void) {
@@ -244,9 +243,9 @@ static void draw_snakey_rain_homepage(tenv *env, float frame_height) {
   float popup_w = homepage_min(homepage_px(390.0f),
                                env->ctx->size[0] - homepage_px(24.0f));
   igSetNextWindowSize((ImVec2){popup_w, 0.0f}, ImGuiCond_Appearing);
-  static bool s_cred_ok = false;   /* user accepted the "real account" notice */
+  static bool s_cred_ok = false;
   if (!igBeginPopup("Snakey Rain Settings", ImGuiWindowFlags_NoSavedSettings)) {
-    s_cred_ok = false;             /* ask again next time the panel is opened */
+    s_cred_ok = false;
     return;
   }
 
@@ -265,8 +264,6 @@ static void draw_snakey_rain_homepage(tenv *env, float frame_height) {
   }
   igSpacing();
 
-  /* The default login (snakeyuser / wormfood) cannot spawn bots. Editing it
-   * first shows a notice and needs an OK. */
   const bool cred_default =
       strcmp(us->snakey_rain_username, "snakeyuser") == 0 ||
       strcmp(us->snakey_rain_password, "wormfood") == 0;
@@ -416,7 +413,6 @@ static void join_event(tenv *env, int index) {
   join_server_address(env, vlither_event_server_at(index));
 }
 
-/* First http(s) link inside an event description (registration, bot channel). */
 static bool event_find_link(const char *text, char *out, size_t cap) {
   const char *p = text ? strstr(text, "https://") : NULL;
   if (!p) return false;
@@ -436,10 +432,40 @@ static ImVec4 ntl_tier_color(const char *tier) {
   return (ImVec4){0.78f, 0.80f, 0.84f, 1.0f};
 }
 
-/* One card. state: 0 = live, 1 = upcoming, 2 = ended */
+static bool any_event_live(long long now_ms) {
+  int vcount = vlither_event_count();
+  for (int i = 0; i < vcount; ++i) {
+    long long s = vlither_event_start_at_ms(i);
+    long long r = vlither_event_remove_at_ms(i);
+    if (s > 0 && now_ms >= s && (r <= 0 || now_ms < r)) return true;
+  }
+  int ncount = vlither_ntl_event_count();
+  for (int i = 0; i < ncount; ++i) {
+    long long s = vlither_ntl_event_start_at_ms(i);
+    long long e = vlither_ntl_event_end_at_ms(i);
+    if (s > 0 && s <= now_ms && (e <= 0 || now_ms < e)) return true;
+  }
+  return false;
+}
+
+static void draw_event_badge(const char *text, ImVec4 bg, ImVec4 fg) {
+  ImGuiStyle *st = igGetStyle();
+  ImVec2 tsz;
+  igCalcTextSize(&tsz, text, NULL, false, -1.0f);
+  ImVec2 p;
+  igGetCursorScreenPos(&p);
+  float pad_x = homepage_px(10.0f), pad_y = homepage_px(4.0f);
+  ImVec2 p1 = {p.x + tsz.x + pad_x * 2.0f, p.y + tsz.y + pad_y * 2.0f};
+  ImDrawList *dl = igGetWindowDrawList();
+  ImDrawList_AddRectFilled(dl, p, p1, igColorConvertFloat4ToU32(bg),
+                           homepage_px(8.0f), 0);
+  ImDrawList_AddText_Vec2(dl, (ImVec2){p.x + pad_x, p.y + pad_y},
+                          igColorConvertFloat4ToU32(fg), text, NULL);
+  igDummy((ImVec2){p1.x - p.x, p1.y - p.y});
+  (void)st;
+}
+
 static void ntl_event_card(tenv *env, int i, int state, long long now_ms) {
-  ImGuiStyle *style = igGetStyle();
-  (void)style;
   igPushID_Int(i);
   const long long start_ms = vlither_ntl_event_start_at_ms(i);
   const long long end_ms = vlither_ntl_event_end_at_ms(i);
@@ -459,72 +485,125 @@ static void ntl_event_card(tenv *env, int i, int state, long long now_ms) {
   }
   int num = vlither_ntl_event_number_at(i);
   if (num >= 0)
-    snprintf(title, sizeof title, "%s #%d  -  %s",
-             vlither_ntl_event_type_at(i), num, date_only);
+    snprintf(title, sizeof title, "%s #%d",
+             vlither_ntl_event_type_at(i), num);
   else
-    snprintf(title, sizeof title, "%s  -  %s", vlither_ntl_event_type_at(i),
-             date_only);
-  igSeparatorText(title);
+    snprintf(title, sizeof title, "%s", vlither_ntl_event_type_at(i));
 
-  if (state == 0)
-    igTextColored((ImVec4){0.20f, 0.92f, 0.55f, 1.0f}, "LIVE NOW");
-  else if (state == 1) {
-    event_format_countdown(start_ms - now_ms, countdown, sizeof countdown);
-    igTextColored((ImVec4){0.95f, 0.78f, 0.28f, 1.0f}, "Starts in %s",
-                  countdown);
-  } else {
-    igTextDisabled("Ended");
-  }
-  igText("Start: %s", start_text);
-  if (end_ms > 0) {
-    igText("End: %s", end_text);
-    long long mins = (end_ms - start_ms) / 60000LL;
-    if (mins > 0) igText("Duration: %lld min", mins);
-  }
-  if (vlither_ntl_event_people_at(i) > 0)
-    igText("Players: %d", vlither_ntl_event_people_at(i));
-  if (vlither_ntl_event_prize_text_at(i, prize, sizeof prize)) {
-    const char *tier = vlither_ntl_event_tier_at(i);
-    igTextColored(ntl_tier_color(tier), "Prize: %s%s%s%s", prize,
-                  tier[0] ? "  [" : "", tier, tier[0] ? "]" : "");
-  }
-  const char *server = vlither_ntl_event_server_at(i);
-  if (server[0]) igText("Server: %s", server);
+  ImVec4 card_bg = state == 0 ? (ImVec4){0.06f, 0.14f, 0.11f, 0.94f}
+                 : state == 1 ? (ImVec4){0.08f, 0.11f, 0.18f, 0.94f}
+                              : (ImVec4){0.06f, 0.08f, 0.12f, 0.85f};
+  ImVec4 card_bd = state == 0 ? (ImVec4){0.18f, 0.85f, 0.50f, 0.65f}
+                 : state == 1 ? (ImVec4){0.92f, 0.72f, 0.24f, 0.45f}
+                              : (ImVec4){0.26f, 0.34f, 0.48f, 0.30f};
+  igPushStyleVar_Float(ImGuiStyleVar_ChildRounding, 14.0f);
+  igPushStyleVar_Float(ImGuiStyleVar_ChildBorderSize, state == 0 ? 1.5f : 1.0f);
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, (ImVec2){14.0f, 12.0f});
+  igPushStyleColor_Vec4(ImGuiCol_ChildBg, card_bg);
+  igPushStyleColor_Vec4(ImGuiCol_Border, card_bd);
 
-  const char *desc = vlither_ntl_event_description_at(i);
-  if (desc[0]) {
-    if (igCollapsingHeader_TreeNodeFlags("Details & Rules", 0)) {
-      igPushTextWrapPos(0.0f);
-      igTextWrapped("%s", desc);
-      igPopTextWrapPos();
-      char link[200];
-      if (event_find_link(desc, link, sizeof link) &&
-          igButton("Open registration link", (ImVec2){0, 0}))
-        android_jni_open_url(link);
+  char card_id[32];
+  snprintf(card_id, sizeof card_id, "##ntl_ev_card_%d", i);
+  if (igBeginChild_Str(card_id, (ImVec2){-1.0f, 0.0f},
+                       ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY,
+                       ImGuiWindowFlags_None)) {
+    if (state == 0) {
+      draw_event_badge("LIVE NOW", (ImVec4){0.12f, 0.62f, 0.36f, 0.95f},
+                       (ImVec4){1, 1, 1, 1});
+    } else if (state == 1) {
+      event_format_countdown(start_ms - now_ms, countdown, sizeof countdown);
+      char up_txt[80];
+      snprintf(up_txt, sizeof up_txt, "STARTS IN %s", countdown);
+      draw_event_badge(up_txt, (ImVec4){0.62f, 0.44f, 0.10f, 0.95f},
+                       (ImVec4){1.0f, 0.94f, 0.74f, 1.0f});
+    } else {
+      draw_event_badge("ENDED", (ImVec4){0.22f, 0.25f, 0.32f, 0.90f},
+                       (ImVec4){0.78f, 0.82f, 0.88f, 1.0f});
+    }
+    if (vlither_ntl_event_prize_text_at(i, prize, sizeof prize)) {
+      igSameLine(0, homepage_px(8.0f));
+      const char *tier = vlither_ntl_event_tier_at(i);
+      char pbuf[112];
+      if (tier[0])
+        snprintf(pbuf, sizeof pbuf, "PRIZE: %s (%s)", prize, tier);
+      else
+        snprintf(pbuf, sizeof pbuf, "PRIZE: %s", prize);
+      draw_event_badge(pbuf, (ImVec4){0.14f, 0.22f, 0.34f, 0.95f},
+                       ntl_tier_color(tier));
+    }
+    if (date_only[0]) {
+      igSameLine(0, homepage_px(8.0f));
+      draw_event_badge(date_only, (ImVec4){0.14f, 0.18f, 0.26f, 0.85f},
+                       (ImVec4){0.75f, 0.84f, 0.96f, 1.0f});
+    }
+
+    igSpacing();
+    igTextColored((ImVec4){0.94f, 0.97f, 1.0f, 1.0f}, "%s", title);
+
+    igTextColored((ImVec4){0.68f, 0.78f, 0.92f, 1.0f}, "Start: %s", start_text);
+    if (end_ms > 0) {
+      long long mins = (end_ms - start_ms) / 60000LL;
+      if (mins > 0)
+        igTextDisabled("End: %s  (%lld min)", end_text, mins);
+      else
+        igTextDisabled("End: %s", end_text);
+    }
+    const char *server = vlither_ntl_event_server_at(i);
+    if (server[0] || vlither_ntl_event_people_at(i) > 0) {
+      if (server[0] && vlither_ntl_event_people_at(i) > 0)
+        igTextColored((ImVec4){0.55f, 0.86f, 0.95f, 1.0f},
+                      "Server: %s   |   Players: %d", server,
+                      vlither_ntl_event_people_at(i));
+      else if (server[0])
+        igTextColored((ImVec4){0.55f, 0.86f, 0.95f, 1.0f},
+                      "Server: %s", server);
+      else
+        igText("Players: %d", vlither_ntl_event_people_at(i));
+    }
+
+    const char *desc = vlither_ntl_event_description_at(i);
+    if (desc[0]) {
+      igSpacing();
+      if (igCollapsingHeader_TreeNodeFlags("Details & Rules", 0)) {
+        igPushTextWrapPos(0.0f);
+        igTextWrapped("%s", desc);
+        igPopTextWrapPos();
+        char link[200];
+        if (event_find_link(desc, link, sizeof link) &&
+            igButton("Open registration link", (ImVec2){0, 0}))
+          android_jni_open_url(link);
+      }
+    }
+    if (server[0] && state != 2) {
+      igSpacing();
+      igPushStyleColor_Vec4(ImGuiCol_Button,
+                            state == 0
+                                ? (ImVec4){0.14f, 0.65f, 0.38f, 0.95f}
+                                : (ImVec4){0.18f, 0.44f, 0.78f, 0.95f});
+      if (igButton(state == 0 ? "Join Event" : "Join early",
+                   (ImVec2){homepage_px(170.0f), 0}))
+        join_server_address(env, server);
+      igPopStyleColor(1);
+      igSameLine(0, homepage_px(8.0f));
+      if (igButton("Copy server", (ImVec2){homepage_px(145.0f), 0}))
+        igSetClipboardText(server);
     }
   }
-  if (server[0] && state != 2) {
-    if (igButton(state == 0 ? "Join Event" : "Join early",
-                 (ImVec2){homepage_px(180.0f), 0}))
-      join_server_address(env, server);
-    igSameLine(0, -1);
-    if (igButton("Copy server", (ImVec2){homepage_px(150.0f), 0}))
-      igSetClipboardText(server);
-  }
+  igEndChild();
+  igPopStyleColor(2);
+  igPopStyleVar(3);
   igSpacing();
   igPopID();
 }
 
 static void ntl_events_section(tenv *env, long long now_ms) {
   igSpacing();
-  igTextColored((ImVec4){0.45f, 0.88f, 0.70f, 1.0f}, "Events");
-  igTextDisabled("Live, upcoming and past events.");
+  igTextColored((ImVec4){0.45f, 0.88f, 0.70f, 1.0f}, "NTL Events");
   const int total = vlither_ntl_event_count();
   if (total <= 0) {
     igTextWrapped("%s", vlither_ntl_events_status());
     return;
   }
-  /* summary */
   int live = 0, upcoming = 0, past = 0, players = 0, counted = 0;
   for (int i = 0; i < total; ++i) {
     long long s = vlither_ntl_event_start_at_ms(i);
@@ -537,8 +616,31 @@ static void ntl_events_section(tenv *env, long long now_ms) {
       ++counted;
     }
   }
-  igTextDisabled("%d live | %d upcoming | %d past | avg %d players", live,
-                 upcoming, past, counted ? players / counted : 0);
+  char stat_buf[48];
+  snprintf(stat_buf, sizeof stat_buf, "%d LIVE", live);
+  draw_event_badge(stat_buf,
+                   live > 0 ? (ImVec4){0.12f, 0.56f, 0.34f, 0.95f}
+                            : (ImVec4){0.14f, 0.17f, 0.24f, 0.85f},
+                   live > 0 ? (ImVec4){1, 1, 1, 1}
+                            : (ImVec4){0.70f, 0.76f, 0.85f, 1.0f});
+  igSameLine(0, homepage_px(8.0f));
+  snprintf(stat_buf, sizeof stat_buf, "%d UPCOMING", upcoming);
+  draw_event_badge(stat_buf,
+                   upcoming > 0 ? (ImVec4){0.54f, 0.38f, 0.08f, 0.95f}
+                                : (ImVec4){0.14f, 0.17f, 0.24f, 0.85f},
+                   upcoming > 0 ? (ImVec4){1.0f, 0.92f, 0.68f, 1.0f}
+                                : (ImVec4){0.70f, 0.76f, 0.85f, 1.0f});
+  igSameLine(0, homepage_px(8.0f));
+  snprintf(stat_buf, sizeof stat_buf, "%d PAST", past);
+  draw_event_badge(stat_buf, (ImVec4){0.14f, 0.17f, 0.24f, 0.85f},
+                   (ImVec4){0.75f, 0.80f, 0.88f, 1.0f});
+  if (counted > 0) {
+    igSameLine(0, homepage_px(8.0f));
+    snprintf(stat_buf, sizeof stat_buf, "AVG %d PLAYERS", players / counted);
+    draw_event_badge(stat_buf, (ImVec4){0.14f, 0.22f, 0.34f, 0.85f},
+                     (ImVec4){0.62f, 0.86f, 1.0f, 1.0f});
+  }
+  igSpacing();
 
   if (igBeginTabBar("##ntl_event_tabs", 0)) {
     if (igBeginTabItem("Live & Upcoming", NULL, 0)) {
@@ -549,7 +651,7 @@ static void ntl_events_section(tenv *env, long long now_ms) {
         if (s <= now_ms && e > 0 && now_ms >= e) continue;
         if (s <= now_ms) { ntl_event_card(env, i, 0, now_ms); any = true; }
       }
-      /* soonest upcoming first (list is newest first) */
+
       for (int i = total - 1; i >= 0; --i) {
         if (vlither_ntl_event_start_at_ms(i) > now_ms) {
           ntl_event_card(env, i, 1, now_ms);
@@ -579,88 +681,161 @@ static void ntl_events_section(tenv *env, long long now_ms) {
 void ui_events_panel(tenv *env) {
   if (!env || !env->usr) return;
   tuser_data *usr = env->usr;
+  tcontext *ctx = env->ctx;
   ImGuiStyle *style = igGetStyle();
 
   igPushFont(usr->imgui_data.regular_font[usr->usrs.ui_font_size],
              usr->imgui_data.regular_font[usr->usrs.ui_font_size]->LegacySize);
-  igTextColored((ImVec4){0.45f, 0.68f, 1.0f, 1.0f}, "Vlither Events");
-  igTextDisabled("Times below use this phone's timezone.");
-  ImVec2 nav_avail;
-  igGetContentRegionAvail(&nav_avail);
-  float nav_w = (nav_avail.x - style->ItemSpacing.x) * 0.5f;
-  if (igButton("Back to homepage##events", (ImVec2){nav_w, 0})) {
-    usr->gdata.curr_screen = TITLE_SCREEN;
-    igPopFont();
-    return;
-  }
-  igSameLine(0, style->ItemSpacing.x);
-  if (igButton("Refresh events", (ImVec2){nav_w, 0}))
-    vlither_event_refresh();
-  igSeparator();
 
-  igBeginChild_Str("##events_full_page_scroll", (ImVec2){0, 0},
-                   ImGuiChildFlags_None,
-                   ImGuiWindowFlags_AlwaysVerticalScrollbar);
-  int count = vlither_event_count();
-  if (count <= 0) {
-    igTextWrapped("%s", vlither_event_status());
-  }
-  const long long now_ms = event_now_ms();
-  for (int i = 0; i < count; ++i) {
-    igPushID_Int(i);
-    const long long start_ms = vlither_event_start_at_ms(i);
-    const long long end_ms = vlither_event_end_at_ms(i);
-    const long long remove_ms = vlither_event_remove_at_ms(i);
-    const bool live = start_ms > 0 && now_ms >= start_ms &&
-                      (remove_ms <= 0 || now_ms < remove_ms);
-    char start_text[96], end_text[96], countdown[64];
-    event_format_local_time(start_ms, start_text, sizeof start_text);
-    event_format_local_time(end_ms, end_text, sizeof end_text);
+  float panel_w = ctx->size[0] * 0.88f;
+  float panel_h = ctx->size[1] * 0.86f;
+  if (panel_w > 1180.0f) panel_w = 1180.0f;
+  if (panel_h > ctx->size[1] - 32.0f) panel_h = ctx->size[1] - 32.0f;
+  if (panel_w < 320.0f) panel_w = ctx->size[0] - 20.0f;
+  if (panel_h < 320.0f) panel_h = ctx->size[1] - 20.0f;
+  float panel_x = (ctx->size[0] - panel_w) * 0.5f;
+  float panel_y = (ctx->size[1] - panel_h) * 0.5f;
 
-    igSeparatorText(vlither_event_name_at(i));
-    if (live)
-      igTextColored((ImVec4){0.20f, 0.92f, 0.55f, 1.0f}, "LIVE NOW");
-    else if (start_ms > now_ms) {
-      event_format_countdown(start_ms - now_ms, countdown, sizeof countdown);
-      igTextColored((ImVec4){0.95f, 0.78f, 0.28f, 1.0f},
-                    "Starts in %s", countdown);
+  igSetCursorPos((ImVec2){panel_x, panel_y});
+  igPushStyleVar_Float(ImGuiStyleVar_ChildRounding, 18.0f);
+  igPushStyleVar_Float(ImGuiStyleVar_ChildBorderSize, 1.0f);
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, (ImVec2){18.0f, 16.0f});
+  igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 8.0f);
+  igPushStyleColor_Vec4(ImGuiCol_ChildBg,
+                        (ImVec4){0.04f, 0.06f, 0.11f, 0.90f});
+  igPushStyleColor_Vec4(ImGuiCol_Border,
+                        (ImVec4){0.24f, 0.48f, 0.88f, 0.45f});
+  igPushStyleColor_Vec4(ImGuiCol_Separator,
+                        (ImVec4){0.28f, 0.42f, 0.63f, 0.38f});
+
+  if (igBeginChild_Str("events_panel_root", (ImVec2){panel_w, panel_h},
+                       ImGuiChildFlags_Borders,
+                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav)) {
+    const long long now_ms = event_now_ms();
+    igTextColored((ImVec4){0.50f, 0.78f, 1.0f, 1.0f}, "Events");
+    if (any_event_live(now_ms)) {
+      igSameLine(0, homepage_px(10.0f));
+      draw_event_badge("EVENT LIVE", (ImVec4){0.12f, 0.62f, 0.36f, 0.95f},
+                       (ImVec4){1, 1, 1, 1});
     }
-    igText("Country: %s", vlither_event_country_at(i));
-    igText("Start: %s", start_text);
-    if (end_ms > 0) igText("End: %s", end_text);
-    igText("Prize: %s", vlither_event_prize_at(i));
-    igText("Server: %s", vlither_event_server_at(i));
-    igTextDisabled("%d player%s interested",
-                   vlither_event_interested_count_at(i),
-                   vlither_event_interested_count_at(i) == 1 ? "" : "s");
-    igSpacing();
-    igTextColored((ImVec4){0.72f, 0.80f, 0.94f, 1.0f}, "Rules");
-    igPushTextWrapPos(0.0f);
-    igTextWrapped("%s", vlither_event_rules_at(i));
-    igPopTextWrapPos();
-    igSpacing();
-
-    bool interested = vlither_event_interested_at(i);
-    if (interested)
-      igPushStyleColor_Vec4(ImGuiCol_Button,
-                            (ImVec4){0.12f, 0.58f, 0.38f, 0.95f});
-    if (igButton(interested ? "Interested - ON" : "Interested",
-                 (ImVec2){homepage_px(180.0f), 0}))
-      vlither_event_set_interested(i, !interested);
-    if (interested) igPopStyleColor(1);
-
-    if (interested) {
-      igSameLine(0, -1);
-      if (igButton("Join Event", (ImVec2){homepage_px(180.0f), 0}))
-        join_event(env, i);
-    } else {
-      igTextDisabled("Turn on Interested to unlock one-tap joining and reminders.");
+    igTextDisabled("Times below use your device's local timezone.");
+    ImVec2 nav_avail;
+    igGetContentRegionAvail(&nav_avail);
+    float nav_w = (nav_avail.x - style->ItemSpacing.x) * 0.5f;
+    if (igButton("Back to homepage##events", (ImVec2){nav_w, 0})) {
+      usr->gdata.curr_screen = TITLE_SCREEN;
+      igEndChild();
+      igPopStyleColor(3);
+      igPopStyleVar(4);
+      igPopFont();
+      return;
     }
-    igSpacing();
-    igPopID();
+    igSameLine(0, style->ItemSpacing.x);
+    if (igButton("Refresh events", (ImVec2){nav_w, 0})) {
+      vlither_event_refresh();
+      vlither_ntl_events_refresh();
+    }
+    igSeparator();
+
+    igBeginChild_Str("##events_full_page_scroll", (ImVec2){0, 0},
+                     ImGuiChildFlags_None,
+                     ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    int count = vlither_event_count();
+    if (count <= 0) {
+      igTextWrapped("%s", vlither_event_status());
+    }
+    for (int i = 0; i < count; ++i) {
+      igPushID_Int(i);
+      const long long start_ms = vlither_event_start_at_ms(i);
+      const long long end_ms = vlither_event_end_at_ms(i);
+      const long long remove_ms = vlither_event_remove_at_ms(i);
+      const bool live = start_ms > 0 && now_ms >= start_ms &&
+                        (remove_ms <= 0 || now_ms < remove_ms);
+      char start_text[96], end_text[96], countdown[64];
+      event_format_local_time(start_ms, start_text, sizeof start_text);
+      event_format_local_time(end_ms, end_text, sizeof end_text);
+
+      igPushStyleVar_Float(ImGuiStyleVar_ChildRounding, 14.0f);
+      igPushStyleVar_Float(ImGuiStyleVar_ChildBorderSize, live ? 1.5f : 1.0f);
+      igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, (ImVec2){14.0f, 12.0f});
+      igPushStyleColor_Vec4(ImGuiCol_ChildBg,
+                            live ? (ImVec4){0.06f, 0.14f, 0.11f, 0.94f}
+                                 : (ImVec4){0.08f, 0.11f, 0.18f, 0.94f});
+      igPushStyleColor_Vec4(ImGuiCol_Border,
+                            live ? (ImVec4){0.18f, 0.85f, 0.50f, 0.65f}
+                                 : (ImVec4){0.28f, 0.48f, 0.82f, 0.42f});
+      char vcard_id[32];
+      snprintf(vcard_id, sizeof vcard_id, "##vl_ev_card_%d", i);
+      if (igBeginChild_Str(
+              vcard_id, (ImVec2){-1.0f, 0.0f},
+              ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY,
+              ImGuiWindowFlags_None)) {
+        if (live) {
+          draw_event_badge("LIVE NOW", (ImVec4){0.12f, 0.62f, 0.36f, 0.95f},
+                           (ImVec4){1, 1, 1, 1});
+        } else if (start_ms > now_ms) {
+          event_format_countdown(start_ms - now_ms, countdown,
+                                 sizeof countdown);
+          char up_txt[80];
+          snprintf(up_txt, sizeof up_txt, "STARTS IN %s", countdown);
+          draw_event_badge(up_txt, (ImVec4){0.62f, 0.44f, 0.10f, 0.95f},
+                           (ImVec4){1.0f, 0.94f, 0.74f, 1.0f});
+        }
+        igSameLine(0, homepage_px(8.0f));
+        draw_event_badge(vlither_event_country_at(i),
+                         (ImVec4){0.14f, 0.22f, 0.34f, 0.95f},
+                         (ImVec4){0.72f, 0.86f, 1.0f, 1.0f});
+
+        igSpacing();
+        igTextColored((ImVec4){0.94f, 0.97f, 1.0f, 1.0f}, "%s",
+                      vlither_event_name_at(i));
+        igTextColored((ImVec4){0.68f, 0.78f, 0.92f, 1.0f}, "Start: %s",
+                      start_text);
+        if (end_ms > 0) igTextDisabled("End: %s", end_text);
+        igTextColored((ImVec4){0.98f, 0.84f, 0.32f, 1.0f}, "Prize: %s",
+                      vlither_event_prize_at(i));
+        igTextColored((ImVec4){0.55f, 0.86f, 0.95f, 1.0f}, "Server: %s",
+                      vlither_event_server_at(i));
+        igTextDisabled("%d player%s interested",
+                       vlither_event_interested_count_at(i),
+                       vlither_event_interested_count_at(i) == 1 ? "" : "s");
+        igSpacing();
+        igTextColored((ImVec4){0.72f, 0.80f, 0.94f, 1.0f}, "Rules");
+        igPushTextWrapPos(0.0f);
+        igTextWrapped("%s", vlither_event_rules_at(i));
+        igPopTextWrapPos();
+        igSpacing();
+
+        bool interested = vlither_event_interested_at(i);
+        if (interested)
+          igPushStyleColor_Vec4(ImGuiCol_Button,
+                                (ImVec4){0.12f, 0.58f, 0.38f, 0.95f});
+        if (igButton(interested ? "Interested - ON" : "Interested",
+                     (ImVec2){homepage_px(180.0f), 0}))
+          vlither_event_set_interested(i, !interested);
+        if (interested) igPopStyleColor(1);
+
+        if (interested) {
+          igSameLine(0, homepage_px(8.0f));
+          if (igButton("Join Event", (ImVec2){homepage_px(180.0f), 0}))
+            join_event(env, i);
+        } else {
+          igTextDisabled(
+              "Turn on Interested to unlock one-tap joining and reminders.");
+        }
+      }
+      igEndChild();
+      igPopStyleColor(2);
+      igPopStyleVar(3);
+      igSpacing();
+      igPopID();
+    }
+    ntl_events_section(env, now_ms);
+    igEndChild();
   }
-  ntl_events_section(env, now_ms);
   igEndChild();
+  igPopStyleColor(3);
+  igPopStyleVar(4);
   igPopFont();
 }
 
@@ -744,7 +919,7 @@ static void draw_privacy_policy_popup(tenv *env) {
 #define SUPPORT_UPI_ID        "luckyy623@ibl"
 #define SUPPORT_UPI_URL       "upi://pay?pa=luckyy623@ibl&pn=Vlither%20Android&cu=INR"
 
-static int    g_support_copied    = 0;   /* 0 none, 1 PayPal, 2 UPI */
+static int    g_support_copied    = 0;
 static double g_support_copied_at = 0.0;
 
 static void support_row(const char *title, const char *note, const char *value,
@@ -964,32 +1139,24 @@ static void draw_server_list_popup(tenv* env) {
 
 }
 
-/* ======================================================================
- *  Glass / gold homepage (matches the Fuji Sunset design screenshot)
- *  All sizes are in "design units": 1 unit == 1px of a 1157px-tall
- *  screenshot, scaled by g_hp_u so it fits any screen height.
- *  Tweak the numbers in ui_title_screen() to nudge the layout.
- * ====================================================================== */
-
 static ImDrawList* g_dl;
-static ImVec2 g_org;       /* window origin on screen */
-static ImFont* g_font;     /* regular */
-static ImFont* g_font_b;   /* bold    */
+static ImVec2 g_org;
+static ImFont* g_font;
+static ImFont* g_font_b;
 
-#define HP_GOLD    g_acc.x, g_acc.y, g_acc.z   /* accent, changes per background */
+#define HP_GOLD    g_acc.x, g_acc.y, g_acc.z
 #define HP_DARK    0.04f, 0.04f, 0.045f
 
 static ImU32 hp_col(float r, float g, float b, float a) {
   return igColorConvertFloat4ToU32((ImVec4){r, g, b, a});
 }
-static ImVec2 hp_sp(float x, float y) { /* design -> screen */
+static ImVec2 hp_sp(float x, float y) {
   return (ImVec2){g_org.x + g_ox + x * g_hp_u, g_org.y + g_oy + y * g_hp_u};
 }
-static ImVec2 hp_cp(float x, float y) { /* design -> cursor pos */
+static ImVec2 hp_cp(float x, float y) {
   return (ImVec2){g_ox + x * g_hp_u, g_oy + y * g_hp_u};
 }
 
-/* ---- text helpers (any pixel size) ---- */
 static ImVec2 hp_text_size(ImFont* f, float px, const char* s) {
   ImVec2 sz;
   igPushFont(f, px);
@@ -1007,7 +1174,6 @@ static void hp_text_c(ImFont* f, float px, ImVec2 c, ImU32 col, const char* s) {
   hp_text(f, px, (ImVec2){c.x - sz.x * 0.5f, c.y - sz.y * 0.5f}, col, s);
 }
 
-/* ---- panels ---- */
 static void hp_glass(ImVec2 a, ImVec2 b, float round, float alpha) {
   ImDrawList_AddRectFilled(g_dl, a, b, hp_col(0.07f + g_acc.x * 0.05f, 0.07f + g_acc.y * 0.05f, 0.07f + g_acc.z * 0.05f, alpha), round, 0);
   ImDrawList_AddRectFilled(g_dl, a, (ImVec2){b.x, a.y + (b.y - a.y) * 0.40f},
@@ -1017,7 +1183,6 @@ static void hp_glass(ImVec2 a, ImVec2 b, float round, float alpha) {
                      2.0f * g_hp_u);
 }
 
-/* dark rounded button; returns clicked, gives screen rect */
 static bool hp_cell(const char* id, float x, float y, float w, float h,
                     float round, ImVec2* out_a, ImVec2* out_b) {
   igSetCursorPos(hp_cp(x, y));
@@ -1037,12 +1202,10 @@ static bool hp_cell(const char* id, float x, float y, float w, float h,
   return clicked;
 }
 
-/* ---- icons: font glyphs ---- */
 static void hp_glyph(ImVec2 c, float px, ImU32 col, const char* g) {
   hp_text_c(g_font, px, c, col, g);
 }
 
-/* ---- icons: vector (not in iconfont) ---- */
 static void hp_icon_palette(ImVec2 c, float r) {
   ImU32 gold = hp_col(HP_GOLD, 1), dark = hp_col(HP_DARK, 1);
   ImDrawList_AddCircleFilled(g_dl, c, r, gold, 40);
@@ -1067,7 +1230,7 @@ static void hp_icon_podium(ImVec2 c, float s) {
     hp_text_c(g_font_b, s * 0.34f, (ImVec2){(a.x + b.x) * 0.5f, base - hh[i] * 0.45f},
               dark, num[i]);
   }
-  /* little star on the winner's block */
+
   ImDrawList_AddCircleFilled(g_dl, (ImVec2){c.x - w * 0.5f + w * 0.46f, base - hh[1] - s * 0.14f},
                              s * 0.11f, gold, 12);
 }
@@ -1078,13 +1241,13 @@ static void hp_icon_gamepad(ImVec2 c, float s) {
   ImDrawList_AddCircleFilled(g_dl, (ImVec2){c.x + 0.58f * s, c.y + 0.22f * s}, 0.34f * s, body, 20);
   ImDrawList_AddRectFilled(g_dl, (ImVec2){c.x - 0.74f * s, c.y - 0.40f * s},
                            (ImVec2){c.x + 0.74f * s, c.y + 0.30f * s}, body, 0.30f * s, 0);
-  /* d-pad */
+
   ImVec2 d = {c.x - 0.40f * s, c.y - 0.04f * s};
   ImDrawList_AddRectFilled(g_dl, (ImVec2){d.x - 0.20f * s, d.y - 0.06f * s},
                            (ImVec2){d.x + 0.20f * s, d.y + 0.06f * s}, dark, 0, 0);
   ImDrawList_AddRectFilled(g_dl, (ImVec2){d.x - 0.06f * s, d.y - 0.20f * s},
                            (ImVec2){d.x + 0.06f * s, d.y + 0.20f * s}, dark, 0, 0);
-  /* buttons */
+
   ImDrawList_AddCircleFilled(g_dl, (ImVec2){c.x + 0.34f * s, c.y - 0.16f * s}, 0.09f * s, dark, 10);
   ImDrawList_AddCircleFilled(g_dl, (ImVec2){c.x + 0.56f * s, c.y + 0.02f * s}, 0.09f * s, dark, 10);
 }
@@ -1109,8 +1272,8 @@ static void hp_icon_swords(ImVec2 c, float s, ImU32 col) {
     ImVec2 tip = {c.x - i * 0.50f * s, c.y - 0.50f * s};
     ImVec2 hilt = {c.x + i * 0.50f * s, c.y + 0.50f * s};
     ImDrawList_AddLine(g_dl, tip, hilt, col, t);
-    ImVec2 d = {i * k, k};            /* tip -> hilt */
-    ImVec2 p = {-k, i * k};           /* perpendicular */
+    ImVec2 d = {i * k, k};
+    ImVec2 p = {-k, i * k};
     ImVec2 g = {hilt.x - d.x * 0.26f * s, hilt.y - d.y * 0.26f * s};
     ImDrawList_AddLine(g_dl, (ImVec2){g.x - p.x * 0.24f * s, g.y - p.y * 0.24f * s},
                        (ImVec2){g.x + p.x * 0.24f * s, g.y + p.y * 0.24f * s}, col, t);
@@ -1127,13 +1290,11 @@ static void hp_icon_user_outline(ImVec2 c, float s, ImU32 col) {
   ImDrawList_PathStroke(g_dl, col, 0, t);
 }
 
-/* label centred inside a rect (optional glyph/icon drawn by caller) */
 static void hp_label_in(ImVec2 a, ImVec2 b, float fy, float px, const char* s) {
   hp_text_c(g_font, px, (ImVec2){(a.x + b.x) * 0.5f, a.y + (b.y - a.y) * fy},
             hp_col(1, 1, 1, 0.96f), s);
 }
 
-/* icon + text on one line, centred */
 static void hp_inline(ImVec2 a, ImVec2 b, const char* glyph, float gpx, ImU32 gcol,
                       const char* s, float px) {
   float gw = glyph ? gpx * 1.1f : 0.0f;
@@ -1147,7 +1308,6 @@ static void hp_inline(ImVec2 a, ImVec2 b, const char* glyph, float gpx, ImU32 gc
           hp_col(1, 1, 1, 0.96f), s);
 }
 
-/* the gold PLAY button */
 static bool hp_play_button(float x, float y, float w, float h) {
   igSetCursorPos(hp_cp(x, y));
   bool clicked = igInvisibleButton("##hp_play", (ImVec2){w * g_hp_u, h * g_hp_u}, 0);
@@ -1172,7 +1332,6 @@ static bool hp_play_button(float x, float y, float w, float h) {
   return clicked;
 }
 
-/* small pill in the bottom bar, auto-sized, wraps to a new row if needed */
 static float g_bar_x0 = 48.0f, g_bar_xmax = 1e9f, g_pill_x, g_pill_y;
 static bool hp_pill(const char* id, const char* label, float* x, float* y, float min_w) {
   float px = 32.0f * g_hp_u;
@@ -1220,11 +1379,8 @@ void ui_title_screen(tenv* env) {
   const bool portrait = W < H;
   g_hp_portrait = portrait;
   g_hp_w = W;
-  g_acc = homepage_accent(usrs->homepage_background);   /* accent follows background */
+  g_acc = homepage_accent(usrs->homepage_background);
 
-  /* Scale for toggles / stats / bottom bar:
-   *   landscape: 1 unit = H/1157   (design screenshot height)
-   *   portrait : 1 unit = W/1000   (940-wide column with 30 margins)   */
   float uT = portrait ? W / 1000.0f : H / 1157.0f;
   if (uT < 0.35f) uT = 0.35f;
   const float WdT = W / uT, HdT = H / uT;
@@ -1237,7 +1393,6 @@ void ui_title_screen(tenv* env) {
   g_dl = igGetWindowDrawList();
   igGetWindowPos(&g_org);
 
-  /* version, top-right corner */
   {
     char version_str[16] = {0};
     sprintf(version_str, "v%s", APP_VERSION);
@@ -1256,7 +1411,6 @@ void ui_title_screen(tenv* env) {
   const float frame_height = igGetFrameHeight();
   const float fs = igGetFontSize();
 
-  /* ================= toggles ================= */
   if (portrait) {
     g_tog_w_p = 940.0f * u;
     for (int i = 0; i < 3; i++) {
@@ -1275,10 +1429,9 @@ void ui_title_screen(tenv* env) {
 #endif
   igPopStyleVar(4);
 
-  /* ================= panel placement ================= */
   const float px0 = 60.0f, py0 = 68.0f, pw = 628.0f;
   float ph;
-  float bar_y0 = portrait ? HdT - 128.0f : HdT - 62.0f;   /* design units (uT) */
+  float bar_y0 = portrait ? HdT - 128.0f : HdT - 62.0f;
   if (portrait) {
     ph = 1020.0f;
     float top_px = 500.0f * uT;
@@ -1297,15 +1450,11 @@ void ui_title_screen(tenv* env) {
     ph = HdT - 68.0f - 69.0f;
   }
 
-  /* ================= left glass panel ================= */
   hp_glass(hp_sp(px0, py0), hp_sp(px0 + pw, py0 + ph), 30.0f * u, 0.72f);
 
-  /* -- header: avatar + @name (tap to edit nickname) -- */
   {
     ImVec2 a, b;
-    /* The avatar button below overlaps this header cell. ImGui gives hover to
-     * the FIRST overlapping item unless it allows overlap, so without this the
-     * header swallowed every avatar tap and the photo picker never opened. */
+
     igSetNextItemAllowOverlap();
     bool clicked = hp_cell("##hp_header", 88, 97, 572, 128, 18, &a, &b);
     ImVec2 av_b = hp_sp(88 + 128, 97 + 128);
@@ -1315,7 +1464,7 @@ void ui_title_screen(tenv* env) {
     bool avatar_clicked = false;
     bool have_photo = false;
 #ifdef ANDROID
-    /* profile photo: poll for a newly picked image a couple of times a second */
+
     {
       static int poll = 0;
       if (usr->r && ctx && (poll++ % 30) == 0)
@@ -1333,7 +1482,6 @@ void ui_title_screen(tenv* env) {
     }
     ImDrawList_AddRect(g_dl, av_a, av_b, hp_col(1, 1, 1, 0.22f), 16 * u, 0, 1.5f * u);
 
-    /* tapping the avatar opens local storage to pick / change the photo */
     igSetCursorPos(hp_cp(88, 97));
     avatar_clicked = igInvisibleButton("##hp_avatar", (ImVec2){128 * u, 128 * u}, 0);
 #ifdef ANDROID
@@ -1359,7 +1507,6 @@ void ui_title_screen(tenv* env) {
     igEndPopup();
   }
 
-  /* -- server field + globe -- */
   {
     float pad_y = fmaxf(2.0f, (74.0f * u - fs) * 0.5f);
     igPushStyleVar_Vec2(ImGuiStyleVar_FramePadding, (ImVec2){20.0f * u, pad_y});
@@ -1384,10 +1531,8 @@ void ui_title_screen(tenv* env) {
   }
   draw_server_list_popup(env);
 
-  /* -- PLAY -- */
   if (hp_play_button(88, 363, 572, 100)) hp_play(env);
 
-  /* -- button grid -- */
   {
     ImVec2 a, b, c;
     const ImU32 gold = hp_col(HP_GOLD, 1);
@@ -1454,17 +1599,15 @@ void ui_title_screen(tenv* env) {
     hp_inline(a, b, "\ue9b6", 40.0f * u, gold, "Quit", lab);
   }
 
-  /* back to the top/bottom scale, no offset */
   g_ox = g_oy = 0.0f;
   g_hp_u = uT;
   u = uT;
 
-  /* ================= stats card ================= */
   {
     float cw = portrait ? 940.0f : 702.0f, ch = 205.0f;
     float cx = portrait ? 30.0f : 955.0f, cy = portrait ? 30.0f : 68.0f;
     if (!portrait) {
-      float max_x = WdT - 16.0f - 420.0f - 24.0f - cw;   /* keep clear of toggles */
+      float max_x = WdT - 16.0f - 420.0f - 24.0f - cw;
       if (cx > max_x) cx = fmaxf(px0 + pw + 20.0f, max_x);
     }
     hp_glass(hp_sp(cx, cy), hp_sp(cx + cw, cy + ch), 22.0f * u, 0.74f);
@@ -1507,7 +1650,6 @@ void ui_title_screen(tenv* env) {
     hp_text(g_font, tpx, hp_sp(c2 + 38, rowy[2] - 19), white, buf);
   }
 
-  /* ================= bottom link bar ================= */
 #ifdef ANDROID
   {
     g_bar_x0 = portrait ? 30.0f : 48.0f;
@@ -1521,8 +1663,25 @@ void ui_title_screen(tenv* env) {
 
     bool events_clicked = hp_pill("##hp_events", "Events", &x, &by, 116);
     float ex = g_pill_x, ey = g_pill_y;
+    if (any_event_live(event_now_ms())) {
+      ImVec2 badge_c = hp_sp(x - 15.0f - 4.0f, ey + 4.0f);
+      float pulse = 0.5f + 0.5f * sinf((float)igGetTime() * 4.5f);
+      float r = 10.5f * u;
+      ImDrawList_AddCircleFilled(
+          g_dl, badge_c, r * (1.28f + 0.25f * pulse),
+          hp_col(1.0f, 0.28f, 0.22f, 0.24f + 0.22f * pulse), 20);
+      ImDrawList_AddCircleFilled(g_dl, badge_c, r,
+                                 hp_col(0.98f, 0.24f, 0.20f, 1.0f), 20);
+      ImDrawList_AddCircle(g_dl, badge_c, r,
+                           hp_col(0.08f, 0.10f, 0.14f, 0.95f), 20, 2.0f * u);
+      ImVec2 btsz = hp_text_size(g_font, 17.0f * u, "!");
+      hp_text(g_font, 17.0f * u,
+              (ImVec2){badge_c.x - btsz.x * 0.5f, badge_c.y - btsz.y * 0.5f},
+              hp_col(1, 1, 1, 1), "!");
+    }
     if (events_clicked) {
       vlither_event_refresh();
+      vlither_ntl_events_refresh();
       usr->gdata.curr_screen = EVENTS_PANEL;
     }
     int next_event = vlither_event_next_interested();

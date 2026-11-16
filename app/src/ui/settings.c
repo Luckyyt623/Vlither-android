@@ -80,11 +80,6 @@ static void apply_mode_graphics_preset(user_settings *us, int mode_index,
                          us->mode_graphics_preset[1] <= 2;
 }
 
-
-/* ---- Settings search bar -------------------------------------------------
- * Labels and widgets live in two parallel columns, so each label registers
- * whether it matches the query (sf_vis[]) and each widget group replays that
- * decision in the same order. Every typed word must match label or keywords. */
 static const char* sf_query = "";
 static bool sf_vis[160];
 static int  sf_n, sf_r;
@@ -158,6 +153,8 @@ void ui_settings(tenv* env) {
   float frame_height = igGetFrameHeight();
   ImVec2 settings_window_size;
   igGetWindowSize(&settings_window_size);
+
+  igSetCursorPos((ImVec2){style->WindowPadding.x, style->WindowPadding.y});
   float footer_btn_h = frame_height * 1.8f;
 #ifdef ANDROID
   float footer_h = footer_btn_h * 2.0f + style->ItemSpacing.y;
@@ -543,6 +540,46 @@ void ui_settings(tenv* env) {
       igIndent(-style->WindowPadding.x);
       igEndTable();
     }
+
+    if (sf_match("Clean lines", "battledome line ring box food dots server") ||
+        sf_match("Clean text", "battledome text food dots server") ||
+        sf_match("Battledome only", "")) {
+      igSpacing();
+      float bd_h = igGetTextLineHeightWithSpacing() +
+                   igGetFrameHeightWithSpacing() * 2.0f +
+                   style->WindowPadding.y * 2.0f + style->ItemSpacing.y * 2.0f;
+      igBeginChild_Str("battledome_only_box", (ImVec2){-1, bd_h},
+                       ImGuiChildFlags_Borders,
+                       ImGuiWindowFlags_NoScrollbar |
+                           ImGuiWindowFlags_NoScrollWithMouse);
+      igTextColored((ImVec4){1.0f, 0.82f, 0.30f, 1.0f}, "Battledome only");
+      if (igBeginTable("battledome_field:value", 2, ImGuiTableFlags_None,
+                       (ImVec2){}, 0)) {
+        igTableNextRow(ImGuiTableRowFlags_None, 0);
+        igTableSetColumnIndex(0);
+        sf_n = 0;
+        SLBLK("Clean lines", "battledome line ring box food dots server");
+        SLBLK("Clean text", "battledome text food dots server");
+        igTableSetColumnIndex(1);
+        sf_r = 0;
+        if (sf_next()) {
+          bool clean_lines = user_clean_lines(usrs);
+          if (igCheckbox("##clean lines", &clean_lines))
+            user_set_clean_lines(usrs, clean_lines);
+          if (igIsItemHovered(0))
+            igSetTooltip("Hides the food dots a Battledome server uses to draw rings, boxes and lines, and draws clean lines instead.");
+        }
+        if (sf_next()) {
+          bool clean_text = user_clean_text(usrs);
+          if (igCheckbox("##clean text", &clean_text))
+            user_set_clean_text(usrs, clean_text);
+          if (igIsItemHovered(0))
+            igSetTooltip("Hides the food dots a Battledome server uses to write texts, and draws clean text instead.");
+        }
+        igEndTable();
+      }
+      igEndChild();
+    }
 #ifdef ANDROID
     igSpacing();
     if (igButton("Upload background from gallery", (ImVec2){-1, 0}))
@@ -815,9 +852,13 @@ void ui_settings(tenv* env) {
       }
       const bool hk_shader = sf_match("Cycle snake shader", "hotkey key");
       const bool hk_invis = sf_match("Toggle invisible own skin", "hotkey key");
+      const bool hk_settings = sf_match("Open settings", "hotkey key");
+      const bool hk_controls = sf_match("Open controls", "hotkey key");
       const bool hk_sos = sf_match("SOS help (fixed S)", "hotkey key");
       if (hk_shader) igText("Cycle snake shader");
       if (hk_invis) igText("Toggle invisible own skin");
+      if (hk_settings) igText("Open settings");
+      if (hk_controls) igText("Open controls");
       if (hk_sos) igTextDisabled("SOS help (fixed S)");
       igTableSetColumnIndex(1);
 
@@ -888,6 +929,16 @@ void ui_settings(tenv* env) {
         draw_vlither_key_selector("##invisible skin key",
                                   &usrs->invisible_skin_key);
       }
+      if (hk_settings) {
+        igSetNextItemWidth(frame_height * 2.2f);
+        draw_vlither_key_selector("##open settings key",
+                                  &usrs->settings_key);
+      }
+      if (hk_controls) {
+        igSetNextItemWidth(frame_height * 2.2f);
+        draw_vlither_key_selector("##open controls key",
+                                  &usrs->controls_key);
+      }
       if (hk_sos) igTextDisabled("S = 4 min + Help me!");
       igIndent(-style->WindowPadding.x);
 
@@ -942,7 +993,11 @@ void ui_settings(tenv* env) {
   igSetCursorPosY(bottom_y);
   if (igButton("OK", (ImVec2){btn_w, btn_h})) {
     save_user_settings(usrs);
-    gdata->curr_screen = TITLE_SCREEN;
+    gdata->curr_screen =
+        (!gdata->preview_active &&
+         (gdata->conn == CONNECTED || gdata->conn == CONNECTING))
+            ? PLAYING
+            : TITLE_SCREEN;
   }
 
 #ifdef ANDROID

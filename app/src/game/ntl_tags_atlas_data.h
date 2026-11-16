@@ -1,8 +1,6 @@
 #ifndef NTL_TAGS_ATLAS_DATA_H
 #define NTL_TAGS_ATLAS_DATA_H
 
-// Generated from vlither-main ntl_tags_main_data.h. Atlas image: app/res/textures/ntl_tags.png
-
 typedef struct ntl_tag_atlas_entry {
   int id;
   float u0, v0, u1, v1;

@@ -17,9 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Node A = the hostname the live NTL extension uses (always current).
-// Node B = second relay IP from vlither-main (NTL browsers may land on either
-// node, so we register on both). If B is dead it just retries slowly.
 #define NTL_TAG_WS_URL_A "ws://ws.ntl-slither.com:9000"
 #define NTL_TAG_WS_URL_B "ws://5.2.180.30:9000"
 #define NTL_TAG_SALT_WAIT_SECONDS 2.5
@@ -52,7 +49,7 @@ typedef struct ntl_tags_state {
   struct mg_mgr mgr;
   struct mg_connection *ws;
   struct mg_connection *auth;
-  struct mg_connection *authz;  // POST /tags/authorizetags.php (per-IP auth)
+  struct mg_connection *authz;
   double authz_started;
   double authz_next;
   struct mg_connection *catalog;
@@ -62,7 +59,7 @@ typedef struct ntl_tags_state {
   double next_connect;
   double last_position_send;
   double ws_connected_at;
-  // second relay node (own session id so the nodes don't kick each other)
+
   struct mg_connection *ws2;
   bool ws2_open;
   bool handshake2_sent;
@@ -70,7 +67,7 @@ typedef struct ntl_tags_state {
   double last_position_send2;
   double ws2_connected_at;
   char sid2[9];
-  // snake id -> tag id map received from the :9000 relay (both nodes)
+
   struct {
     int id;
     int16_t tag;
@@ -91,7 +88,7 @@ typedef struct ntl_tags_state {
   double next_fixed_catalog_sync;
   long fixed_catalog_version;
   int public_tag_max;
-  int public_hi_max;  // top of NTL's second public range (668..)
+  int public_hi_max;
   int private_tag_min;
   int dynamic_tag_count;
   ntl_tag_meta dynamic_meta[NTL_DYNAMIC_TAG_MAX];
@@ -118,7 +115,7 @@ typedef struct ntl_tags_state {
   int fixed_tag_count_pending;
   int public_tag_max_pending;
   int public_hi_max_pending;
-  int code_result;  // tag code box: 0 nothing, 1 ok, 2 error
+  int code_result;
   int mapped_tag_count;
   double last_mapping_received;
   char status[192];
@@ -161,7 +158,6 @@ static const ntl_tag_atlas_entry *find_atlas_entry(int id) {
   return NULL;
 }
 
-// vlither-main's tag table (banner size, colours, anchors). Binary search by id.
 static const ntl_tag_def *main_tag_lookup(int id) {
   int lo = 0, hi = NTL_TAG_COUNT - 1;
   while (lo <= hi) {
@@ -193,10 +189,9 @@ static bool ensure_atlas_loaded(tenv *env) {
   if (!env || !env->ctx || !env->usr || !env->usr->r) return false;
   if (S.atlas_tex && S.atlas_ds) return true;
 
-  // same atlas image vlither-main uses: app/res/textures/ntl_tags.png
   static double s_next_try = 0.0;
   double now_s = mg_millis() / 1000.0;
-  if (!S.atlas_tex && now_s < s_next_try) return false;  // don't reload every frame
+  if (!S.atlas_tex && now_s < s_next_try) return false;
   if (!S.atlas_tex)
     S.atlas_tex = create_mipmap_texture(env->ctx,
                                         "app/res/textures/ntl_tags.png");
@@ -229,13 +224,11 @@ bool ntl_tags_is_packet_tag(int id) {
   if (id >= 0 && id <= 59) return true;
   int public_max = S.public_tag_max >= 303 ? S.public_tag_max : 367;
   if (id >= 200 && id <= public_max) return true;
-  // NTL's public tags continue at 668 once 200..367 is full
+
   int hi_max = S.public_hi_max >= 667 ? S.public_hi_max : 671;
   return id >= 668 && id <= hi_max;
 }
 
-// NTL gives catalog entries below id 368 a second range: 1123 - id, i.e. 756+.
-// Those ids exist only once the live catalogue has been loaded.
 static bool dynamic_has_id(int id) {
   for (int i = 0; i < S.dynamic_tag_count; ++i)
     if (S.dynamic_meta[i].id == id) return true;
@@ -426,9 +419,6 @@ static bool install_dynamic_catalog(struct mg_str json) {
     if (!src) break;
     ++source_count;
 
-    // same id rule as NTL's main-mt.js: an explicit id wins, otherwise
-    // 580 - index; anything that lands below 368 wraps to 1123 - id (>= 756).
-    // ids 667..755 and anything still below 368 are not valid private tags.
     snprintf(path, sizeof path, "$.d[%d].id", source_index);
     long json_id = json_long_flexible(json, path, 0);
     int id = json_id > 0 ? (int)json_id : 580 - source_index;
@@ -533,7 +523,7 @@ static bool install_fixed_catalog(struct mg_str json) {
 
     ntl_tag_meta meta;
     memset(&meta, 0, sizeof meta);
-    // NTL: fstags index 104+k -> id 304+k up to 367, then 668+ (see main-mt.js)
+
     meta.id = source_index < 64 ? 304 + source_index : 668 + (source_index - 64);
     snprintf(path, sizeof path, "$.d[%d].fst_blbw", source_index);
     long display_w = json_long_flexible(json, path, image_w);
@@ -641,10 +631,6 @@ static void trim_copy(char *dst, size_t dst_size, const char *src, size_t len) {
   dst[len] = 0;
 }
 
-// The :9000 relay only publishes a private tag for an IP that NTL has
-// authorized. NTL does GET /tags/tag then POSTs [[id,md5]] to
-// /tags/authorizetags.php at login and every 60 s. Without this the relay
-// silently drops our private tag. Response: JSON array, 1 = ok, 0 = rejected.
 static void authz_cb(struct mg_connection *c, int ev, void *ev_data) {
   if (c != S.authz) return;
   if (ev == MG_EV_CONNECT) {
@@ -672,14 +658,14 @@ static void authz_cb(struct mg_connection *c, int ev, void *ev_data) {
     double now = mg_millis() / 1000.0;
     if (v == 1) {
       S.authz_next = now + 60.0;
-      restart_ws_registration();  // re-register now that our IP is authorized
+      restart_ws_registration();
     } else if (v == 0) {
       S.authz_next = now + 60.0;
       commit_tag(-1, NULL);
       set_status("NTL no longer authorizes this private tag. Tag removed.");
       ntl_team_system_message(S.status);
     } else {
-      S.authz_next = now + 10.0;  // unreadable reply -> retry soon
+      S.authz_next = now + 10.0;
     }
     S.authz = NULL;
     S.authz_started = 0.0;
@@ -711,7 +697,6 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
         .name = mg_str(NTL_TAG_HOST), .skip_verification = 1};
     mg_tls_init(c, &tls);
 
-    // NTL sends md5(password) in the URL, never the plain password
     char pass_enc[sizeof S.pending_hash * 3 + 8];
     mg_url_encode(S.pending_hash, strlen(S.pending_hash), pass_enc,
                   sizeof pass_enc);
@@ -736,6 +721,26 @@ static void auth_cb(struct mg_connection *c, int ev, void *ev_data) {
     if (ok) {
       int id = S.pending_tag_id;
       S.code_result = 1;
+      if (S.env && S.env->usr) {
+        user_settings *us = &S.env->usr->usrs;
+        int found = -1;
+        for (int i = 0; i < us->ntl_own_tag_count; ++i) {
+          if (us->ntl_own_tags[i].id == id) {
+            found = i;
+            break;
+          }
+        }
+        if (found < 0 && us->ntl_own_tag_count < 32) {
+          found = us->ntl_own_tag_count++;
+        }
+        if (found >= 0) {
+          us->ntl_own_tags[found].id = id;
+          strncpy(us->ntl_own_tags[found].password_md5, S.pending_hash,
+                  sizeof us->ntl_own_tags[found].password_md5 - 1);
+          us->ntl_own_tags[found].password_md5[
+              sizeof us->ntl_own_tags[found].password_md5 - 1] = 0;
+        }
+      }
       commit_tag(id, S.pending_hash);
       S.authz_next = 0.0;
       start_authorize();
@@ -933,9 +938,6 @@ static void json_escape(char *dst, size_t dst_size, const char *src) {
   dst[n] = 0;
 }
 
-// store the relay's snake-id -> tag-id records (4 bytes each: id, tag).
-// like vlither-main, we keep the raw map and resolve per snake every frame
-// (resolve_snake_tag) so snakes that appear between pushes get their tag too.
 static void apply_mapping(const uint8_t *data, size_t len) {
   int count = 0, mapped_count = 0;
   for (size_t j = 0; j + 3 < len && count < NTL_TAG_MAP_MAX; j += 4) {
@@ -960,9 +962,6 @@ static int map_lookup_exact(int id) {
   return -1;
 }
 
-// NTL browser players register under their SALTED ntlid = (salt<<10)|(rawid&1023).
-// the low 10 bits are the raw id we already see, so match on those to recover a
-// tag even when we don't know the salt. (0 = unset id, skip to avoid matching all.)
 static int map_lookup_low10(int id) {
   if ((id & 1023) == 0) return -1;
   for (int i = 0; i < S.map_count; i++)
@@ -972,12 +971,6 @@ static int map_lookup_low10(int id) {
   return -1;
 }
 
-// Lookup order. Private tags are never in the skin packet - they only arrive
-// through the :9000 relay map (keyed by salted ntlid) - so the map and the team
-// roster are checked BEFORE the packet tag (the packet can hold placeholder
-// ids such as 666/667 for private wearers).
-// own worn tag -> team roster -> map (salted ntlid) -> skin-packet tag ->
-// map (raw id) -> map (low 10 bits).
 static int resolve_snake_tag(snake *o, bool is_local, const user_settings *us) {
   if (is_local && us->ntl_tag_id >= 0 && ntl_tags_exists(us->ntl_tag_id))
     return us->ntl_tag_id;
@@ -1012,7 +1005,7 @@ static void tag_ws_cb(struct mg_connection *c, int ev, void *ev_data) {
       apply_mapping((const uint8_t *)wm->data.buf, wm->data.len);
   } else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
     double retry = mg_millis() / 1000.0 + NTL_TAG_RECONNECT_SECONDS;
-    if (node_b) retry += 8.0;  // secondary node: don't hammer it if it's down
+    if (node_b) retry += 8.0;
     if (node_a) {
       S.ws = NULL;
       S.ws_open = false;
@@ -1029,8 +1022,6 @@ static void tag_ws_cb(struct mg_connection *c, int ev, void *ev_data) {
   }
 }
 
-// node 0 = primary, node 1 = secondary. Same handshake as vlither-main:
-// ["<sid><nick>","<server>","<tag md5>",tag,skin,x,y,ntlid]
 static void send_tag_handshake(snake *me, int node) {
   struct mg_connection *conn = node ? S.ws2 : S.ws;
   bool open = node ? S.ws2_open : S.ws_open;
@@ -1052,9 +1043,10 @@ static void send_tag_handshake(snake *me, int node) {
   json_escape(nick, sizeof nick, raw_nick);
   json_escape(server, sizeof server, us->server_address);
 
-  // the worn tag is broadcast whether public or private (private carries the
-  // password md5), exactly like main. -1 / "" when nothing is worn.
-  int tag = us->ntl_tag_id >= 0 ? us->ntl_tag_id : -1;
+  bool local_only_private =
+      us->ntl_tag_id >= 0 && ntl_tags_is_protected_tag(us->ntl_tag_id) &&
+      !us->ntl_tag_password_md5[0];
+  int tag = (us->ntl_tag_id >= 0 && !local_only_private) ? us->ntl_tag_id : -1;
   const char *hash = (tag >= 0 && us->ntl_tag_password_md5[0])
                          ? us->ntl_tag_password_md5
                          : "";
@@ -1169,7 +1161,7 @@ void ntl_tags_update(tenv *env) {
   mg_mgr_poll(&S.mgr, 0);
   if (S.env && S.env->ctx) tcontext_poll_async_transfer(S.env->ctx);
   finalize_pending_catalog_swaps(S.env);
-  // decode + upload the atlas here (once) so opening the tag page never stalls
+
   if (S.env) ensure_atlas_loaded(S.env);
 
   double now = mg_millis() / 1000.0;
@@ -1266,7 +1258,7 @@ void ntl_tags_update(tenv *env) {
     reset_ws_handshake();
     S.next_connect = 0;
     S.next_connect2 = 0;
-    // keep S.map so tags don't blink during the brief reconnect
+
   }
 
   const char *ws_hdr =
@@ -1284,9 +1276,6 @@ void ntl_tags_update(tenv *env) {
     if (!S.ws2) S.next_connect2 = now + NTL_TAG_RECONNECT_SECONDS;
   }
 
-  // hold the FIRST registration until our snake's salt is known (opcode 83), so
-  // we never register the raw id first and flash the tag on other NTL screens.
-  // fall back after 2.5s for servers that don't salt.
   bool salt_known = me->ntl_id != (uint16_t)(me->id & 0xFFFF);
   bool waiting_a = !salt_known && now - S.ws_connected_at < NTL_TAG_SALT_WAIT_SECONDS;
   bool waiting_b = !salt_known && now - S.ws2_connected_at < NTL_TAG_SALT_WAIT_SECONDS;
@@ -1346,6 +1335,47 @@ bool ntl_tags_select_public(int id) {
   return true;
 }
 
+static void ntl_tags_select_local_private(int id) {
+  if (!ntl_tags_is_protected_tag(id)) return;
+  commit_tag(id, NULL);
+  char msg[160];
+  snprintf(msg, sizeof msg,
+           "Private tag %d applied locally (only visible to you).", id);
+  set_status(msg);
+  ntl_team_system_message(msg);
+}
+
+static bool ntl_tags_request_private_hash(int id, const char *hash_md5) {
+  if (!S.env || !S.env->usr || !ntl_tags_is_protected_tag(id) ||
+      !hash_md5 || !hash_md5[0]) {
+    S.code_result = 2;
+    set_status("Saved tag credentials are invalid.");
+    return false;
+  }
+  if (S.auth) {
+    S.auth->is_closing = 1;
+    S.auth = NULL;
+  }
+  S.pending_tag_id = id;
+  S.pending_password[0] = 0;
+  strncpy(S.pending_hash, hash_md5, sizeof S.pending_hash - 1);
+  S.pending_hash[sizeof S.pending_hash - 1] = 0;
+  S.auth_started = mg_millis() / 1000.0;
+  S.auth = mg_http_connect(&S.mgr, "https://ntl-slither.com", auth_cb, NULL);
+  if (!S.auth) {
+    S.pending_tag_id = -1;
+    S.auth_started = 0.0;
+    S.code_result = 2;
+    set_status("Could not contact the NTL private-tag server.");
+    ntl_team_system_message(S.status);
+    return false;
+  }
+  char msg[128];
+  snprintf(msg, sizeof msg, "Applying saved NTL tag %d...", id);
+  set_status(msg);
+  return true;
+}
+
 void ntl_tags_disable(void) {
   if (!S.env || !S.env->usr) return;
   commit_tag(-1, NULL);
@@ -1353,14 +1383,11 @@ void ntl_tags_disable(void) {
   ntl_team_system_message(S.status);
 }
 
-// Shared by the tag page and the !tag chat command, so a code typed in NTL
-// chat shows up in the tag page and vice versa.
 static int private_id = 60;
 static char private_password[96] = {0};
 
 bool ntl_tags_request_private(int id, const char *password_in) {
-  // same parsing as the chat: only the first whitespace-free word counts
-  // (phone keyboards often add a trailing space / newline)
+
   char password[96] = {0};
   if (password_in)
     trim_copy(password, sizeof password, password_in, strlen(password_in));
@@ -1464,9 +1491,6 @@ bool ntl_tags_handle_command(const char *input) {
   return true;
 }
 
-// The tag box takes what people paste in NTL chat: "!tag 380 code", "380 code"
-// or only the code (then the Tag ID field is used). Returns true when the text
-// names a tag id itself; *has_prefix tells whether it started with !tag.
 static bool split_tag_input(const char *text, int *id, char *code,
                             size_t code_size, bool *has_prefix) {
   char copy[160];
@@ -1567,8 +1591,7 @@ void ntl_tags_skin_panel(tenv *env) {
   }
   if (private_id < 0) private_id = 0;
   if (private_id > 4095) private_id = 4095;
-  // tag code box: the code stays visible, Enter/Done applies it, Paste reads
-  // the clipboard directly (the on-screen keyboard cannot paste here)
+
   igSetNextItemWidth(-1.0f);
   bool code_enter = igInputTextWithHint(
       "##private_tag_password", "Type or paste: !tag 380 code", private_password,
@@ -1615,17 +1638,17 @@ void ntl_tags_skin_panel(tenv *env) {
     }
     char cmd[200];
     if (box_prefix)
-      snprintf(cmd, sizeof cmd, "%s", typed);  // exactly what NTL chat gets
+      snprintf(cmd, sizeof cmd, "%s", typed);
     else
       snprintf(cmd, sizeof cmd, "!tag %d %s", private_id, box_code);
     ntl_tags_handle_command(cmd);
     memset(cmd, 0, sizeof cmd);
-    // keep what the person typed instead of cutting it down to one word
+
     strncpy(private_password, typed, sizeof private_password - 1);
     private_password[sizeof private_password - 1] = 0;
     memset(typed, 0, sizeof typed);
   }
-  // result of the last check, right next to the box
+
   igSameLine(0, 12);
   if (S.auth)
     igTextDisabled("...");
@@ -1638,7 +1661,70 @@ void ntl_tags_skin_panel(tenv *env) {
                   "This ID is public or outside the private-tag ranges.");
 
   igSpacing();
+  igSeparatorText("Your own tags");
+  if (us->ntl_own_tag_count <= 0) {
+    igTextDisabled(
+        "No saved private tags yet. Enter a tag ID and password above to save one.");
+  } else if (!ensure_atlas_loaded(env)) {
+    igTextColored((ImVec4){1.0f, 0.35f, 0.35f, 1.0f},
+                  "Tag atlas could not be loaded.");
+  } else {
+    ImVec2 own_avail;
+    igGetContentRegionAvail(&own_avail);
+    ImGuiStyle *own_style = igGetStyle();
+    float own_tile = 52.0f;
+    float own_cell_w = own_tile + own_style->FramePadding.x * 2.0f;
+    int own_cols = (int)((own_avail.x + own_style->ItemSpacing.x) /
+                         (own_cell_w + own_style->ItemSpacing.x));
+    if (own_cols < 3) own_cols = 3;
+    for (int i = 0; i < us->ntl_own_tag_count; ++i) {
+      int own_id = us->ntl_own_tags[i].id;
+      if (i % own_cols != 0) igSameLine(0, -1);
+      const ntl_tag_atlas_entry *a = find_atlas_entry(own_id);
+      VkDescriptorSet entry_ds = a ? atlas_descriptor(env, a) : VK_NULL_HANDLE;
+      bool selected = (us->ntl_tag_id == own_id && us->ntl_tag_password_md5[0]);
+      igPushStyleColor_Vec4(
+          ImGuiCol_Button,
+          selected ? (ImVec4){0.20f, 0.62f, 0.30f, 0.85f}
+                   : (ImVec4){0.08f, 0.09f, 0.11f, 0.70f});
+      igPushStyleColor_Vec4(
+          ImGuiCol_ButtonHovered, (ImVec4){0.25f, 0.55f, 0.75f, 0.90f});
+      bool clicked = false;
+      if (entry_ds) {
+        ImTextureRef tex = {NULL, (ImTextureID)entry_ds};
+        char id_label[32];
+        snprintf(id_label, sizeof id_label, "##own_tag_%d_%d", own_id, i);
+        clicked = igImageButton(id_label, tex, (ImVec2){own_tile, own_tile},
+                                (ImVec2){a->u0, a->v0},
+                                (ImVec2){a->u1, a->v1},
+                                (ImVec4){0, 0, 0, 0}, (ImVec4){1, 1, 1, 1});
+      } else {
+        char btn_label[32];
+        snprintf(btn_label, sizeof btn_label, "#%d##own_tag_%d", own_id, i);
+        clicked = igButton(btn_label, (ImVec2){own_tile, own_tile});
+      }
+      igPopStyleColor(2);
+      if (igIsItemHovered(0))
+        igSetTooltip("Tag %d (click to apply)", own_id);
+      if (clicked && !S.auth) {
+        S.preview_tag_id = own_id;
+        ntl_tags_request_private_hash(own_id,
+                                      us->ntl_own_tags[i].password_md5);
+      }
+    }
+  }
+
+  igSpacing();
   igSeparatorText("Public tags");
+  if (igCheckbox("Load tags", &us->ntl_load_all_tags)) {
+    save_user_settings(us);
+  }
+  if (us->ntl_load_all_tags) {
+    igPushStyleColor_Vec4(ImGuiCol_Text, (ImVec4){1.0f, 0.72f, 0.25f, 1.0f});
+    igTextWrapped(
+        "In Load tag only private tags visible to you neither NTL nor Vlither android players can see the tag");
+    igPopStyleColor(1);
+  }
   if (!ensure_atlas_loaded(env)) {
     igTextColored((ImVec4){1.0f, 0.35f, 0.35f, 1.0f},
                   "Tag atlas could not be loaded.");
@@ -1651,7 +1737,7 @@ void ntl_tags_skin_panel(tenv *env) {
     int columns = (int)((avail.x + style->ItemSpacing.x) /
                         (cell_w + style->ItemSpacing.x));
     if (columns < 3) columns = 3;
-    // build the list of public tags only when the catalogues change
+
     static const ntl_tag_atlas_entry
         *grid[NTL_TAG_ATLAS_ENTRY_COUNT + NTL_FIXED_TAG_MAX +
               NTL_DYNAMIC_TAG_MAX];
@@ -1662,6 +1748,7 @@ void ntl_tags_skin_panel(tenv *env) {
     key = (key ^ (unsigned)S.dynamic_tag_count) * 16777619u;
     key = (key ^ (unsigned)S.public_tag_max) * 16777619u;
     key = (key ^ (unsigned)S.public_hi_max) * 16777619u;
+    key = (key ^ (unsigned)(us->ntl_load_all_tags ? 1u : 0u)) * 16777619u;
     for (int i = 0; i < S.fixed_tag_count; ++i)
       key = (key ^ (unsigned)S.fixed_atlas[i].id) * 16777619u;
     for (int i = 0; i < S.dynamic_tag_count; ++i)
@@ -1681,15 +1768,15 @@ void ntl_tags_skin_panel(tenv *env) {
           a = &S.dynamic_atlas[
               i - NTL_TAG_ATLAS_ENTRY_COUNT - S.fixed_tag_count];
         }
-        // live-catalogue entries that main's atlas already covers would show twice
+
         if (i >= NTL_TAG_ATLAS_ENTRY_COUNT && main_tag_lookup(a->id)) continue;
-        // grid lists public tags only; private tags are applied by ID above
-        if (!ntl_tags_is_packet_tag(a->id)) continue;
+        if (!ntl_tags_is_packet_tag(a->id) &&
+            !(us->ntl_load_all_tags && ntl_tags_is_protected_tag(a->id)))
+          continue;
         grid[grid_n++] = a;
       }
     }
 
-    // draw only the rows that are on screen
     const float row_h = tile + style->FramePadding.y * 2.0f +
                         style->ItemSpacing.y;
     const int rows = (grid_n + columns - 1) / columns;
@@ -1722,7 +1809,10 @@ void ntl_tags_skin_panel(tenv *env) {
                             (ImVec2){a->u1, a->v1},
                             (ImVec4){0, 0, 0, 0}, (ImVec4){1, 1, 1, 1})) {
             S.preview_tag_id = a->id;
-            ntl_tags_select_public(a->id);
+            if (ntl_tags_is_packet_tag(a->id))
+              ntl_tags_select_public(a->id);
+            else
+              ntl_tags_select_local_private(a->id);
           }
           igPopStyleColor(2);
         }
@@ -1810,7 +1900,7 @@ void ntl_tags_draw_preview(tenv *env, int id, float head_x, float head_y,
                           angle);
   tag_cord_draw(dl, &cord, mc, ec, 1.0f);
   ImVec2 tip = cord.pls[cord.np - 1];
-  // tag hangs from the cord end (same 12px-in anchor as in-game)
+
   ImVec2 center = {tip.x - cosf(angle) * 12.0f * body_scale,
                    tip.y - sinf(angle) * 12.0f * body_scale};
   float width, height;
@@ -1873,7 +1963,6 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
   const ntl_tag_meta *meta = find_meta(o->ntl_tag_id);
   float body_scale = tag_display_scale(&env->usr->usrs, o->sc * g->data.gsc);
 
-  // antenna: shared cord (follows the head trail), same as vlither-main
   float rad = roundf(o->sc * 29.0f) * 0.5f;
   tag_cord_view view = {mww2, mhh2, g->data.view_xx, g->data.view_yy,
                         g->data.gsc};
@@ -1881,7 +1970,6 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
   tag_cord_build(&cord, o->id, 0, o->xx + o->fx, o->yy + o->fy, rad, o->ang,
                  &view, 0.0f);
 
-  // main's atlas image + main's renderer (cord + banner anchored on its art)
   {
     const ntl_tag_def *td = main_tag_lookup(o->ntl_tag_id);
     if (td && ensure_atlas_loaded(env)) {
@@ -1889,7 +1977,7 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
       float custom_s = us->tag_size_scale;
       if (!isfinite(custom_s) || custom_s < 0.50f || custom_s > 2.00f)
         custom_s = 1.0f;
-      // banner px = image px * (rad*5/240) * zoom, same as main
+
       float unit = us->tag_size_with_zoom
                        ? rad * 5.0f / 240.0f * g->data.gsc
                        : 14.5f * 5.0f / 240.0f;
@@ -1911,7 +1999,6 @@ void ntl_tags_draw(tenv *env, snake *o, float alpha,
   }
   tag_cord_draw(dl, &cord, mc, ec, alpha);
 
-  // tag hangs from the cord end, oriented along the cord
   ImVec2 tip = cord.pls[cord.np - 1];
   float angle = cord.ang - PI * 0.5f;
   float ux = cosf(angle), uy = sinf(angle);

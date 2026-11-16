@@ -28,7 +28,7 @@
 #define VLITHER_CHAT_PLAYER_MAX 128
 #define VLITHER_EVENT_MAX 24
 #define VLITHER_NTL_EVENTS_URL "http://81.169.165.225:447/events.json"
-#define VLITHER_NTL_EVENT_MAX 40
+#define VLITHER_NTL_EVENT_MAX 64
 #define VLITHER_NTL_REFRESH_SECONDS 120.0
 
 static const char *VLITHER_PROFILE_EMOJIS[] = {
@@ -383,7 +383,6 @@ static void clear_chat_messages(void) {
   S.chat_start = 0;
   S.last_chat_seq = 0;
 }
-
 
 void vlither_chat_system_message(const char *text) {
   if (!text || !text[0]) return;
@@ -934,8 +933,6 @@ static bool redeem_code(const char *code) {
   return true;
 }
 
-/* ---- NTL events feed (plain JSON array over HTTP) ---- */
-
 static long long json_secs_to_ms(struct mg_str json, const char *path) {
   double value = 0.0;
   if (!mg_json_get_num(json, path, &value) || !isfinite(value) || value <= 0.0)
@@ -948,8 +945,6 @@ static void ntl_set_status(const char *text) {
   S.ntl_status[sizeof S.ntl_status - 1] = 0;
 }
 
-/* Drops Discord mentions (<@id>, <@&id>, <#id>, <:emoji:id>), CRs and swaps the
-   rupee sign for "Rs." since the UI font has no glyph for it. */
 static void ntl_clean_description(char *text, size_t cap) {
   char out[1601];
   size_t n = 0;
@@ -992,49 +987,83 @@ static int ntl_event_cmp(const void *a, const void *b) {
   const vlither_ntl_event *x = a, *y = b;
   long long bx = x->start_ms > 0 ? x->start_ms : x->planned_ms;
   long long by = y->start_ms > 0 ? y->start_ms : y->planned_ms;
-  return (by > bx) - (by < bx); /* newest first */
+  return (by > bx) - (by < bx);
+}
+
+static void parse_ntl_event_item(struct mg_str item) {
+  if (S.ntl_count >= VLITHER_NTL_EVENT_MAX) return;
+  bool hidden = false;
+  if (mg_json_get_bool(item, "$.hidden", &hidden) && hidden) return;
+  vlither_ntl_event *e = &S.ntl[S.ntl_count];
+  memset(e, 0, sizeof *e);
+  copy_json_string(item, "$.id", e->id, sizeof e->id, "");
+  e->event_id = mg_json_get_long(item, "$.event_id", -1);
+  e->start_ms = json_secs_to_ms(item, "$.start");
+  e->end_ms = json_secs_to_ms(item, "$.end");
+  e->planned_ms = json_secs_to_ms(item, "$.planned_start");
+  if (!e->id[0]) {
+    if (e->event_id >= 0)
+      snprintf(e->id, sizeof e->id, "ev_%ld", e->event_id);
+    else if (e->start_ms > 0)
+      snprintf(e->id, sizeof e->id, "ev_%lld", e->start_ms);
+    else
+      return;
+  }
+  for (int k = 0; k < S.ntl_count; ++k) {
+    if (!strcmp(S.ntl[k].id, e->id)) return;
+  }
+  copy_json_string(item, "$.type", e->type, sizeof e->type, "EVENT");
+  char url[96];
+  copy_json_string(item, "$.url", url, sizeof url, "");
+  ntl_strip_scheme(url, e->server, sizeof e->server);
+  copy_json_string(item, "$.prize_tier", e->tier, sizeof e->tier, "");
+  copy_json_string(item, "$.prize_currency", e->currency,
+                   sizeof e->currency, "");
+  e->people = (int)mg_json_get_long(item, "$.people", 0);
+  e->game = (int)mg_json_get_long(item, "$.game", 0);
+  double amount = 0.0, usd = 0.0;
+  if (mg_json_get_num(item, "$.prize_amount", &amount) && amount > 0.0) {
+    e->has_prize = true;
+    e->prize_amount = amount;
+  }
+  if (mg_json_get_num(item, "$.prize_usd", &usd) && usd > 0.0) {
+    e->has_prize = true;
+    e->prize_usd = usd;
+  }
+  char *desc = mg_json_get_str(item, "$.description");
+  if (desc) {
+    strncpy(e->description, desc, sizeof e->description - 1);
+    mg_free(desc);
+    ntl_clean_description(e->description, sizeof e->description);
+  }
+  ++S.ntl_count;
+}
+
+static void parse_ntl_event_array(struct mg_str arr) {
+  if (!arr.buf || arr.len < 2) return;
+  for (int i = 0; S.ntl_count < VLITHER_NTL_EVENT_MAX; ++i) {
+    char path[24];
+    snprintf(path, sizeof path, "$[%d]", i);
+    struct mg_str item = mg_json_get_tok(arr, path);
+    if (!item.buf || item.len < 2) break;
+    parse_ntl_event_item(item);
+  }
 }
 
 static void parse_ntl_events(struct mg_str json) {
   memset(S.ntl, 0, sizeof S.ntl);
   S.ntl_count = 0;
-  for (int i = 0; i < VLITHER_NTL_EVENT_MAX; ++i) {
-    char path[24];
-    snprintf(path, sizeof path, "$[%d]", i);
-    struct mg_str item = mg_json_get_tok(json, path);
-    if (!item.buf || item.len < 2) break;
-    vlither_ntl_event *e = &S.ntl[S.ntl_count];
-    copy_json_string(item, "$.id", e->id, sizeof e->id, "");
-    if (!e->id[0]) continue;
-    copy_json_string(item, "$.type", e->type, sizeof e->type, "EVENT");
-    char url[96];
-    copy_json_string(item, "$.url", url, sizeof url, "");
-    ntl_strip_scheme(url, e->server, sizeof e->server);
-    copy_json_string(item, "$.prize_tier", e->tier, sizeof e->tier, "");
-    copy_json_string(item, "$.prize_currency", e->currency,
-                     sizeof e->currency, "");
-    e->start_ms = json_secs_to_ms(item, "$.start");
-    e->end_ms = json_secs_to_ms(item, "$.end");
-    e->planned_ms = json_secs_to_ms(item, "$.planned_start");
-    e->people = (int)mg_json_get_long(item, "$.people", 0);
-    e->game = (int)mg_json_get_long(item, "$.game", 0);
-    e->event_id = mg_json_get_long(item, "$.event_id", -1);
-    double amount = 0.0, usd = 0.0;
-    if (mg_json_get_num(item, "$.prize_amount", &amount) && amount > 0.0) {
-      e->has_prize = true;
-      e->prize_amount = amount;
-    }
-    if (mg_json_get_num(item, "$.prize_usd", &usd) && usd > 0.0) {
-      e->has_prize = true;
-      e->prize_usd = usd;
-    }
-    char *desc = mg_json_get_str(item, "$.description");
-    if (desc) {
-      strncpy(e->description, desc, sizeof e->description - 1);
-      mg_free(desc);
-      ntl_clean_description(e->description, sizeof e->description);
-    }
-    ++S.ntl_count;
+  struct mg_str live_arr = mg_json_get_tok(json, "$.live");
+  struct mg_str up_arr = mg_json_get_tok(json, "$.upcoming");
+  struct mg_str fin_arr = mg_json_get_tok(json, "$.finished");
+  if ((live_arr.buf && live_arr.len >= 2) ||
+      (up_arr.buf && up_arr.len >= 2) ||
+      (fin_arr.buf && fin_arr.len >= 2)) {
+    parse_ntl_event_array(live_arr);
+    parse_ntl_event_array(up_arr);
+    parse_ntl_event_array(fin_arr);
+  } else {
+    parse_ntl_event_array(json);
   }
   if (S.ntl_count > 1)
     qsort(S.ntl, (size_t)S.ntl_count, sizeof S.ntl[0], ntl_event_cmp);
@@ -1141,7 +1170,7 @@ bool vlither_ntl_event_prize_text_at(int i, char *out, size_t cap) {
     snprintf(out + strlen(out), cap - strlen(out), " (~$%.2f)", e->prize_usd);
   return true;
 }
-/* Live event first, otherwise the soonest one that has not begun. */
+
 int vlither_ntl_event_featured(long long now_ms) {
   int best = -1;
   long long best_start = 0;
@@ -1622,8 +1651,6 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
   float height = entry->display_height * body_scale;
   float hw = width * 0.5f, hh = height * 0.5f;
 
-  // antenna: shared cord (follows the head trail), same as vlither-main.
-  // When an NTL tag is also shown, fan this cord to the side so they don't overlap.
   float rad = roundf(o->sc * 29.0f) * 0.5f;
   float fan = (o->ntl_tag_id >= 0 && env->usr->usrs.show_ntl_tags)
                   ? -(8.0f * body_scale + width * 0.34f)
@@ -1635,11 +1662,10 @@ void vlither_tags_draw(tenv *env, snake *o, float alpha,
                  &view, fan);
 
   ImDrawList *dl = igGetWindowDrawList();
-  const float mc[3] = {0.02f, 0.30f, 0.18f};  // mint green cord
+  const float mc[3] = {0.02f, 0.30f, 0.18f};
   const float ec[3] = {0.35f, 1.0f, 0.68f};
   tag_cord_draw(dl, &cord, mc, ec, alpha);
 
-  // tag hangs from the cord end, oriented along the cord
   ImVec2 tip = cord.pls[cord.np - 1];
   float angle = cord.ang - PI * 0.5f;
   float ux = cosf(angle), uy = sinf(angle);

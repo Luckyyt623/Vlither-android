@@ -68,7 +68,6 @@ int vlither_event_next_interested(void);
 bool vlither_event_set_interested(int index, bool interested);
 bool vlither_event_refresh(void);
 
-/* NTL events feed (history, live and upcoming) */
 bool vlither_ntl_events_refresh(void);
 int vlither_ntl_event_count(void);
 const char *vlither_ntl_events_status(void);

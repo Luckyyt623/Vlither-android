@@ -502,14 +502,11 @@ void oef(tenv* env) {
   if (bot_on && gdata->data.follow_view) {
     sbot_go(env);
   } else if (usrs->vis_manual && gdata->data.follow_view) {
-    /* Shadow mode: bot is OFF but Decision Visuals is on. Run the analysis
-     * only to feed the overlay; input.c ignores bot output while the bot
-     * hotkey is inactive, so the player keeps full control. */
+
     sbot_go(env);
     gdata->bot.output.accel = false;
   } else {
-    /* Bot is off: sbot_go() no longer runs, so its last boost request would
-     * stay stuck at "true" and the snake kept boosting. Clear it. */
+
     gdata->bot.output.accel = false;
     g_bot_dbg.active = false;
   }

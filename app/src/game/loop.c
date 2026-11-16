@@ -100,7 +100,8 @@ void game_loop(tenv* env) {
       server_poll(env);
       oef(env);
       redraw(env);
-      ui_overlay(env);
+
+      if (gdata->curr_screen != SETTINGS) ui_overlay(env);
 
       if (!gdata->closed && gdata->connection &&
           (usrs->hotkeys[HOTKEY_QUIT].active ||

@@ -43,9 +43,6 @@ sbot_dbg g_bot_dbg;
 #define HUG_BODY_MULT 0.10f
 #define HUG_BODY_OD0 0.06f
 
-/* NTL MOD parity: while coiling (stage 2) run only NTL's follow-circle
-   logic. No safety_steer, no boost-lane override, no border emergency,
-   no hug, no forage. Build with -DSBOT_NTL_PURE=0 to get the old layers. */
 #ifndef SBOT_NTL_PURE
 #define SBOT_NTL_PURE 1
 #endif

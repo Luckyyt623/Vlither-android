@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include "ntl_tag_anchors.h"  // NTL_TAG_ANCHORS
+#include "ntl_tag_anchors.h"
 
 void ntl_tag_render(ImDrawList* dl, ImTextureID tex, const ntl_tag_def* td,
                     const ImVec2* pls, int np, float wide, float ang, float sw,
@@ -12,7 +12,6 @@ void ntl_tag_render(ImDrawList* dl, ImTextureID tex, const ntl_tag_def* td,
   float ecr = td->ce[0] / 255.0f, ecg = td->ce[1] / 255.0f, ecb = td->ce[2] / 255.0f;
   if (wide < 2.5f) wide = 2.5f;
 
-  // string: faded black halo, then a smooth rim->core colour gradient
   if (np >= 2) {
     const float bw[3] = {wide * 1.55f, wide * 1.35f, wide * 1.18f};
     const float bal[3] = {0.10f, 0.24f, 0.42f};

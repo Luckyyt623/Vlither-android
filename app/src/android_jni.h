@@ -6,8 +6,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-
-
 void android_jni_notify_game_ready(void);
 
 void android_jni_open_url(const char* url);
@@ -66,16 +64,15 @@ void android_jni_capture_sync(bool recording_enabled,
                               bool session_active);
 void android_jni_capture_confirmed_kill(void);
 
-/* Audio events -> GameActivity.onAudioEvent -> GameAudio (Kotlin) */
 enum {
-    AJNI_AUDIO_EAT = 0,        /* arg: 0..1000 food size factor */
+    AJNI_AUDIO_EAT = 0,
     AJNI_AUDIO_DIE = 1,
     AJNI_AUDIO_KILL = 2,
     AJNI_AUDIO_GAME_START = 3,
     AJNI_AUDIO_GAME_STOP = 4,
     AJNI_AUDIO_BOOST_ON = 5,
     AJNI_AUDIO_BOOST_OFF = 6,
-    AJNI_AUDIO_SNAKE_DEAD = 7, /* arg: 0..1000 snake length / max length */
+    AJNI_AUDIO_SNAKE_DEAD = 7,
 };
 void android_jni_audio_event(int ev, int arg);
 

@@ -3,6 +3,7 @@
 #include "game/ntl_team.h"
 #include "game/ntl_tags.h"
 #include "game/vlither_tags.h"
+#include "game/live_feed.h"
 #include "game/vlither_ratings.h"
 #include "game/snakey_rain.h"
 #include "ui/skin_editor.h"
@@ -103,6 +104,7 @@ void tinit(tenv* env) {
   ntl_team_init(env);
   ntl_tags_init(env);
   vlither_tags_init(env);
+  live_feed_init(env);
   vlither_ratings_init(env);
   snakey_rain_init(env);
   DLOG("tinit: game_data_init done");
@@ -113,6 +115,7 @@ void tdestroy(tenv* env) {
   ui_key_buttons_destroy(env);
   snakey_rain_destroy(env);
   vlither_ratings_destroy(env);
+  live_feed_destroy(env);
   vlither_tags_destroy(env);
   ntl_tags_destroy(env);
   ntl_team_destroy(env);
@@ -202,7 +205,7 @@ void trender(tenv* env) {
     ImGuiStyle* style = igGetStyle();
     ui_viewport(env);
 
-    if (bg_preview_visible(env) && usr->gdata.curr_screen == SETTINGS) {
+    if (usr->gdata.curr_screen == SETTINGS) {
       draw_bg_preview_blur(env, usr->usrs.performance_mode ? 0.55f : 1.0f);
     }
 
@@ -220,6 +223,7 @@ void trender(tenv* env) {
     ntl_team_update(env);
     ntl_tags_update(env);
     vlither_tags_update(env);
+    live_feed_update(env);
     vlither_ratings_update(env);
     snakey_rain_update(env);
 
@@ -229,6 +233,25 @@ void trender(tenv* env) {
       ntl_team_consume_ui_touch(env);
 
     leaderboard_update(env);
+
+    {
+      static bool s_panel_bot_override = false;
+      static bool s_panel_saved_bot = false;
+      bool in_game_panel =
+          !bg_preview_visible(env) &&
+          (gdata->conn == CONNECTED || gdata->conn == CONNECTING) &&
+          (gdata->curr_screen == SETTINGS || gdata->curr_screen == CONTROLS);
+      if (in_game_panel) {
+        if (!s_panel_bot_override) {
+          s_panel_saved_bot = usr->usrs.hotkeys[HOTKEY_BOT].active;
+          s_panel_bot_override = true;
+        }
+        usr->usrs.hotkeys[HOTKEY_BOT].active = true;
+      } else if (s_panel_bot_override) {
+        usr->usrs.hotkeys[HOTKEY_BOT].active = s_panel_saved_bot;
+        s_panel_bot_override = false;
+      }
+    }
 
     switch (usr->gdata.curr_screen) {
       case TITLE_SCREEN:
@@ -241,6 +264,10 @@ void trender(tenv* env) {
         game_loop(env);
         break;
       case SETTINGS:
+        if (!bg_preview_visible(env) &&
+            (gdata->conn == CONNECTED || gdata->conn == CONNECTING)) {
+          game_loop(env);
+        }
         ui_settings(env);
         break;
       case NTL_PANEL:

@@ -4,6 +4,7 @@
 #include "ntl_team.h"
 #include "ntl_tags.h"
 #include "vlither_tags.h"
+#include "live_feed.h"
 
 extern bool g_ntl_skin_peek_active;
 
@@ -353,10 +354,6 @@ static void vl_skinless_strip(game_data* gdata, int bp, float cx, float cy,
   }
 }
 
-// The skinless body is an ImGui draw list, and ImGui is drawn after the whole
-// body-part renderer. A centre line pushed through the body-part renderer
-// would end up under the translucent body, so in Skinless it is drawn on the
-// same list, after the body.
 static void vl_skinless_center_line(game_data* gdata, int bp, float cx,
                                     float cy, float shade, float alpha,
                                     float thickness) {
@@ -432,11 +429,21 @@ void redraw(tenv* env) {
 
   int foods_len = tdarray_length(gdata->data.foods);
   int preys_len = tdarray_length(gdata->data.preys);
+  bool clean_lines = user_clean_lines(usrs);
+  bool clean_text = user_clean_text(usrs);
+  bool hide_text = clean_text && live_feed_has_text();
+  bool clean_dots = (clean_lines || hide_text) && live_feed_active();
   if (mode->uniform_food_color) {
     for (int i = foods_len - 1; i >= 0; i--) {
       food* fo = gdata->data.foods + i;
 
       if (usrs->hotkeys[HOTKEY_BIG_FOOD].active && fo->sz < 10) continue;
+      if (clean_dots) {
+        int dk = live_feed_dot_kind(fo->xx, fo->yy);
+        if ((dk == LIVE_DOT_SHAPE && clean_lines) ||
+            (dk == LIVE_DOT_TEXT && hide_text))
+          continue;
+      }
 
       if (fo->rx >= gdata->data.fpx1 && fo->ry >= gdata->data.fpy1 &&
           fo->rx <= gdata->data.fpx2 && fo->ry <= gdata->data.fpy2) {
@@ -476,6 +483,12 @@ void redraw(tenv* env) {
       food* fo = gdata->data.foods + i;
 
       if (usrs->hotkeys[HOTKEY_BIG_FOOD].active && fo->sz < 10) continue;
+      if (clean_dots) {
+        int dk = live_feed_dot_kind(fo->xx, fo->yy);
+        if ((dk == LIVE_DOT_SHAPE && clean_lines) ||
+            (dk == LIVE_DOT_TEXT && hide_text))
+          continue;
+      }
 
       if (fo->rx >= gdata->data.fpx1 && fo->ry >= gdata->data.fpy1 &&
           fo->rx <= gdata->data.fpx2 && fo->ry <= gdata->data.fpy2) {
@@ -544,6 +557,14 @@ void redraw(tenv* env) {
   }
 
   int snakes_len = tdarray_length(gdata->data.snakes);
+  if (clean_dots) {
+    int my_id = (!gdata->data.dead && snakes_len > 0)
+                    ? gdata->data.snakes[snakes_len - 1].id
+                    : -1;
+    live_feed_draw(env, gdata->data.view_xx, gdata->data.view_yy,
+                   gdata->data.gsc, mww2, mhh2, my_id, clean_lines,
+                   hide_text);
+  }
   for (int i = snakes_len - 1; i >= 0; i--) {
     snake* o = gdata->data.snakes + i;
     int iiv = false;
@@ -1553,7 +1574,7 @@ void redraw(tenv* env) {
                      line_angle},
                     gdata->cg_uvs[BLANK_UV],
                     {line_rgb, line_rgb, line_rgb,
-                     /* Skinless / transparent skin: center line fully visible */
+
                      ((snake_render_mode == 3 || mode->transparent_skin)
                           ? 1.0f
                           : 0.85f) * a},

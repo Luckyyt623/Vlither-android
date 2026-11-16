@@ -35,7 +35,6 @@ static double monotonic_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-
 static ImGuiKey android_ime_key_to_imgui(int keycode) {
     switch (keycode) {
         case AKEYCODE_TAB:         return ImGuiKey_Tab;

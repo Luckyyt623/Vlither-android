@@ -15,7 +15,6 @@ int skin_code_filter(ImGuiInputTextCallbackData* data) {
            (data->EventChar >= '0' && data->EventChar <= '9'));
 }
 
-
 static void apply_skin_editor_background(tenv *env) {
   if (!env || !env->usr || !env->usr->r || !env->ctx) return;
   tuser_data *usr = env->usr;
@@ -607,10 +606,7 @@ void ui_skin_editor(tenv* env) {
   if (s_mode == SK_BROWSE) {
     if (active) {
       if (igIsItemActivated()) {
-        /* First frame of a touch: the pointer teleports from where the last
-         * touch ended to the new finger position in the same frame as the
-         * press, so MouseDelta is a huge fake drag. Ignore it and just
-         * catch the wheel (stop any momentum). */
+
         s_vel = 0.0f;
         s_has_target = false;
       } else {

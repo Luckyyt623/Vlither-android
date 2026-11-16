@@ -2,19 +2,19 @@
 
 #include <math.h>
 
-#define TAG_CORD_LEN 3.15f    // cord length = this * body radius
-#define TAG_CORD_STEP 0.25f   // trail point spacing (body radii)
-#define TAG_CORD_START 0.5f   // cord starts this far back from head (body radii)
-#define TAG_CORD_WIDE 0.275f  // string thickness = this * body radius
+#define TAG_CORD_LEN 3.15f
+#define TAG_CORD_STEP 0.25f
+#define TAG_CORD_START 0.5f
+#define TAG_CORD_WIDE 0.275f
 #define TAG_TRAIL_MAX 128
 #define TAG_STATE_MAX 192
 
 typedef struct {
   int id;
   unsigned last_use;
-  float x[TAG_TRAIL_MAX], y[TAG_TRAIL_MAX];  // newest point at n-1
+  float x[TAG_TRAIL_MAX], y[TAG_TRAIL_MAX];
   int n;
-  float fe[2];     // eased tag angle per slot
+  float fe[2];
   bool init[2];
 } tag_cord_state;
 
@@ -32,7 +32,7 @@ static tag_cord_state *state_get(int id) {
   int idx;
   if (g_state_n < TAG_STATE_MAX) {
     idx = g_state_n++;
-  } else {  // full -> recycle least recently used
+  } else {
     idx = 0;
     for (int i = 1; i < TAG_STATE_MAX; i++)
       if (g_state[i].last_use < g_state[idx].last_use) idx = i;
@@ -47,7 +47,7 @@ static tag_cord_state *state_get(int id) {
 }
 
 static void trail_push(tag_cord_state *t, float x, float y) {
-  if (t->n >= TAG_TRAIL_MAX) {  // drop oldest
+  if (t->n >= TAG_TRAIL_MAX) {
     for (int i = 1; i < TAG_TRAIL_MAX; i++) {
       t->x[i - 1] = t->x[i];
       t->y[i - 1] = t->y[i];
@@ -59,7 +59,6 @@ static void trail_push(tag_cord_state *t, float x, float y) {
   t->n++;
 }
 
-// lay down evenly-spaced trail points up to the head; reset on teleport
 static void trail_update(tag_cord_state *t, float hx, float hy, float step) {
   if (step < 2.0f) step = 2.0f;
   if (t->n == 0) {
@@ -69,7 +68,7 @@ static void trail_update(tag_cord_state *t, float hx, float hy, float step) {
   float lx = t->x[t->n - 1], ly = t->y[t->n - 1];
   float dx = hx - lx, dy = hy - ly;
   float d = sqrtf(dx * dx + dy * dy);
-  if (d > step * 40.0f) {  // teleport (respawn) -> restart trail
+  if (d > step * 40.0f) {
     t->n = 0;
     trail_push(t, hx, hy);
     return;
@@ -133,7 +132,7 @@ void tag_cord_build(tag_cord *c, int snake_id, int slot, float hx, float hy,
       float cx = st->x[i], cy = st->y[i];
       float dx = cx - prevx, dy = cy - prevy;
       float seg = sqrtf(dx * dx + dy * dy);
-      if (!started && acc + seg >= start) {  // begin the cord on the neck
+      if (!started && acc + seg >= start) {
         float f = seg > 0.001f ? (start - acc) / seg : 0.0f;
         c->pls[c->np++] = (ImVec2){W2S_X(prevx + dx * f), W2S_Y(prevy + dy * f)};
         started = true;
@@ -157,10 +156,10 @@ void tag_cord_build(tag_cord *c, int snake_id, int slot, float hx, float hy,
       ax = prevx;
       ay = prevy;
     }
-    if (c->np == 0)  // trail shorter than start offset (just spawned)
+    if (c->np == 0)
       c->pls[c->np++] = (ImVec2){W2S_X(ax), W2S_Y(ay)};
   }
-  if (c->np < 2) {  // no trail yet -> straight cord straight back from head
+  if (c->np < 2) {
     float bx = -cosf(head_ang), by = -sinf(head_ang);
     c->pls[0] = (ImVec2){W2S_X(hx + bx * start), W2S_Y(hy + by * start)};
     c->pls[1] = (ImVec2){W2S_X(hx + bx * clen), W2S_Y(hy + by * clen)};
@@ -195,7 +194,6 @@ void tag_cord_draw(ImDrawList *dl, const tag_cord *c, const float mc[3],
   const ImVec2 *pls = c->pls;
   int np = c->np;
 
-  // faded black halo
   const float bw[3] = {wide * 1.55f, wide * 1.35f, wide * 1.18f};
   const float bal[3] = {0.10f, 0.24f, 0.42f};
   for (int b = 0; b < 3; b++) {
@@ -204,7 +202,7 @@ void tag_cord_draw(ImDrawList *dl, const tag_cord *c, const float mc[3],
     ImDrawList_AddCircleFilled(dl, pls[0], bw[b] * 0.5f, col, 16);
     ImDrawList_AddCircleFilled(dl, pls[np - 1], bw[b] * 0.5f, col, 16);
   }
-  // smooth rim -> core colour gradient
+
   const int GL = 7;
   for (int L = 0; L < GL; L++) {
     float t = (float)L / (float)(GL - 1);

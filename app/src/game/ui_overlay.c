@@ -257,7 +257,6 @@ void ui_overlay(tenv* env) {
                   seconds);
     igText("");
 
-
     float px = (((gdata->data.view_xx - gdata->data.grd) * 2) /
                 ((gdata->data.flux_grd) * 2));
     float py = (((gdata->data.view_yy - gdata->data.grd) * 2) /
@@ -408,7 +407,6 @@ void ui_overlay(tenv* env) {
       mm_x = ctx->size[0] - mm_size - style->WindowPadding.x;
       mm_y = ctx->size[1] - mm_size - style->WindowPadding.y - line_height;
     }
-
 
 #ifdef ANDROID
     static int s_minimap_edit_action = 0;
@@ -730,7 +728,6 @@ void ui_overlay(tenv* env) {
     }
 
   }
-
 
   if (gdata->data.follow_view || gdata->curr_screen == CONTROLS) {
 

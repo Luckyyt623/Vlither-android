@@ -15,8 +15,6 @@
 #define AJNI_LOG(...) \
     __android_log_print(ANDROID_LOG_DEBUG, AJNI_TAG, __VA_ARGS__)
 
-
-
 extern struct android_app* g_android_app;
 
 void android_jni_capture_sync(bool recording_enabled,
@@ -93,7 +91,7 @@ void android_jni_capture_confirmed_kill(void) {
 
 void android_jni_audio_event(int ev, int arg) {
     if (ev == AJNI_AUDIO_EAT) {
-        /* many foods can be eaten per second: cap the eat sound rate */
+
         static long long last_ms = 0;
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -858,7 +856,6 @@ event_cancel_cleanup:
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
 
-
 void android_jni_show_local_notification(const char* title, const char* body) {
     if (!title || !title[0] || !g_android_app || !g_android_app->activity ||
         !g_android_app->activity->vm || !g_android_app->activity->clazz)
@@ -899,7 +896,6 @@ notif_cleanup:
     if (cls) (*env)->DeleteLocalRef(env, cls);
     if (did_attach) (*vm)->DetachCurrentThread(vm);
 }
-
 
 void android_jni_set_text_input_active(bool active) {
     if (!g_android_app || !g_android_app->activity ||

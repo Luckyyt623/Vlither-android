@@ -595,7 +595,6 @@ bool ntl_team_is_snake_teammate(uint16_t ntl_id, const char *server) {
   return false;
 }
 
-
 static void ntl_message_key(const char *nick, char *out, size_t cap) {
   if (!out || cap == 0) return;
   out[0] = 0;
@@ -1064,8 +1063,7 @@ void ntl_team_init(tenv *env) {
     strncpy(S.profile_name, profile->name, sizeof S.profile_name - 1);
     S.profile_name[sizeof S.profile_name - 1] = 0;
   }
-  /* Player list visibility is remembered in byte 0 of chat_hud_settings_reserved
-   * (1 = hidden). Zero (default / old settings files) keeps it visible. */
+
   S.players_open = !(env && env->usr && env->usr->usrs.chat_hud_settings_reserved[0]);
 }
 void ntl_team_update(tenv *env) {
@@ -1558,10 +1556,31 @@ static void draw_chat_network_switch(void) {
   }
 }
 
+static bool chat_cmd_eq(const char *a, const char *b) {
+  while (*a && *b) {
+    if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false;
+    ++a;
+    ++b;
+  }
+  return *a == 0 && *b == 0;
+}
+
 static void chat_submit_current(const user_settings *us) {
+  ntl_normalize_chat_text(S.input, sizeof S.input);
+  if (!S.input[0]) return;
+  if (chat_cmd_eq(S.input, "/vlither")) {
+    S.vlither_chat_active = true;
+    S.vlither_chat_open = true;
+    S.input[0] = 0;
+    return;
+  }
+  if (chat_cmd_eq(S.input, "/ntl")) {
+    S.vlither_chat_active = false;
+    S.ntl_chat_open = true;
+    S.input[0] = 0;
+    return;
+  }
   if (S.vlither_chat_active) {
-    ntl_normalize_chat_text(S.input, sizeof S.input);
-    if (!S.input[0]) return;
     if (vlither_chat_send_text(S.input)) S.input[0] = 0;
     return;
   }
@@ -1767,10 +1786,6 @@ void ntl_team_draw(tenv *env) {
                   chat_pos_now.y + chat_size_now.y - input_capture_h),
             chat_pos_now.x + chat_size_now.x,
             chat_pos_now.y + chat_size_now.y);
-        float switch_capture_h = igGetFrameHeight() + 14.0f;
-        android_ui_capture_rect(chat_pos_now.x, chat_pos_now.y,
-                                chat_pos_now.x + chat_size_now.x,
-                                chat_pos_now.y + switch_capture_h);
       }
       if (settings_open && vp->WorkSize.x > 0.0f && vp->WorkSize.y > 0.0f) {
         us->ntl_chat_rel_x = (chat_pos_now.x - vp->WorkPos.x) / vp->WorkSize.x;
@@ -1790,10 +1805,8 @@ void ntl_team_draw(tenv *env) {
       }
 #endif
 
-      draw_chat_network_switch();
-      float switch_h = igGetFrameHeight() + style->ItemSpacing.y;
       float input_h = igGetFrameHeight() + style->ItemSpacing.y;
-      float message_h = fmaxf(40.0f, win_sz.y - input_h - switch_h - 20.0f);
+      float message_h = fmaxf(40.0f, win_sz.y - input_h - 20.0f);
       igBeginChild_Str("##messages_list_box",
                        (ImVec2){fmaxf(40.0f, win_sz.x - 16.0f), message_h},
                        false, ImGuiWindowFlags_None);
@@ -1883,12 +1896,11 @@ void ntl_team_draw(tenv *env) {
       igPushStyleVar_Float(ImGuiStyleVar_FrameBorderSize, 1.0f);
       igPushStyleColor_Vec4(ImGuiCol_Border,
                             (ImVec4){1.0f, 1.0f, 1.0f, 0.18f});
-      igBeginDisabled(S.vlither_chat_active && !vlither_chat_joined());
       bool submitted = igInputTextWithHint(
           "##chat_box_input",
-          S.vlither_chat_active ? "Message Vlither chat..." : "Message NTL team...",
+          S.vlither_chat_active ? "Message Vlither (/NTL to switch)"
+                                : "Message NTL (/Vlither to switch)",
           S.input, sizeof S.input, ImGuiInputTextFlags_EnterReturnsTrue, NULL, NULL);
-      igEndDisabled();
       igPopStyleColor(1);
       igPopStyleVar(2);
       igPopStyleColor(5);

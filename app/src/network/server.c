@@ -59,8 +59,6 @@ static void server_connect_ex(tenv* env, bool want_tls, int attempt) {
   if (gdata->curr_screen == PLAYING)
     gdata->server_list.ping_stop = 1;
 
-  /* A second socket to the same game server is what gets one of the two
-     dropped by the server, so never leave the previous one running. */
   if (gdata->connection) {
     gdata->connection->is_closing = true;
     gdata->connection = NULL;
@@ -85,10 +83,7 @@ static void server_connect_ex(tenv* env, bool want_tls, int attempt) {
                              sizeof authority);
   snprintf(url, sizeof url, "%s://%s/slither", tls ? "wss" : "ws", authority);
   DLOG("conn: connecting %s (try %d)", url, attempt);
-  /* mongoose already writes "Host: <ip>:<port>" itself. The old code added a
-     second, different "Host: slither.com" line, i.e. two Host headers, which
-     strict servers/proxies answer with 400 and a closed socket before the
-     WebSocket is ever opened. Only Origin is added here. */
+
   gdata->connection =
     mg_ws_connect(&gdata->network_manager, url, server_callback, env,
                   "Origin: https://slither.com\r\n");
@@ -111,8 +106,6 @@ void server_connect(tenv* env) {
   server_connect_ex(env, tls, 0);
 }
 
-/* Called when a connection died before the WebSocket upgrade finished.
-   Retries once with the other transport (plain <-> TLS). */
 bool server_connect_fallback(tenv* env) {
   tuser_data* usr = env->usr;
   game_data* gdata = &usr->gdata;
